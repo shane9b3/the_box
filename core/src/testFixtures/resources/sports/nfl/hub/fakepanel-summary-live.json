@@ -1,0 +1,954 @@
+{
+ "header": {
+  "id": "401899001",
+  "competitions": [
+   {
+    "id": "401899001",
+    "date": "2026-11-26T01:58Z",
+    "status": {
+     "clock": 822.0,
+     "displayClock": "13:42",
+     "period": 3,
+     "type": {
+      "id": "2",
+      "name": "STATUS_IN_PROGRESS",
+      "state": "in",
+      "completed": false,
+      "description": "In Progress",
+      "detail": "13:42 - 3rd Quarter",
+      "shortDetail": "13:42 - 3rd"
+     }
+    },
+    "competitors": [
+     {
+      "id": "2",
+      "homeAway": "home",
+      "order": 0,
+      "winner": null,
+      "record": [
+       {
+        "type": "total",
+        "summary": "7-4"
+       },
+       {
+        "type": "home",
+        "summary": "3-1"
+       },
+       {
+        "type": "road",
+        "summary": "2-2"
+       }
+      ],
+      "team": {
+       "id": "2",
+       "abbreviation": "BUF",
+       "displayName": "Buffalo Bills"
+      }
+     },
+     {
+      "id": "12",
+      "homeAway": "away",
+      "order": 1,
+      "winner": null,
+      "record": [
+       {
+        "type": "total",
+        "summary": "8-3"
+       },
+       {
+        "type": "home",
+        "summary": "3-1"
+       },
+       {
+        "type": "road",
+        "summary": "2-2"
+       }
+      ],
+      "team": {
+       "id": "12",
+       "abbreviation": "KC",
+       "displayName": "Kansas City Chiefs"
+      }
+     }
+    ],
+    "broadcasts": [
+     {
+      "market": "national",
+      "names": [
+       "CBS"
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "boxscore": {
+  "teams": [
+   {
+    "team": {
+     "id": "12",
+     "abbreviation": "KC"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "16",
+      "value": "16",
+      "label": "firstDowns"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "5-10",
+      "value": "5-10",
+      "label": "thirdDownEff"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "0-1",
+      "value": "0-1",
+      "label": "fourthDownEff"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "251",
+      "value": "251",
+      "label": "totalYards"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "168",
+      "value": "168",
+      "label": "netPassingYards"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "83",
+      "value": "83",
+      "label": "rushingYards"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "3-15",
+      "value": "3-15",
+      "label": "totalPenaltiesYards"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "1",
+      "value": "1",
+      "label": "turnovers"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0",
+      "value": "0",
+      "label": "interceptions"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "23:53",
+      "value": "23:53",
+      "label": "possessionTime"
+     },
+     {
+      "name": "totalPlays",
+      "displayValue": "50",
+      "value": "50",
+      "label": "totalPlays"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0",
+      "value": "0",
+      "label": "interceptions"
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "2",
+     "abbreviation": "BUF"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "16",
+      "value": "16",
+      "label": "firstDowns"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "4-10",
+      "value": "4-10",
+      "label": "thirdDownEff"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "0-1",
+      "value": "0-1",
+      "label": "fourthDownEff"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "187",
+      "value": "187",
+      "label": "totalYards"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "125",
+      "value": "125",
+      "label": "netPassingYards"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "62",
+      "value": "62",
+      "label": "rushingYards"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "3-15",
+      "value": "3-15",
+      "label": "totalPenaltiesYards"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "1",
+      "value": "1",
+      "label": "turnovers"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0",
+      "value": "0",
+      "label": "interceptions"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "22:52",
+      "value": "22:52",
+      "label": "possessionTime"
+     },
+     {
+      "name": "totalPlays",
+      "displayValue": "49",
+      "value": "49",
+      "label": "totalPlays"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0",
+      "value": "0",
+      "label": "interceptions"
+     }
+    ]
+   }
+  ],
+  "players": [
+   {
+    "team": {
+     "id": "12",
+     "abbreviation": "KC"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "9120",
+         "displayName": "Patrick Mahomes",
+         "headshot": {
+          "href": "https://img.invalid/h/9120.png"
+         }
+        },
+        "stats": [
+         "17/26",
+         "221",
+         "6.8",
+         "2",
+         "0",
+         "1-7",
+         "61.2",
+         "98.4"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "9120",
+         "displayName": "Isiah Pacheco",
+         "headshot": {
+          "href": "https://img.invalid/h/9120.png"
+         }
+        },
+        "stats": [
+         "12",
+         "54",
+         "4.5",
+         "0",
+         "14"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "9121",
+         "displayName": "Patrick Mahomes",
+         "headshot": {
+          "href": "https://img.invalid/h/9121.png"
+         }
+        },
+        "stats": [
+         "3",
+         "9",
+         "3.0",
+         "0",
+         "7"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "9120",
+         "displayName": "Travis Kelce",
+         "headshot": {
+          "href": "https://img.invalid/h/9120.png"
+         }
+        },
+        "stats": [
+         "6",
+         "118",
+         "12.1",
+         "2",
+         "31",
+         "9"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "2",
+     "abbreviation": "BUF"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "920",
+         "displayName": "Josh Allen",
+         "headshot": {
+          "href": "https://img.invalid/h/920.png"
+         }
+        },
+        "stats": [
+         "16/26",
+         "217",
+         "6.8",
+         "1",
+         "0",
+         "1-7",
+         "61.2",
+         "98.4"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "920",
+         "displayName": "James Cook",
+         "headshot": {
+          "href": "https://img.invalid/h/920.png"
+         }
+        },
+        "stats": [
+         "12",
+         "54",
+         "4.5",
+         "0",
+         "14"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "921",
+         "displayName": "Josh Allen",
+         "headshot": {
+          "href": "https://img.invalid/h/921.png"
+         }
+        },
+        "stats": [
+         "3",
+         "9",
+         "3.0",
+         "0",
+         "7"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "920",
+         "displayName": "Khalil Shakir",
+         "headshot": {
+          "href": "https://img.invalid/h/920.png"
+         }
+        },
+        "stats": [
+         "6",
+         "116",
+         "12.1",
+         "1",
+         "31",
+         "9"
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "fullName": "Highmark Stadium"
+  },
+  "weather": {
+   "temperature": 41
+  }
+ },
+ "drives": {
+  "previous": []
+ },
+ "leaders": [
+  {
+   "team": {
+    "id": "2",
+    "abbreviation": "BUF"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "passingYards",
+     "leaders": [
+      {
+       "displayValue": "25/33, 207 YDS, 1 TD, 3 INT",
+       "value": 207.0,
+       "athlete": {
+        "id": "820",
+        "displayName": "Josh Allen",
+        "shortName": "J. Allen",
+        "headshot": {
+         "href": "https://img.invalid/h/820.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "rushingYards",
+     "leaders": [
+      {
+       "displayValue": "12 CAR, 56 YDS, 0 TD",
+       "value": 56.0,
+       "athlete": {
+        "id": "821",
+        "displayName": "James Cook",
+        "shortName": "J. Cook",
+        "headshot": {
+         "href": "https://img.invalid/h/821.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "receivingYards",
+     "leaders": [
+      {
+       "displayValue": "4 REC, 79 YDS, 0 TD",
+       "value": 79.0,
+       "athlete": {
+        "id": "822",
+        "displayName": "Khalil Shakir",
+        "shortName": "K. Shakir",
+        "headshot": {
+         "href": "https://img.invalid/h/822.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "sacks"
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "totalTackles",
+     "leaders": [
+      {
+       "displayValue": "3",
+       "value": 3.0,
+       "athlete": {
+        "id": "824",
+        "displayName": "Bill Linebacker",
+        "shortName": "B. Linebacker",
+        "headshot": {
+         "href": "https://img.invalid/h/824.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "12",
+    "abbreviation": "KC"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "passingYards",
+     "leaders": [
+      {
+       "displayValue": "26/34, 216 YDS, 2 TD, 3 INT",
+       "value": 216.0,
+       "athlete": {
+        "id": "8120",
+        "displayName": "Patrick Mahomes",
+        "shortName": "P. Mahomes",
+        "headshot": {
+         "href": "https://img.invalid/h/8120.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "rushingYards",
+     "leaders": [
+      {
+       "displayValue": "12 CAR, 58 YDS, 1 TD",
+       "value": 58.0,
+       "athlete": {
+        "id": "8121",
+        "displayName": "Isiah Pacheco",
+        "shortName": "I. Pacheco",
+        "headshot": {
+         "href": "https://img.invalid/h/8121.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "receivingYards",
+     "leaders": [
+      {
+       "displayValue": "5 REC, 82 YDS, 1 TD",
+       "value": 82.0,
+       "athlete": {
+        "id": "8122",
+        "displayName": "Travis Kelce",
+        "shortName": "T. Kelce",
+        "headshot": {
+         "href": "https://img.invalid/h/8122.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "sacks"
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "totalTackles",
+     "leaders": [
+      {
+       "displayValue": "4",
+       "value": 4.0,
+       "athlete": {
+        "id": "8124",
+        "displayName": "Chief Linebacker",
+        "shortName": "C. Linebacker",
+        "headshot": {
+         "href": "https://img.invalid/h/8124.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "injuries": [
+  {
+   "team": {
+    "id": "2",
+    "abbreviation": "BUF"
+   },
+   "injuries": [
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Bills Player 1",
+      "position": {
+       "abbreviation": "QB"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision"
+     }
+    },
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Bills Player 2",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Hamstring"
+     }
+    },
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Bills Player 3",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision"
+     }
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "12",
+    "abbreviation": "KC"
+   },
+   "injuries": [
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Chiefs Player 1",
+      "position": {
+       "abbreviation": "QB"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision"
+     }
+    },
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Chiefs Player 2",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Hamstring"
+     }
+    },
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Chiefs Player 3",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision"
+     }
+    }
+   ]
+  }
+ ],
+ "pickcenter": [
+  {
+   "provider": {
+    "name": "fake"
+   },
+   "details": "none"
+  }
+ ],
+ "scoringPlays": [
+  {
+   "id": "4018990010100",
+   "type": {
+    "id": "67",
+    "abbreviation": "TD",
+    "text": "Passing Touchdown"
+   },
+   "text": "Travis Kelce 5 Yd pass from Patrick Mahomes (Harrison Butker Kick)",
+   "awayScore": 7,
+   "homeScore": 0,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 800.0,
+    "displayValue": "13:20"
+   },
+   "team": {
+    "id": "12",
+    "abbreviation": "KC"
+   },
+   "scoringType": {
+    "name": "touchdown"
+   }
+  },
+  {
+   "id": "4018990010137",
+   "type": {
+    "id": "59",
+    "abbreviation": "FG",
+    "text": "Field Goal Good"
+   },
+   "text": "Tyler Bass 32 Yd Field Goal",
+   "awayScore": 7,
+   "homeScore": 3,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 875.0,
+    "displayValue": "14:35"
+   },
+   "team": {
+    "id": "2",
+    "abbreviation": "BUF"
+   },
+   "scoringType": {
+    "name": "other"
+   }
+  },
+  {
+   "id": "4018990010174",
+   "type": {
+    "id": "67",
+    "abbreviation": "TD",
+    "text": "Passing Touchdown"
+   },
+   "text": "Travis Kelce 19 Yd pass from Patrick Mahomes (Harrison Butker Kick)",
+   "awayScore": 14,
+   "homeScore": 3,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 95.0,
+    "displayValue": "1:35"
+   },
+   "team": {
+    "id": "12",
+    "abbreviation": "KC"
+   },
+   "scoringType": {
+    "name": "touchdown"
+   }
+  },
+  {
+   "id": "4018990010211",
+   "type": {
+    "id": "20",
+    "abbreviation": "SF",
+    "text": "Safety"
+   },
+   "text": "Bill Edge Safety",
+   "awayScore": 14,
+   "homeScore": 5,
+   "period": {
+    "number": 3
+   },
+   "clock": {
+    "value": 875.0,
+    "displayValue": "14:35"
+   },
+   "team": {
+    "id": "2",
+    "abbreviation": "BUF"
+   },
+   "scoringType": {
+    "name": "other"
+   }
+  },
+  {
+   "id": "4018990010248",
+   "type": {
+    "id": "36",
+    "abbreviation": "TD",
+    "text": "Interception Return Touchdown"
+   },
+   "text": "Bill Linebacker 33 Yd Interception Return (Two-Point Pass Conversion)",
+   "awayScore": 14,
+   "homeScore": 13,
+   "period": {
+    "number": 3
+   },
+   "clock": {
+    "value": 825.0,
+    "displayValue": "13:45"
+   },
+   "team": {
+    "id": "2",
+    "abbreviation": "BUF"
+   },
+   "scoringType": {
+    "name": "touchdown"
+   }
+  }
+ ],
+ "news": {
+  "header": "News",
+  "articles": [
+   {
+    "headline": "A fake news item"
+   }
+  ]
+ },
+ "winprobability": [
+  {
+   "homeWinPercentage": 0.5,
+   "playId": "1"
+  }
+ ],
+ "videos": []
+}

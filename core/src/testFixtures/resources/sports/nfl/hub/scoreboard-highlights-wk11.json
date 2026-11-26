@@ -1,0 +1,563 @@
+{
+ "season": {
+  "type": 2,
+  "year": 2026
+ },
+ "week": {
+  "number": 11
+ },
+ "events": [
+  {
+   "id": "401873076",
+   "date": "2026-11-22T18:00Z",
+   "name": "Pittsburgh Steelers at Philadelphia Eagles",
+   "shortName": "PIT @ PHI",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "week": {
+    "number": 11
+   },
+   "competitions": [
+    {
+     "id": "401873076",
+     "date": "2026-11-22T18:00Z",
+     "attendance": 69879,
+     "neutralSite": false,
+     "competitors": [
+      {
+       "id": "21",
+       "homeAway": "home",
+       "winner": true,
+       "score": "19",
+       "linescores": [
+        {
+         "value": 13.0,
+         "displayValue": "13",
+         "period": 1
+        },
+        {
+         "value": 0.0,
+         "displayValue": "0",
+         "period": 2
+        },
+        {
+         "value": 3.0,
+         "displayValue": "3",
+         "period": 3
+        },
+        {
+         "value": 3.0,
+         "displayValue": "3",
+         "period": 4
+        }
+       ],
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Game",
+         "type": "total",
+         "summary": "3-7"
+        },
+        {
+         "name": "Home",
+         "type": "home",
+         "summary": "2-4"
+        },
+        {
+         "name": "Road",
+         "type": "road",
+         "summary": "1-3"
+        }
+       ],
+       "team": {
+        "id": "21",
+        "location": "Philadelphia",
+        "name": "Eagles",
+        "abbreviation": "PHI",
+        "displayName": "Philadelphia Eagles",
+        "shortDisplayName": "Eagles"
+       }
+      },
+      {
+       "id": "23",
+       "homeAway": "away",
+       "winner": false,
+       "score": "16",
+       "linescores": [
+        {
+         "value": 0.0,
+         "displayValue": "0",
+         "period": 1
+        },
+        {
+         "value": 3.0,
+         "displayValue": "3",
+         "period": 2
+        },
+        {
+         "value": 6.0,
+         "displayValue": "6",
+         "period": 3
+        },
+        {
+         "value": 7.0,
+         "displayValue": "7",
+         "period": 4
+        }
+       ],
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Game",
+         "type": "total",
+         "summary": "6-4"
+        },
+        {
+         "name": "Home",
+         "type": "home",
+         "summary": "4-0"
+        },
+        {
+         "name": "Road",
+         "type": "road",
+         "summary": "2-4"
+        }
+       ],
+       "team": {
+        "id": "23",
+        "location": "Pittsburgh",
+        "name": "Steelers",
+        "abbreviation": "PIT",
+        "displayName": "Pittsburgh Steelers",
+        "shortDisplayName": "Steelers"
+       }
+      }
+     ],
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 4,
+      "type": {
+       "id": "3",
+       "name": "STATUS_FINAL",
+       "state": "post",
+       "completed": true,
+       "description": "Final",
+       "detail": "Final",
+       "shortDetail": "Final"
+      },
+      "isTBDFlex": false
+     },
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "CBS"
+       ]
+      }
+     ],
+     "leaders": [
+      {
+       "name": "passingYards",
+       "displayName": "Passing Leader",
+       "leaders": [
+        {
+         "displayValue": "30/44, 227 YDS, 1 TD",
+         "value": 227.0,
+         "athlete": {
+          "id": "8439",
+          "displayName": "Aaron Rodgers",
+          "shortName": "A. Rodgers",
+          "jersey": "8",
+          "position": {
+           "abbreviation": "QB"
+          },
+          "headshot": {
+           "href": "https://img.invalid/h/8439.png"
+          }
+         },
+         "team": {
+          "id": "23"
+         }
+        }
+       ]
+      },
+      {
+       "name": "rushingYards",
+       "displayName": "Rushing Leader",
+       "leaders": [
+        {
+         "displayValue": "17 CAR, 75 YDS, 1 TD",
+         "value": 75.0,
+         "athlete": {
+          "id": "3929630",
+          "displayName": "Saquon Barkley",
+          "shortName": "S. Barkley",
+          "jersey": "26",
+          "position": {
+           "abbreviation": "RB"
+          },
+          "headshot": {
+           "href": "https://img.invalid/h/3929630.png"
+          }
+         },
+         "team": {
+          "id": "21"
+         }
+        }
+       ]
+      },
+      {
+       "name": "receivingYards",
+       "displayName": "Receiving Leader",
+       "leaders": [
+        {
+         "displayValue": "6 REC, 61 YDS, 1 TD",
+         "value": 61.0,
+         "athlete": {
+          "id": "4694237",
+          "displayName": "Max Hurleman",
+          "shortName": "M. Hurleman",
+          "jersey": "84",
+          "position": {
+           "abbreviation": "WR"
+          },
+          "headshot": {
+           "href": "https://img.invalid/h/4694237.png"
+          }
+         },
+         "team": {
+          "id": "23"
+         }
+        }
+       ]
+      }
+     ],
+     "highlights": [
+      {
+       "id": 50565318,
+       "headline": "Pittsburgh Steelers vs. Philadelphia Eagles: Game Highlights",
+       "description": "Pittsburgh Steelers vs. Philadelphia Eagles: Game Highlights",
+       "lastModified": "2026-11-25T04:36:01Z",
+       "originalPublishDate": "2026-11-22T21:29:51Z",
+       "duration": 52,
+       "timeRestrictions": {
+        "embargoDate": "2026-11-22T21:29:49Z",
+        "expirationDate": "2026-11-26T21:29:49Z"
+       },
+       "deviceRestrictions": {
+        "devices": [
+         "settop",
+         "tablet",
+         "handset",
+         "ipad",
+         "desktop"
+        ],
+        "type": "whitelist"
+       },
+       "thumbnail": "https://img.invalid/50565318.jpg",
+       "links": {
+        "source": {
+         "href": "https://clips.invalid/50565318/source.mp4",
+         "HLS": {
+          "href": "https://clips.invalid/50565318/playlist.m3u8",
+          "cmaf": {
+           "href": "https://clips.invalid/50565318/cmaf/playlist.m3u8"
+          }
+         }
+        },
+        "mobile": {
+         "href": "https://login.invalid/50565318"
+        }
+       },
+       "tracking": {
+        "coverageType": "Final Game Highlight",
+        "leagueName": "NFL",
+        "sportName": "football"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401873078",
+   "date": "2026-11-24T01:15Z",
+   "name": "Cincinnati Bengals at Washington Commanders",
+   "shortName": "CIN @ WSH",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "week": {
+    "number": 11
+   },
+   "competitions": [
+    {
+     "id": "401873078",
+     "date": "2026-11-24T01:15Z",
+     "attendance": 64101,
+     "neutralSite": false,
+     "competitors": [
+      {
+       "id": "28",
+       "homeAway": "home",
+       "winner": true,
+       "score": "22",
+       "linescores": [
+        {
+         "value": 0.0,
+         "displayValue": "0",
+         "period": 1
+        },
+        {
+         "value": 7.0,
+         "displayValue": "7",
+         "period": 2
+        },
+        {
+         "value": 6.0,
+         "displayValue": "6",
+         "period": 3
+        },
+        {
+         "value": 9.0,
+         "displayValue": "9",
+         "period": 4
+        }
+       ],
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Game",
+         "type": "total",
+         "summary": "4-5-1"
+        },
+        {
+         "name": "Home",
+         "type": "home",
+         "summary": "3-2-1"
+        },
+        {
+         "name": "Road",
+         "type": "road",
+         "summary": "1-3"
+        }
+       ],
+       "team": {
+        "id": "28",
+        "location": "Washington",
+        "name": "Commanders",
+        "abbreviation": "WSH",
+        "displayName": "Washington Commanders",
+        "shortDisplayName": "Commanders"
+       }
+      },
+      {
+       "id": "4",
+       "homeAway": "away",
+       "winner": false,
+       "score": "20",
+       "linescores": [
+        {
+         "value": 0.0,
+         "displayValue": "0",
+         "period": 1
+        },
+        {
+         "value": 10.0,
+         "displayValue": "10",
+         "period": 2
+        },
+        {
+         "value": 7.0,
+         "displayValue": "7",
+         "period": 3
+        },
+        {
+         "value": 3.0,
+         "displayValue": "3",
+         "period": 4
+        }
+       ],
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Game",
+         "type": "total",
+         "summary": "7-3"
+        },
+        {
+         "name": "Home",
+         "type": "home",
+         "summary": "3-1"
+        },
+        {
+         "name": "Road",
+         "type": "road",
+         "summary": "4-2"
+        }
+       ],
+       "team": {
+        "id": "4",
+        "location": "Cincinnati",
+        "name": "Bengals",
+        "abbreviation": "CIN",
+        "displayName": "Cincinnati Bengals",
+        "shortDisplayName": "Bengals"
+       }
+      }
+     ],
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 4,
+      "type": {
+       "id": "3",
+       "name": "STATUS_FINAL",
+       "state": "post",
+       "completed": true,
+       "description": "Final",
+       "detail": "Final",
+       "shortDetail": "Final"
+      },
+      "isTBDFlex": false
+     },
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "ESPN"
+       ]
+      }
+     ],
+     "leaders": [
+      {
+       "name": "passingYards",
+       "displayName": "Passing Leader",
+       "leaders": [
+        {
+         "displayValue": "28/40, 300 YDS, 2 TD",
+         "value": 300.0,
+         "athlete": {
+          "id": "3915511",
+          "displayName": "Joe Burrow",
+          "shortName": "J. Burrow",
+          "jersey": "9",
+          "position": {
+           "abbreviation": "QB"
+          },
+          "headshot": {
+           "href": "https://img.invalid/h/3915511.png"
+          }
+         },
+         "team": {
+          "id": "4"
+         }
+        }
+       ]
+      },
+      {
+       "name": "rushingYards",
+       "displayName": "Rushing Leader",
+       "leaders": [
+        {
+         "displayValue": "6 CAR, 55 YDS",
+         "value": 55.0,
+         "athlete": {
+          "id": "4426348",
+          "displayName": "Jayden Daniels",
+          "shortName": "J. Daniels",
+          "jersey": "5",
+          "position": {
+           "abbreviation": "QB"
+          },
+          "headshot": {
+           "href": "https://img.invalid/h/4426348.png"
+          }
+         },
+         "team": {
+          "id": "28"
+         }
+        }
+       ]
+      },
+      {
+       "name": "receivingYards",
+       "displayName": "Receiving Leader",
+       "leaders": [
+        {
+         "displayValue": "9 REC, 122 YDS",
+         "value": 122.0,
+         "athlete": {
+          "id": "5081432",
+          "displayName": "Antonio Williams",
+          "shortName": "A. Williams",
+          "jersey": "14",
+          "position": {
+           "abbreviation": "WR"
+          },
+          "headshot": {
+           "href": "https://img.invalid/h/5081432.png"
+          }
+         },
+         "team": {
+          "id": "28"
+         }
+        }
+       ]
+      }
+     ],
+     "highlights": [
+      {
+       "id": 50579688,
+       "headline": "Commanders storm back, stun Bengals 22-20 on MNF",
+       "description": "Commanders storm back, stun Bengals 22-20 on MNF",
+       "lastModified": "2026-11-24T04:47:34Z",
+       "originalPublishDate": "2026-11-24T04:32:11Z",
+       "duration": 74,
+       "timeRestrictions": {
+        "embargoDate": "2026-11-24T04:32:10Z",
+        "expirationDate": "2026-11-26T04:32:10Z"
+       },
+       "deviceRestrictions": {
+        "devices": [
+         "settop",
+         "tablet",
+         "handset",
+         "ipad",
+         "desktop"
+        ],
+        "type": "whitelist"
+       },
+       "thumbnail": "https://img.invalid/50579688.jpg",
+       "links": {
+        "source": {
+         "href": "https://clips.invalid/50579688/source.mp4",
+         "HLS": {
+          "href": "https://clips.invalid/50579688/playlist.m3u8",
+          "cmaf": {
+           "href": "https://clips.invalid/50579688/cmaf/playlist.m3u8"
+          }
+         }
+        },
+        "mobile": {
+         "href": "https://login.invalid/50579688"
+        }
+       },
+       "tracking": {
+        "coverageType": "Final Game Highlight",
+        "leagueName": "NFL",
+        "sportName": "football"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

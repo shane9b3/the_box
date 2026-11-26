@@ -330,7 +330,7 @@ internal class FakeEngine : EngineEnvironment, EngineParts {
     override val fps = MutableStateFlow<Float?>(null)
     var statsValue = StreamStats()
     var ffmpegMimes = setOf("audio/mpeg-L2")
-    override val isLowRam = false
+    override var isLowRam = false
     override fun capabilities() = mapOf("fake" to "1")
     override fun ffmpegSupports(mimeType: String) = mimeType in ffmpegMimes
     override fun softwareVideoDecoderAvailable(mimeType: String?) = true

@@ -56,12 +56,12 @@ class GameDetailRepositoryImplTest {
         val calls = ArrayList<Pair<String, Long>>()
         val cancelled = ArrayList<String>()
         var gate: CompletableDeferred<Unit>? = null
-        var answer: (GameId, Long) -> NhlDetailSource.DetailAnswer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id), now), false) }
+        var answer: (GameId, Long) -> DetailAnswer = { id, now -> DetailAnswer(ok(detail(id), now), false) }
         var box: Fetch<BoxScore> = Fetch.Ok(BoxScore(TeamBox(emptyList(), emptyList()), TeamBox(emptyList(), emptyList())), 0L, null, 0)
         var boxCalls = 0
         var boxGate: CompletableDeferred<Unit>? = null
 
-        override suspend fun detail(id: GameId, phaseHint: GamePhase?): NhlDetailSource.DetailAnswer {
+        override suspend fun detail(id: GameId, phaseHint: GamePhase?): DetailAnswer {
             calls += id.id to mono.nowMs()
             try {
                 gate?.await()
@@ -116,11 +116,9 @@ class GameDetailRepositoryImplTest {
 
     // ---------------------------------------------------------------- the rest and the moves
 
-    @Test fun nflAndChlAreBoardOnlyWithoutARequest() = runTest {
+    /** (NFL hub P2) The NFL now has a detail (GameDetailRepositoryNflTest); the CHL stays board-only. */
+    @Test fun chlIsBoardOnlyWithoutARequest() = runTest {
         val h = harness()
-        h.repo.show(game(id = "401873049", league = League.NFL))
-        settle(5_000)
-        assertEquals(DetailState.BoardOnly(GameId(League.NFL, "401873049")), h.state)
         h.repo.show(game(id = "29187", league = League.OHL))
         settle(5_000)
         assertEquals(DetailState.BoardOnly(GameId(League.OHL, "29187")), h.state)
@@ -206,7 +204,7 @@ class GameDetailRepositoryImplTest {
 
     @Test fun preReReadsEveryFiveMinutesAndACacheHitIsShownWithoutARequest() = runTest {
         val h = harness()
-        h.fetcher.answer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id, GamePhase.PRE), now), false) }
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.PRE), now), false) }
         h.repo.show(game(id = "pre", phase = GamePhase.PRE))
         settle(600 + 60_000)
         h.repo.show(game(id = "other", phase = GamePhase.PRE))
@@ -223,7 +221,7 @@ class GameDetailRepositoryImplTest {
 
     @Test fun aBoardThatWentLiveReTimesAPreGameDetail() = runTest {
         val h = harness()
-        h.fetcher.answer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id, GamePhase.PRE), now), false) }
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.PRE), now), false) }
         h.repo.show(game(phase = GamePhase.PRE))
         settle(600 + 40_000)
         h.repo.show(game(phase = GamePhase.LIVE))
@@ -233,7 +231,7 @@ class GameDetailRepositoryImplTest {
 
     @Test fun finalOnceWhenTheRecapIsThere() = runTest {
         val h = harness()
-        h.fetcher.answer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id, GamePhase.FINAL, recapId = 9L), now), false) }
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.FINAL, recapId = 9L), now), false) }
         h.repo.show(game(phase = GamePhase.FINAL))
         settle(600 + 3_600_000)
         assertEquals(1, h.fetcher.calls.size)
@@ -241,7 +239,7 @@ class GameDetailRepositoryImplTest {
 
     @Test fun finalWithoutRecapReReadsUntilThreeHoursAfterTheEnd() = runTest {
         val h = harness()
-        h.fetcher.answer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id, GamePhase.FINAL), now), false) }
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.FINAL), now), false) }
         // Seen live first, then final: the end is when this process saw it turn.
         h.repo.show(game(phase = GamePhase.LIVE))
         settle(600)
@@ -257,7 +255,7 @@ class GameDetailRepositoryImplTest {
 
     @Test fun aBoardRecapEndsTheWait() = runTest {
         val h = harness()
-        h.fetcher.answer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id, GamePhase.FINAL), now), false) }
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.FINAL), now), false) }
         h.repo.show(game(phase = GamePhase.FINAL, media = GameMedia(7L, null, 0), startUtcMs = wall - 3_600_000L))
         settle(600 + SportsConstants.HUB_DETAIL_IDLE_MS * 3)
         assertEquals(1, h.fetcher.calls.size)
@@ -272,7 +270,7 @@ class GameDetailRepositoryImplTest {
 
     @Test fun trimKeepsOnlyTheShownGame() = runTest {
         val h = harness()
-        h.fetcher.answer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id, GamePhase.PRE), now), false) }
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.PRE), now), false) }
         h.repo.show(game(id = "a", phase = GamePhase.PRE))
         settle(700)
         h.repo.show(game(id = "b", phase = GamePhase.PRE))
@@ -335,7 +333,7 @@ class GameDetailRepositoryImplTest {
 
     @Test fun failuresShowTheKindThenTheCachedDetailFailing() = runTest {
         val h = harness()
-        h.fetcher.answer = { _, now -> NhlDetailSource.DetailAnswer(Fetch.Failed(FailKind.TIMEOUT, null, now), false) }
+        h.fetcher.answer = { _, now -> DetailAnswer(Fetch.Failed(FailKind.TIMEOUT, null, now), false) }
         h.repo.show(game())
         settle(600)
         assertEquals(DetailState.Failed(GameId(League.NHL, "2026020385"), FailKind.TIMEOUT), h.state)
@@ -344,12 +342,12 @@ class GameDetailRepositoryImplTest {
         assertEquals(1, h.fetcher.calls.size)
         settle(9_000)
         assertEquals(2, h.fetcher.calls.size)
-        h.fetcher.answer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id), now), landingFailed = true) }
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id), now), landingFailed = true) }
         h.repo.retry()
         runCurrent()
         assertEquals(3, h.fetcher.calls.size)
         assertTrue("a failed landing is failing", h.ready.failing)
-        h.fetcher.answer = { _, now -> NhlDetailSource.DetailAnswer(Fetch.Failed(FailKind.HTTP_5XX, null, now), false) }
+        h.fetcher.answer = { _, now -> DetailAnswer(Fetch.Failed(FailKind.HTTP_5XX, null, now), false) }
         settle(30_000)
         assertTrue(h.ready.failing)
         assertEquals("2026020385", h.ready.detail.id.id)
@@ -357,7 +355,7 @@ class GameDetailRepositoryImplTest {
 
     @Test fun refusedIsNotRetriedEarly() = runTest {
         val h = harness()
-        h.fetcher.answer = { _, now -> NhlDetailSource.DetailAnswer(Fetch.Failed(FailKind.HTTP_429, 10, now), false) }
+        h.fetcher.answer = { _, now -> DetailAnswer(Fetch.Failed(FailKind.HTTP_429, 10, now), false) }
         h.repo.show(game())
         settle(600)
         h.repo.retry()
@@ -383,7 +381,7 @@ class GameDetailRepositoryImplTest {
 
     @Test fun notFoundIsAFailure() = runTest {
         val h = harness()
-        h.fetcher.answer = { _, now -> NhlDetailSource.DetailAnswer(Fetch.NotFound, false) }
+        h.fetcher.answer = { _, now -> DetailAnswer(Fetch.NotFound, false) }
         h.repo.show(game())
         settle(600)
         assertEquals(DetailState.Failed(GameId(League.NHL, "2026020385"), FailKind.HTTP_OTHER), h.state)
@@ -407,13 +405,13 @@ class GameDetailRepositoryImplTest {
         val h = harness()
         val star = app.thebox.core.sports.hub.Star(1, "Connor McDavid", "McDavid", "EDM", null)
         val leader = app.thebox.core.sports.hub.LeaderPair("goals", app.thebox.core.sports.hub.Leader("A", 9, null), null)
-        h.fetcher.answer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id).copy(stars = listOf(star), leaders = listOf(leader)), now), false) }
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id).copy(stars = listOf(star), leaders = listOf(leader)), now), false) }
         h.repo.show(game())
         settle(600)
         assertEquals(listOf(star), h.ready.detail.stars)
         assertFalse(h.ready.failing)
         h.fetcher.answer = { id, now ->
-            NhlDetailSource.DetailAnswer(ok(detail(id).copy(venue = null, awayScore = null, homeScore = null), now), landingFailed = true)
+            DetailAnswer(ok(detail(id).copy(venue = null, awayScore = null, homeScore = null), now), landingFailed = true)
         }
         settle(30_000)
         assertEquals(2, h.fetcher.calls.size)

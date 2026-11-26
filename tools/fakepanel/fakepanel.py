@@ -88,9 +88,22 @@ DEFAULTS = {
     **sports_video.DEFAULTS,
     # Sports Hub: catalog channels and XMLTV for the channel link (catalog.py, WP-3; --sports-hub-catalog)
     "sports_hub_catalog": False,
+    # NFL hub (docs/design/m6-nfl-hub.md §8.4; commit 0 names them, P2 serves them): ESPN's game summary
+    # (/apis/site/v2/sports/football/nfl/summary?event=, sports_nfl.py, with --sports --sports-nfl) with a padded `drives`
+    # of this many KB, and the ESPN clip records and HLS (/espn-core/v1/video/clips/{id}, /espn-media/, sports_video.py)
+    # in one of NFL_CLIP_MODES.
+    "sports_nfl_summary_pad_kb": 400,
+    "sports_nfl_clips": "espn",
     # Event and team channels (docs/design/m6-event-channels.md §11.3; events.py; --event-catalog)
     **events.DEFAULTS,
 }
+# (NFL hub §8.4) `sports_nfl_clips`: a highlight + 3 one-plays; one highlight; none; the highlight expired 1 h ago; expiring
+# in 2 min (inside the margin); listed but the master and the record 404; records answering after 8 s.
+NFL_CLIP_MODES = ("espn", "single", "none", "expired", "expiring", "gone", "slow_records")
+# (NFL hub §8.4) The ESPN video paths: the clip records (EspnEndpoints.fromOverride's clipBase) and the fake HLS media.
+ESPN_VIDEO_PREFIXES = ("/espn-core/", "/espn-media/")
+NFL_SUMMARY_PATH = sports_nfl.API_PREFIX + "summary"
+
 FAULT_DOC = {
     "redirect": False, "token_ttl": None, "linger": 0, "linger_status": 403, "close_every": 0,
     "reconnect_mode": "continue", "stall": 0, "stall_after": None, "slow": 0, "ua_whitelist": [], "wrong_content_type": False,
@@ -897,6 +910,16 @@ class Registry:
 
 # ------------------------------------------------------------------ panel state
 
+def check_nfl_hub_config(patch):
+    """(NFL hub §8.4) Raises ValueError for a bad NFL hub key in a config patch."""
+    if "sports_nfl_summary_pad_kb" in patch:
+        v = patch["sports_nfl_summary_pad_kb"]
+        if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 4096:
+            raise ValueError("sports_nfl_summary_pad_kb must be an integer 0..4096")
+    if "sports_nfl_clips" in patch and patch["sports_nfl_clips"] not in NFL_CLIP_MODES:
+        raise ValueError("sports_nfl_clips must be one of " + ", ".join(NFL_CLIP_MODES))
+
+
 def check_reject_forms(v):
     if not isinstance(v, dict):
         raise ValueError("timeshift_reject_forms must be an object {form: status}")
@@ -1081,6 +1104,7 @@ class Panel:
         if isinstance(sl, bool) or not isinstance(sl, (int, float)) or sl < 0:
             raise ValueError("sleep_login must be a number >= 0")
         sports.check_config(patch)
+        check_nfl_hub_config(patch)
         sports_nfl.check_config(patch)
         sports_chl.check_config(patch)
         sports_video.check_config(patch)
@@ -1414,6 +1438,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send(status, body or reason, ctype)
 
     # ---- routing
+    def nfl_hub(self, path):
+        """(NFL hub commit 0, §8.4) The summary and ESPN video routes. P2 serves them from `sports_nfl.handle_summary(h, path)`
+        and `sports_video.handle_espn(h, path)`; until those exist (or with the routes off) the answer is a plain 404."""
+        cfg = self.panel.cfg
+        if path == NFL_SUMMARY_PATH:
+            on, handler = cfg.get("sports") and cfg.get("sports_nfl"), getattr(sports_nfl, "handle_summary", None)
+            off = b"NFL routes are off (--sports --sports-nfl)"
+        else:
+            on, handler = cfg.get("sports") and cfg.get("sports_nfl"), getattr(sports_video, "handle_espn", None)
+            off = b"ESPN video routes are off (--sports --sports-nfl)"
+        if not on:
+            return self.send(404, off, "text/plain")
+        if handler is None:
+            return self.send(404, b"not served yet (NFL hub P2)", "text/plain")
+        handler(self, path)
+        return None
+
     def dispatch(self):
         p, path = self.panel, self.path_only
         if path.startswith("/admin"):
@@ -1423,6 +1464,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(404, b"lb: stream paths only", "text/plain")
         if sports.handle(self, path):
             return None
+        if path == NFL_SUMMARY_PATH or path.startswith(ESPN_VIDEO_PREFIXES):
+            return self.nfl_hub(path)
         if sports_nfl.handle(self, path):
             return None
         if sports_chl.handle(self, path):

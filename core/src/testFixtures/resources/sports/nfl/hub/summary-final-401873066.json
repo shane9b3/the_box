@@ -1,0 +1,1378 @@
+{
+ "boxscore": {
+  "teams": [
+   {
+    "team": {
+     "id": "11",
+     "location": "Indianapolis",
+     "name": "Colts",
+     "abbreviation": "IND",
+     "displayName": "Indianapolis Colts",
+     "shortDisplayName": "Colts"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "8"
+     },
+     {
+      "name": "firstDownsPassing",
+      "displayValue": "6"
+     },
+     {
+      "name": "firstDownsRushing",
+      "displayValue": "1"
+     },
+     {
+      "name": "firstDownsPenalty",
+      "displayValue": "1"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "1-11"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "1-2"
+     },
+     {
+      "name": "totalOffensivePlays",
+      "displayValue": "48"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "167"
+     },
+     {
+      "name": "yardsPerPlay",
+      "displayValue": "3.5"
+     },
+     {
+      "name": "totalDrives",
+      "displayValue": "10"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "129"
+     },
+     {
+      "name": "completionAttempts",
+      "displayValue": "12/29"
+     },
+     {
+      "name": "yardsPerPass",
+      "displayValue": "4.2"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1"
+     },
+     {
+      "name": "sacksYardsLost",
+      "displayValue": "2-15"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "38"
+     },
+     {
+      "name": "rushingAttempts",
+      "displayValue": "17"
+     },
+     {
+      "name": "yardsPerRushAttempt",
+      "displayValue": "2.2"
+     },
+     {
+      "name": "redZoneAttempts",
+      "displayValue": "0-1"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "2-15"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "1"
+     },
+     {
+      "name": "fumblesLost",
+      "displayValue": "0"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1"
+     },
+     {
+      "name": "defensiveTouchdowns",
+      "displayValue": "0"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "22:14"
+     }
+    ],
+    "homeAway": "away"
+   },
+   {
+    "team": {
+     "id": "34",
+     "location": "Houston",
+     "name": "Texans",
+     "abbreviation": "HOU",
+     "displayName": "Houston Texans",
+     "shortDisplayName": "Texans"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "21"
+     },
+     {
+      "name": "firstDownsPassing",
+      "displayValue": "12"
+     },
+     {
+      "name": "firstDownsRushing",
+      "displayValue": "8"
+     },
+     {
+      "name": "firstDownsPenalty",
+      "displayValue": "1"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "8-14"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "0-1"
+     },
+     {
+      "name": "totalOffensivePlays",
+      "displayValue": "65"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "354"
+     },
+     {
+      "name": "yardsPerPlay",
+      "displayValue": "5.4"
+     },
+     {
+      "name": "totalDrives",
+      "displayValue": "10"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "187"
+     },
+     {
+      "name": "completionAttempts",
+      "displayValue": "21/27"
+     },
+     {
+      "name": "yardsPerPass",
+      "displayValue": "6.7"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1"
+     },
+     {
+      "name": "sacksYardsLost",
+      "displayValue": "1-7"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "167"
+     },
+     {
+      "name": "rushingAttempts",
+      "displayValue": "37"
+     },
+     {
+      "name": "yardsPerRushAttempt",
+      "displayValue": "4.5"
+     },
+     {
+      "name": "redZoneAttempts",
+      "displayValue": "1-2"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "4-23"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "1"
+     },
+     {
+      "name": "fumblesLost",
+      "displayValue": "0"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1"
+     },
+     {
+      "name": "defensiveTouchdowns",
+      "displayValue": "0"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "37:46"
+     }
+    ],
+    "homeAway": "home"
+   }
+  ],
+  "players": [
+   {
+    "team": {
+     "id": "11",
+     "location": "Indianapolis",
+     "name": "Colts",
+     "abbreviation": "IND",
+     "displayName": "Indianapolis Colts",
+     "shortDisplayName": "Colts"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "3917792",
+         "displayName": "Daniel Jones"
+        },
+        "stats": [
+         "12/27",
+         "144",
+         "5.3",
+         "0",
+         "1",
+         "2-15",
+         "14.0",
+         "45.9"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4429084",
+         "displayName": "Anthony Richardson Sr."
+        },
+        "stats": [
+         "0/2",
+         "0",
+         "0.0",
+         "0",
+         "0",
+         "0-0",
+         "4.3",
+         "39.6"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4242335",
+         "displayName": "Jonathan Taylor"
+        },
+        "stats": [
+         "11",
+         "21",
+         "1.9",
+         "0",
+         "6"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4686468",
+         "displayName": "Seth McGowan"
+        },
+        "stats": [
+         "3",
+         "7",
+         "2.3",
+         "0",
+         "8"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4429684",
+         "displayName": "Anthony Gould"
+        },
+        "stats": [
+         "2",
+         "48",
+         "24.0",
+         "0",
+         "31",
+         "3"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4061956",
+         "displayName": "Ashton Dulin"
+        },
+        "stats": [
+         "2",
+         "30",
+         "15.0",
+         "0",
+         "25",
+         "4"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "34",
+     "location": "Houston",
+     "name": "Texans",
+     "abbreviation": "HOU",
+     "displayName": "Houston Texans",
+     "shortDisplayName": "Texans"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4432577",
+         "displayName": "C.J. Stroud"
+        },
+        "stats": [
+         "21/27",
+         "194",
+         "7.2",
+         "3",
+         "1",
+         "1-7",
+         "79.9",
+         "118.2"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4035538",
+         "displayName": "David Montgomery"
+        },
+        "stats": [
+         "26",
+         "107",
+         "4.1",
+         "0",
+         "15"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4362478",
+         "displayName": "Emari Demercado"
+        },
+        "stats": [
+         "5",
+         "33",
+         "6.6",
+         "0",
+         "10"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4258173",
+         "displayName": "Nico Collins"
+        },
+        "stats": [
+         "3",
+         "58",
+         "19.3",
+         "1",
+         "42",
+         "5"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4429022",
+         "displayName": "Kayshon Boutte"
+        },
+        "stats": [
+         "2",
+         "40",
+         "20.0",
+         "1",
+         "24",
+         "2"
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "id": "3891",
+   "fullName": "Reliant Stadium"
+  }
+ },
+ "drives": {
+  "previous": [
+   {
+    "id": "4018730661",
+    "description": "9 plays, 44 yards, 4:17",
+    "yards": 44,
+    "isScore": true,
+    "result": "FG",
+    "displayResult": "Field Goal",
+    "plays": [
+     {
+      "id": "40187306640",
+      "sequenceNumber": "4000",
+      "type": {
+       "id": "53",
+       "text": "Kickoff",
+       "abbreviation": "K"
+      },
+      "text": "K.Fairbairn kicks 65 yards from HST 35 to IND 0. S.McGowan ran ob at IND 40 for 40 yards (J.Smith). HST-C.Braswell was injured during the play.",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "15:00"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "40187306658",
+      "sequenceNumber": "5800",
+      "type": {
+       "id": "74",
+       "text": "Official Timeout",
+       "abbreviation": "Off TO"
+      },
+      "text": "Official Timeout at 14:54.",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "14:54"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "40187306676",
+      "sequenceNumber": "7600",
+      "type": {
+       "id": "5",
+       "text": "Rush",
+       "abbreviation": "RUSH"
+      },
+      "text": "(Shotgun) J.Taylor left tackle to IND 46 for 6 yards (R.Blankenship; W.Anderson).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "14:54"
+      },
+      "scoringPlay": false
+     }
+    ]
+   }
+  ]
+ },
+ "leaders": [
+  {
+   "team": {
+    "id": "34",
+    "displayName": "Houston Texans",
+    "abbreviation": "HOU"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "Passing Yards",
+     "leaders": [
+      {
+       "displayValue": "21/27, 194 YDS, 3 TD, 1 INT",
+       "value": 194.0,
+       "athlete": {
+        "id": "4432577",
+        "lastName": "Stroud",
+        "displayName": "C.J. Stroud",
+        "shortName": "C.J. Stroud",
+        "jersey": "7",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4432577.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "Rushing Yards",
+     "leaders": [
+      {
+       "displayValue": "26 CAR, 107 YDS",
+       "value": 107.0,
+       "athlete": {
+        "id": "4035538",
+        "lastName": "Montgomery",
+        "displayName": "David Montgomery",
+        "shortName": "D. Montgomery",
+        "jersey": "32",
+        "position": {
+         "abbreviation": "RB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4035538.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "Receiving Yards",
+     "leaders": [
+      {
+       "displayValue": "3 REC, 58 YDS, 1 TD",
+       "value": 58.0,
+       "athlete": {
+        "id": "4258173",
+        "lastName": "Collins",
+        "displayName": "Nico Collins",
+        "shortName": "N. Collins",
+        "jersey": "12",
+        "position": {
+         "abbreviation": "WR"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4258173.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "Sacks",
+     "leaders": [
+      {
+       "displayValue": "1",
+       "value": 1.0,
+       "athlete": {
+        "id": "16734",
+        "lastName": "Clowney",
+        "displayName": "Jadeveon Clowney",
+        "shortName": "J. Clowney",
+        "jersey": "90",
+        "position": {
+         "abbreviation": "DE"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/16734.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "Tackles",
+     "leaders": [
+      {
+       "displayValue": "6",
+       "value": 6.0,
+       "athlete": {
+        "id": "4361366",
+        "lastName": "Togiai",
+        "displayName": "Tommy Togiai",
+        "shortName": "T. Togiai",
+        "jersey": "72",
+        "position": {
+         "abbreviation": "DT"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4361366.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "11",
+    "displayName": "Indianapolis Colts",
+    "abbreviation": "IND"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "Passing Yards",
+     "leaders": [
+      {
+       "displayValue": "12/27, 144 YDS, 1 INT",
+       "value": 144.0,
+       "athlete": {
+        "id": "3917792",
+        "lastName": "Jones",
+        "displayName": "Daniel Jones",
+        "shortName": "D. Jones",
+        "jersey": "17",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3917792.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "Rushing Yards",
+     "leaders": [
+      {
+       "displayValue": "11 CAR, 21 YDS",
+       "value": 21.0,
+       "athlete": {
+        "id": "4242335",
+        "lastName": "Taylor",
+        "displayName": "Jonathan Taylor",
+        "shortName": "J. Taylor",
+        "jersey": "28",
+        "position": {
+         "abbreviation": "RB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4242335.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "Receiving Yards",
+     "leaders": [
+      {
+       "displayValue": "2 REC, 48 YDS",
+       "value": 48.0,
+       "athlete": {
+        "id": "4429684",
+        "lastName": "Gould",
+        "displayName": "Anthony Gould",
+        "shortName": "A. Gould",
+        "jersey": "6",
+        "position": {
+         "abbreviation": "WR"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4429684.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "Sacks",
+     "leaders": [
+      {
+       "displayValue": "1",
+       "value": 1.0,
+       "athlete": {
+        "id": "4427635",
+        "lastName": "Adebawore",
+        "displayName": "Adetomiwa Adebawore",
+        "shortName": "A. Adebawore",
+        "jersey": "95",
+        "position": {
+         "abbreviation": "DT"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4427635.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "Tackles",
+     "leaders": [
+      {
+       "displayValue": "16",
+       "value": 16.0,
+       "athlete": {
+        "id": "4870598",
+        "lastName": "Allen",
+        "displayName": "CJ Allen",
+        "shortName": "C. Allen",
+        "jersey": "53",
+        "position": {
+         "abbreviation": "LB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4870598.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "injuries": [
+  {
+   "team": {
+    "id": "34",
+    "displayName": "Houston Texans",
+    "abbreviation": "HOU"
+   },
+   "injuries": [
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T19:07Z",
+     "athlete": {
+      "id": "4432708",
+      "lastName": "Harrison Jr.",
+      "displayName": "Marvin Harrison Jr.",
+      "shortName": "M. Harrison Jr.",
+      "jersey": "18",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Hamstring",
+      "location": "Leg",
+      "detail": "Strain",
+      "side": "Not Specified",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T19:00Z",
+     "athlete": {
+      "id": "4429059",
+      "lastName": "Marks",
+      "displayName": "Woody Marks",
+      "shortName": "W. Marks",
+      "jersey": "4",
+      "position": {
+       "abbreviation": "RB"
+      }
+     },
+     "details": {
+      "type": "Concussion",
+      "location": "Head",
+      "detail": "Concussion",
+      "side": "Not Specified",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-24T12:39Z",
+     "athlete": {
+      "id": "3045474",
+      "lastName": "Teller",
+      "displayName": "Wyatt Teller",
+      "shortName": "W. Teller",
+      "jersey": "75",
+      "position": {
+       "abbreviation": "G"
+      }
+     },
+     "details": {
+      "type": "Back",
+      "location": "Torso",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-11-29"
+     }
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "11",
+    "displayName": "Indianapolis Colts",
+    "abbreviation": "IND"
+   },
+   "injuries": [
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T20:44Z",
+     "athlete": {
+      "id": "4722908",
+      "lastName": "Ogletree",
+      "displayName": "Drew Ogletree",
+      "shortName": "D. Ogletree",
+      "jersey": "85",
+      "position": {
+       "abbreviation": "TE"
+      }
+     },
+     "details": {
+      "type": "Knee",
+      "location": "Leg",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Injured Reserve",
+     "date": "2026-11-25T18:36Z",
+     "athlete": {
+      "id": "4360078",
+      "lastName": "Pierce",
+      "displayName": "Alec Pierce",
+      "shortName": "A. Pierce",
+      "jersey": "14",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Heel",
+      "location": "Leg",
+      "detail": "Not Specified",
+      "side": "Left",
+      "returnDate": "2027-01-10"
+     }
+    },
+    {
+     "status": "Injured Reserve",
+     "date": "2026-11-25T01:36Z",
+     "athlete": {
+      "id": "4685324",
+      "lastName": "Curry",
+      "displayName": "Caden Curry",
+      "shortName": "C. Curry",
+      "jersey": "55",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Wrist",
+      "location": "Arm",
+      "detail": "Surgery",
+      "side": "Not Specified",
+      "returnDate": "2027-02-15"
+     }
+    }
+   ]
+  }
+ ],
+ "pickcenter": [
+  {
+   "provider": {
+    "id": "x",
+    "name": "x",
+    "priority": 0
+   },
+   "details": "x",
+   "overUnder": 0,
+   "spread": 0,
+   "overOdds": 0,
+   "underOdds": 0,
+   "awayTeamOdds": {
+    "favorite": false,
+    "underdog": false,
+    "moneyLine": 0,
+    "spreadOdds": 0,
+    "team": {},
+    "teamId": "x",
+    "favoriteAtOpen": false
+   },
+   "homeTeamOdds": {
+    "favorite": false,
+    "underdog": false,
+    "moneyLine": 0,
+    "spreadOdds": 0,
+    "team": {},
+    "teamId": "x",
+    "favoriteAtOpen": false
+   },
+   "moneyline": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "home": {
+     "close": {
+      "odds": "x"
+     },
+     "open": {
+      "odds": "x"
+     }
+    },
+    "away": {
+     "close": {
+      "odds": "x"
+     },
+     "open": {
+      "odds": "x"
+     }
+    }
+   },
+   "pointSpread": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "home": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    },
+    "away": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    }
+   },
+   "total": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "over": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    },
+    "under": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    }
+   },
+   "link": {
+    "text": "x",
+    "language": "x",
+    "rel": [
+     "x"
+    ],
+    "href": "x",
+    "isExternal": false,
+    "isPremium": false
+   },
+   "header": {
+    "text": "x"
+   },
+   "footer": {
+    "disclaimer": "x"
+   }
+  }
+ ],
+ "scoringPlays": [
+  {
+   "id": "401873066277",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Spencer Shrader 34 Yd Field Goal ",
+   "awayScore": 3,
+   "homeScore": 0,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 643.0,
+    "displayValue": "10:43"
+   },
+   "team": {
+    "id": "11",
+    "displayName": "Indianapolis Colts",
+    "abbreviation": "IND"
+   }
+  },
+  {
+   "id": "401873066834",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Nico Collins 42 Yd pass from C.J. Stroud (Ka'imi Fairbairn Kick)",
+   "awayScore": 3,
+   "homeScore": 7,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 134.0,
+    "displayValue": "2:14"
+   },
+   "team": {
+    "id": "34",
+    "displayName": "Houston Texans",
+    "abbreviation": "HOU"
+   }
+  },
+  {
+   "id": "4018730661357",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Kayshon Boutte 24 Yd pass from C.J. Stroud (Ka'imi Fairbairn Kick)",
+   "awayScore": 3,
+   "homeScore": 14,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 458.0,
+    "displayValue": "7:38"
+   },
+   "team": {
+    "id": "34",
+    "displayName": "Houston Texans",
+    "abbreviation": "HOU"
+   }
+  },
+  {
+   "id": "4018730662101",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Ka'imi Fairbairn 27 Yd Field Goal",
+   "awayScore": 3,
+   "homeScore": 17,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 15.0,
+    "displayValue": "0:15"
+   },
+   "team": {
+    "id": "34",
+    "displayName": "Houston Texans",
+    "abbreviation": "HOU"
+   }
+  },
+  {
+   "id": "4018730662392",
+   "type": {
+    "id": "20",
+    "text": "Safety",
+    "abbreviation": "SF"
+   },
+   "text": "Daniel Jones Sacked by Will Anderson Jr. For 7 Yd Loss for Safety",
+   "awayScore": 3,
+   "homeScore": 19,
+   "period": {
+    "number": 3
+   },
+   "clock": {
+    "value": 622.0,
+    "displayValue": "10:22"
+   },
+   "team": {
+    "id": "34",
+    "displayName": "Houston Texans",
+    "abbreviation": "HOU"
+   }
+  },
+  {
+   "id": "4018730662675",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Marlin Klein 13 Yd pass from C.J. Stroud (Ka'imi Fairbairn Kick)",
+   "awayScore": 3,
+   "homeScore": 26,
+   "period": {
+    "number": 3
+   },
+   "clock": {
+    "value": 259.0,
+    "displayValue": "4:19"
+   },
+   "team": {
+    "id": "34",
+    "displayName": "Houston Texans",
+    "abbreviation": "HOU"
+   }
+  }
+ ],
+ "news": {
+  "articles": [
+   {
+    "id": 50597187,
+    "type": "HeadlineNews",
+    "headline": "Sources corroborate Aaron Rodgers' allegations about Steelers HC Mike McCarthy"
+   }
+  ]
+ },
+ "winprobability": [
+  {
+   "homeWinPercentage": 0.7478,
+   "tiePercentage": 0.0,
+   "playId": "4018730661"
+  }
+ ],
+ "article": {
+  "type": "Recap",
+  "headline": "C.J. Stroud throws for 3 TDs as the Texans roll past the Colts 26-3"
+ },
+ "header": {
+  "id": "401873066",
+  "season": {
+   "year": 2026,
+   "current": true,
+   "type": 2
+  },
+  "competitions": [
+   {
+    "id": "401873066",
+    "date": "2026-11-20T01:15Z",
+    "neutralSite": false,
+    "competitors": [
+     {
+      "id": "34",
+      "order": 0,
+      "homeAway": "home",
+      "winner": true,
+      "score": "26",
+      "record": [
+       {
+        "type": "total",
+        "summary": "4-6",
+        "displayValue": "4-6"
+       },
+       {
+        "type": "home",
+        "summary": "1-4",
+        "displayValue": "1-4"
+       }
+      ],
+      "possession": false,
+      "team": {
+       "id": "34",
+       "location": "Houston",
+       "name": "Texans",
+       "nickname": "Texans",
+       "abbreviation": "HOU",
+       "displayName": "Houston Texans"
+      }
+     },
+     {
+      "id": "11",
+      "order": 1,
+      "homeAway": "away",
+      "winner": false,
+      "score": "3",
+      "record": [
+       {
+        "type": "total",
+        "summary": "3-8",
+        "displayValue": "3-8"
+       },
+       {
+        "type": "road",
+        "summary": "1-5",
+        "displayValue": "1-5"
+       }
+      ],
+      "possession": false,
+      "team": {
+       "id": "11",
+       "location": "Indianapolis",
+       "name": "Colts",
+       "nickname": "Colts",
+       "abbreviation": "IND",
+       "displayName": "Indianapolis Colts"
+      }
+     }
+    ],
+    "status": {
+     "type": {
+      "id": "3",
+      "name": "STATUS_FINAL",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "detail": "Final",
+      "shortDetail": "Final"
+     },
+     "isTBDFlex": false
+    }
+   }
+  ],
+  "week": 11
+ },
+ "videos": []
+}

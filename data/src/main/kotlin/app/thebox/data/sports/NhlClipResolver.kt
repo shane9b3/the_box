@@ -74,7 +74,8 @@ class NhlClipResolver internal constructor(
         }
     }
 
-    override suspend fun stream(ref: ClipRef): ClipResult<Pair<ClipInfo, ClipStream>> =
+    /** [fresh] is ignored (NFL hub §4.2): the NHL stream is always looked up again. */
+    override suspend fun stream(ref: ClipRef, fresh: Boolean): ClipResult<Pair<ClipInfo, ClipStream>> =
         when (val r = lookup(ref.videoId)) {
             is ClipResult.Ok -> {
                 val info = BrightcoveMapper.info(ref, r.value)
@@ -165,6 +166,7 @@ class NhlClipResolver internal constructor(
             ClipResult.Geo -> "geo"
             ClipResult.NotFound -> "not found"
             ClipResult.Refused -> "refused"
+            ClipResult.Expired -> "expired" // (NFL hub commit 0) never produced by a lookup here
             is ClipResult.Ok<*> -> "ok"
         })
         return out

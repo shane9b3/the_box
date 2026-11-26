@@ -137,11 +137,18 @@ sealed interface HubSheet {
     data class Matchup(override val gameId: GameId) : HubSheet
 }
 
-enum class HubToastKind { VIDEO_UNAVAILABLE, VIDEO_OFFLINE, VIDEO_REFUSED, VIDEO_GEO, VIDEO_REMOVED, VIDEO_NOT_PLAYABLE, GOAL_NO_VIDEO, STARTS_AT, VIDEO_LATER }
+/** [VIDEO_EXPIRED], [PLAY_NO_VIDEO]: (NFL hub commit 0, §3.4, §3.1) appended. */
+enum class HubToastKind {
+    VIDEO_UNAVAILABLE, VIDEO_OFFLINE, VIDEO_REFUSED, VIDEO_GEO, VIDEO_REMOVED, VIDEO_NOT_PLAYABLE, GOAL_NO_VIDEO, STARTS_AT, VIDEO_LATER,
+    VIDEO_EXPIRED, PLAY_NO_VIDEO,
+}
 
-/** A short message with a reason and a next step (§6.8, §5.5). [seq] distinguishes two equal toasts in a row. */
+/**
+ * A short message with a reason and a next step (§6.8, §5.5). [seq] distinguishes two equal toasts in a row. [league]
+ * (NFL hub §3.4): whose wording `SportsScreen` uses (ESPN or NHL.com).
+ */
 @Immutable
-data class HubToast(val kind: HubToastKind, val startUtcMs: Long? = null, val seq: Long = 0L)
+data class HubToast(val kind: HubToastKind, val startUtcMs: Long? = null, val seq: Long = 0L, val league: LeagueGroup = LeagueGroup.NHL)
 
 /**
  * The Sports Hub page's view model (docs/design/m6-sports-hub.md; WP-4). It reads the optional [ScoreRepository] (absent =
@@ -265,12 +272,41 @@ class SportsViewModel internal constructor(
     private val panelFocus = MutableStateFlow(false)
     /** The slot actions held while focus is in the panel (§2.3); null = not frozen. */
     private val frozen = MutableStateFlow<List<SlotAction?>?>(null)
+    /** (Code review 2026-11-26, UI M1) The game's phase when [frozen] was taken. */
+    private var frozenPhase: GamePhase? = null
     private val matches = MutableStateFlow<Map<String, MatchState>>(emptyMap())
     private val clipInfos = MutableStateFlow<Map<Long, ClipInfo>>(emptyMap())
-    /** True while the video service has refused the app (§6.8): the video slots and chips are off for `HUB_VIDEO_KEY_REREAD_MS`. */
-    private val videoOff = MutableStateFlow(false)
-    /** True while the video service has refused the app (§6.8): video slots and the card chip hide. */
-    val videoRefused: StateFlow<Boolean> get() = videoOff.asStateFlow()
+    /**
+     * The leagues whose video service has refused the app (§6.8): their video slots and chips are off for
+     * `HUB_VIDEO_KEY_REREAD_MS`. (NFL hub §6.6) Per league, so an NHL key refusal never hides ESPN video, or the reverse.
+     */
+    private val videoOff = MutableStateFlow<Set<LeagueGroup>>(emptySet())
+    /**
+     * (NFL hub §6.6) The leagues with video off now: a refusal, or (code review 2026-11-26, UI open defect #1 row 10) a
+     * league whose video this build switches off (`HubLeagueUi.videoKilled`: the NFL's `ESPN_VIDEO_ENABLED`). The one
+     * copy of the rule: the screen's cards read this set as is.
+     */
+    val videoOffLeagues: StateFlow<Set<LeagueGroup>> =
+        videoOff.map { it + KILLED_VIDEO }.stateIn(viewModelScope, SharingStarted.Eagerly, KILLED_VIDEO)
+    /** True while the NHL video service has refused the app (§6.8): its video slots and card chips hide. */
+    val videoRefused: StateFlow<Boolean> = videoOff.map { LeagueGroup.NHL in it }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    private val offerTickFlow = MutableStateFlow(0)
+    /**
+     * (NFL hub §4.3, arch M7) Bumped at the next instant any shown clip's offer changes (`ClipOffer.changesAt` over the
+     * shown game's clips and the cards' board highlights): the panel, the sheet and the cards check again then.
+     */
+    val offerTick: StateFlow<Int> = offerTickFlow.asStateFlow()
+
+    private val espnSkewFlow = MutableStateFlow(0L)
+    /**
+     * (NFL hub §4.3, integration §18) The one ESPN skew the page's offer checks use where no detail is at hand (the cards'
+     * board chips and their timer): the newest NFL detail's `clockSkewMs`, which `EspnDetailSource` sets from ESPN's
+     * `Date` (the same skew the resolver's catalog holds). The shown game's checks read its own detail's.
+     */
+    val espnSkewMs: StateFlow<Long> = espnSkewFlow.asStateFlow()
+    private var offerJob: Job? = null
+    private var offerAt: Long? = null
+    private var offerFired = Long.MIN_VALUE
     private val detailFlow: StateFlow<DetailState> = detail?.detail ?: MutableStateFlow(DetailState.None)
 
     private val _panel = MutableStateFlow(HubPanelModel(game = null))
@@ -291,7 +327,7 @@ class SportsViewModel internal constructor(
     private var fetchedId: String? = null
     private var fetchedPhase: GamePhase? = null
     private val infoRequested = HashSet<Long>()
-    private var videoOffJob: Job? = null
+    private val videoOffJobs = HashMap<LeagueGroup, Job>()
     private var entered = false
     /** The game whose panel focus is in (§2.3); null while focus is outside the panel. */
     private var enteredId: GameId? = null
@@ -300,10 +336,11 @@ class SportsViewModel internal constructor(
         viewModelScope.launch {
             merge(
                 state.map { }, shownId.map { }, detailFlow.map { }, matches.map { }, clipInfos.map { }, panelFocus.map { },
-                frozen.map { }, videoOff.map { },
+                frozen.map { }, videoOff.map { }, offerTickFlow.map { },
             ).collect {
                 refreshPanel()
                 ensureClipInfos()
+                armOfferTimer()
             }
         }
         clipSession?.let { s ->
@@ -317,7 +354,9 @@ class SportsViewModel internal constructor(
             viewModelScope.launch { s.effects.collect { _effects.emit(it) } }
             viewModelScope.launch {
                 s.failures.collect { f ->
-                    if (f == ClipSession.Failure.REFUSED) markVideoOff()
+                    // (NFL hub §3.4) The clip's league names the service in the toast and is the one turned off.
+                    val league = s.lastRequested?.gameId?.league?.group ?: LeagueGroup.NHL
+                    if (f == ClipSession.Failure.REFUSED) markVideoOff(league)
                     toast(
                         when (f) {
                             ClipSession.Failure.UNAVAILABLE -> HubToastKind.VIDEO_UNAVAILABLE
@@ -328,7 +367,9 @@ class SportsViewModel internal constructor(
                             ClipSession.Failure.NOT_PLAYABLE -> HubToastKind.VIDEO_NOT_PLAYABLE
                             ClipSession.Failure.NO_CLIP -> HubToastKind.GOAL_NO_VIDEO
                             ClipSession.Failure.LATER -> HubToastKind.VIDEO_LATER
+                            ClipSession.Failure.EXPIRED -> HubToastKind.VIDEO_EXPIRED
                         },
+                        league = league,
                     )
                 }
             }
@@ -646,6 +687,7 @@ class SportsViewModel internal constructor(
         refreshPanel()
         val first = _panel.value.firstEnabled ?: return null
         enteredId = game.id
+        frozenPhase = _panel.value.game?.phase
         frozen.value = _panel.value.slots.map { it.action }
         panelFocus.value = true
         refreshPanel()
@@ -656,6 +698,7 @@ class SportsViewModel internal constructor(
     fun onPanelExited() {
         enteredId = null
         panelFocus.value = false
+        frozenPhase = null
         frozen.value = null
     }
 
@@ -680,7 +723,13 @@ class SportsViewModel internal constructor(
                 // sheet opens, so browsing the grid makes no third lookup per game.
                 ensureClipInfos()
             }
-            SlotAction.WATCH_RECAP -> p.detail?.recapId.let { it ?: game.media?.recapId }?.let { playClips(listOf(ClipRef(it, ClipKind.RECAP, game.id)), 0) }
+            SlotAction.WATCH_RECAP -> {
+                // (NFL hub §4.3) Only a highlight offered now plays (the slot may be a frozen one whose clip just expired);
+                // (code review 2026-11-26, UI m3) then the league's toast says why ("ESPN removed this video; …").
+                val ui = HubLeagues.of(game.id.league.group)
+                val ref = ui.recapRef(game, p.detail, nowUtcMs())
+                if (ref != null) playClips(listOf(ref), 0) else ui.recapGoneToast?.let { toast(it, league = game.id.league.group) }
+            }
             SlotAction.BOX_SCORE -> openBoxScore(game)
             SlotAction.MATCHUP -> _sheet.value = HubSheet.Matchup(game.id)
             SlotAction.WATCH_FROM_START -> {
@@ -739,26 +788,74 @@ class SportsViewModel internal constructor(
 
     fun missingClip() = toast(HubToastKind.GOAL_NO_VIDEO)
 
-    /** Plays [queue]`[`[index]`]` through the clip session (a goal and every later goal, or a recap of one). */
+    /** (NFL hub §3.1) OK on an NFL scoring row: ESPN posts videos of only a few plays (they are under More videos). */
+    fun playNoVideo() = toast(HubToastKind.PLAY_NO_VIDEO, league = LeagueGroup.NFL)
+
+    /**
+     * Plays [queue]`[`[index]`]` through the clip session (a goal and every later goal, or a recap of one). (NFL hub §4.3)
+     * A clip no longer offered is not started ([HubToastKind.VIDEO_EXPIRED]), and the session skips such entries when it
+     * advances.
+     */
     fun playClips(queue: List<ClipRef>, index: Int) {
-        val s = clipSession ?: run { toast(HubToastKind.VIDEO_NOT_PLAYABLE); return }
-        s.play(queue, index)
+        val league = queue.getOrNull(index)?.gameId?.league?.group ?: LeagueGroup.NHL
+        val s = clipSession ?: run { toast(HubToastKind.VIDEO_NOT_PLAYABLE, league = league); return }
+        val ref = queue.getOrNull(index) ?: return
+        if (!clipOffered(ref)) { toast(HubToastKind.VIDEO_EXPIRED, league = league); return }
+        s.play(queue, index, ::clipOffered)
+    }
+
+    /** (NFL hub §4.3) `ClipOffer` for [ref] now: the NFL's clips by the shown detail and board; anything else is offered. */
+    private fun clipOffered(ref: ClipRef): Boolean {
+        val g = _panel.value.game?.takeIf { it.id == ref.gameId } ?: currentCards().firstOrNull { it.game.id == ref.gameId }?.game
+        val d = (detailFlow.value as? DetailState.Ready)?.detail?.takeIf { it.id == ref.gameId }
+        return HubLeagues.of(ref.gameId.league.group).offeredRef(ref, g, d, nowUtcMs())
+    }
+
+    /** (NFL hub §4.1, §6.6) Video is off for [group]: a refusal, or the league's kill switch (`HubLeagueUi.videoKilled`). */
+    private fun videoOffFor(group: LeagueGroup): Boolean = group in videoOff.value || group in KILLED_VIDEO
+
+    /**
+     * (NFL hub §4.3, arch M7) The one offer timer: waits until the earliest `ClipOffer.changesAt` among the shown game's
+     * clips and every card's board highlight, then bumps [offerTick] (the panel's merge input, the cards' and the sheet's
+     * remember key). An instant already fired is never armed again, so a clock that does not move cannot spin it.
+     */
+    private fun armOfferTimer() {
+        val now = nowUtcMs()
+        val shown = _panel.value.game
+        val d = _panel.value.detail
+        val candidates = ArrayList<Long>()
+        if (shown != null) HubLeagues.of(shown.id.league.group).nextOfferChange(shown, d, now, d?.clockSkewMs ?: 0L)?.let { candidates += it }
+        for (c in currentCards()) {
+            val g = c.game
+            if (g.media?.recapExpiresMs != null) HubLeagues.of(g.id.league.group).nextOfferChange(g, null, now, espnSkewFlow.value)?.let { candidates += it }
+        }
+        val at = candidates.filter { it > offerFired }.minOrNull()
+        if (at == offerAt) return
+        offerJob?.cancel()
+        offerAt = at
+        if (at == null) return
+        offerJob = viewModelScope.launch {
+            delay((at - nowUtcMs()).coerceAtLeast(0L))
+            offerFired = at
+            offerAt = null
+            offerTickFlow.value = offerTickFlow.value + 1
+        }
     }
 
     fun toastShown(seq: Long) {
         if (_toast.value?.seq == seq) _toast.value = null
     }
 
-    private fun toast(kind: HubToastKind, startUtcMs: Long? = null) {
-        _toast.value = HubToast(kind, startUtcMs, ++toastSeq)
+    private fun toast(kind: HubToastKind, startUtcMs: Long? = null, league: LeagueGroup = LeagueGroup.NHL) {
+        _toast.value = HubToast(kind, startUtcMs, ++toastSeq, league)
     }
 
-    private fun markVideoOff() {
-        videoOff.value = true
-        videoOffJob?.cancel()
-        videoOffJob = viewModelScope.launch {
+    private fun markVideoOff(league: LeagueGroup) {
+        videoOff.value = videoOff.value + league
+        videoOffJobs[league]?.cancel()
+        videoOffJobs[league] = viewModelScope.launch {
             delay(SportsConstants.HUB_VIDEO_KEY_REREAD_MS)
-            videoOff.value = false
+            videoOff.value = videoOff.value - league
         }
     }
 
@@ -870,32 +967,24 @@ class SportsViewModel internal constructor(
     private inline fun guarded(block: () -> List<ChannelCandidate>): List<ChannelCandidate> =
         runCatching(block).getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it else emptyList() }
 
-    /** The clip lookups of the shown NHL game (§6.3): the recap and the winning goal's clip; the latest goal's clip. */
+    /**
+     * The clip lookups of the shown game (§6.3): (NFL hub commit 0, §6.6) the league's [HubLeagueUi.clipRefs] (the NHL:
+     * the recap and the winning goal's clip; the latest goal's clip; the NFL and CHL: none).
+     */
     private fun ensureClipInfos() {
         val r = resolver ?: return
         val game = shownGame() ?: return
-        if (game.id.league.group != LeagueGroup.NHL || fetchedId != game.id.id) return
+        if (fetchedId != game.id.id) return
         val ds = detailFlow.value
         val d = (ds as? DetailState.Ready)?.detail?.takeIf { it.id == game.id }
-        val refs = ArrayList<ClipRef>()
-        when (game.phase) {
-            GamePhase.FINAL -> {
-                (d?.recapId ?: game.media?.recapId)?.let { refs += ClipRef(it, ClipKind.RECAP, game.id) }
-                if (d != null) HubSummary.winningGoal(game, d)?.clipId?.let { refs += ClipRef(it, ClipKind.GOAL, game.id) }
-                // (Owner bug 2026-11-25) The condensed game, only while its Goals sheet is open (the row that shows it).
-                val goalsOpen = (_sheet.value as? HubSheet.Goals)?.gameId == game.id
-                if (goalsOpen) (d?.condensedId ?: game.media?.condensedId)?.let { refs += ClipRef(it, ClipKind.CONDENSED, game.id) }
-            }
-            GamePhase.LIVE, GamePhase.INTERMISSION ->
-                d?.goals?.lastOrNull { it.clipId != null }?.clipId?.let { refs += ClipRef(it, ClipKind.GOAL, game.id) }
-            else -> Unit
-        }
+        val goalsOpen = (_sheet.value as? HubSheet.Goals)?.gameId == game.id
+        val refs = HubLeagues.of(game.id.league.group).clipRefs(game, d, clipInfos.value, goalsOpen)
         for (ref in refs) {
             if (!infoRequested.add(ref.videoId)) continue
             viewModelScope.launch {
                 when (val res = runCatching { r.info(ref) }.getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it else null }) {
                     is ClipResult.Ok -> clipInfos.value = (clipInfos.value + (ref.videoId to res.value)).let { m -> if (m.size > 40) m.entries.drop(m.size - 40).associate { it.toPair() } else m }
-                    ClipResult.Refused -> { infoRequested.remove(ref.videoId); markVideoOff() }
+                    ClipResult.Refused -> { infoRequested.remove(ref.videoId); markVideoOff(ref.gameId.league.group) }
                     else -> if (res !is ClipResult.NotFound) infoRequested.remove(ref.videoId)
                 }
             }
@@ -906,7 +995,7 @@ class SportsViewModel internal constructor(
 
     private fun ctxOf(p: HubPanelModel): HubSlots.Ctx = HubSlots.Ctx(
         game = p.game!!, followed = p.followed, detail = p.detail, failure = p.failure,
-        match = p.match, videoOff = videoOff.value, nowMs = p.nowMs, matcherBound = matcher != null,
+        match = p.match, videoOff = p.game?.let { videoOffFor(it.id.league.group) } ?: false, nowMs = p.nowMs, matcherBound = matcher != null,
     )
 
     private fun refreshPanel() {
@@ -916,6 +1005,9 @@ class SportsViewModel internal constructor(
         // (Review M1, M6) The panel's game changed under an open sheet or a focused panel (a re-poll dropped it, the board's day
         // rolled over, a new board): the sheet closes and focus leaves the panel; the screen moves focus to a card.
         _sheet.value?.let { if (it.gameId != game?.id) _sheet.value = null }
+        // (Code review 2026-11-26, UI M1) The NFL Matchup sheet is pre-game only: it closes when the game leaves pre-game
+        // (the screen moves focus to the panel's first usable slot).
+        _sheet.value?.let { if (it is HubSheet.Matchup && game != null && !HubLeagues.of(game.id.league.group).matchupOpen(game)) _sheet.value = null }
         if (panelFocus.value && enteredId != null && enteredId != game?.id) onPanelExited()
         if (game == null) stopFetching() else followPhase(game)
     }
@@ -925,7 +1017,8 @@ class SportsViewModel internal constructor(
         val g = card.game
         val ds = detailFlow.value
         var d: GameDetail? = null
-        var kind = if (g.id.league.group == LeagueGroup.NHL) DetailKind.NONE else DetailKind.BOARD_ONLY
+        val ui = HubLeagues.of(g.id.league.group)
+        var kind = if (ui.detailed) DetailKind.NONE else DetailKind.BOARD_ONLY
         var failure: FailKind? = null
         var stale = false
         var failing = false
@@ -934,6 +1027,7 @@ class SportsViewModel internal constructor(
         when (ds) {
             is DetailState.Ready -> if (ds.detail.id == g.id) {
                 d = ds.detail; kind = DetailKind.READY; stale = ds.stale; failing = ds.failing
+                if (ui.source == HubSource.ESPN) espnSkewFlow.value = ds.detail.clockSkewMs
                 // (Review L3) To the minute ("Stats from 8:12 PM"), so two builds a millisecond apart are equal models.
                 statsAt = (now - (nowMono() - ds.fetchedAtMono).coerceAtLeast(0L)) / 60_000L * 60_000L
             }
@@ -946,7 +1040,8 @@ class SportsViewModel internal constructor(
         var away = g.away.score
         var home = g.home.score
         val ready = ds as? DetailState.Ready
-        if (d != null && ready != null && (g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION) && d.awayScore != null && d.homeScore != null &&
+        // (NFL hub §2.1, arch m7) The NFL detail carries no score: its headline is always the board's.
+        if (d != null && ready != null && ui.detailCarriesScore && (g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION) && d.awayScore != null && d.homeScore != null &&
             ready.fetchedAtMono > card.anchorMono
         ) {
             away = d.awayScore; home = d.homeScore
@@ -960,12 +1055,20 @@ class SportsViewModel internal constructor(
             game = g, followed = card.followed, detail = d, detailKind = kind, failure = failure, stale = stale, failing = failing,
             statsAtMs = statsAt, awayScore = away, homeScore = home, match = match,
             recap = recapId?.let { infos[it] }, latestGoal = latest?.let { infos[it] }, winningGoal = winning?.let { infos[it] }, nowMs = now,
-            videoOff = videoOff.value,
+            videoOff = videoOffFor(g.id.league.group),
             imminent = g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION || g.startUtcMs - now <= SportsConstants.HUB_IMMINENT_MIN * 60_000L,
+            offerTick = offerTickFlow.value,
         )
         val ctx = ctxOf(base)
         val fr = frozen.value
-        val slots = if (panelFocus.value && fr != null) fr.map { HubSlots.forAction(it, ctx) } else HubSlots.default(ctx)
+        // (Code review 2026-11-26, UI M1) A league that re-freezes at a phase change (the NFL: a pre-game set's Matchup
+        // becomes Scoring at kick-off) takes the new phase's default set, frozen again from here.
+        val refreeze = panelFocus.value && fr != null && ui.refreezeOnPhaseChange && frozenPhase?.let { phaseGroup(it) != phaseGroup(g.phase) } == true
+        val slots = if (panelFocus.value && fr != null && !refreeze) fr.map { HubSlots.forAction(it, ctx) } else HubSlots.default(ctx)
+        if (refreeze) {
+            frozenPhase = g.phase
+            frozen.value = slots.map { it.action }
+        }
         return base.copy(slots = slots)
     }
 
@@ -973,6 +1076,17 @@ class SportsViewModel internal constructor(
 
     companion object {
         val EASTERN: ZoneId = ZoneId.of("America/New_York")
+
+        /** (Code review 2026-11-26) The leagues whose video this build switches off (`HubLeagueUi.videoKilled`). */
+        private val KILLED_VIDEO: Set<LeagueGroup> = LeagueGroup.entries.filter { HubLeagues.of(it).videoKilled }.toSet()
+
+        /** (UI M1) Pre-game, play (live and breaks), final, postponed: a change of group is a phase change for the slots. */
+        private fun phaseGroup(p: GamePhase): Int = when (p) {
+            GamePhase.SCHEDULED, GamePhase.PRE -> 0
+            GamePhase.LIVE, GamePhase.INTERMISSION -> 1
+            GamePhase.FINAL -> 2
+            GamePhase.POSTPONED -> 3
+        }
 
         /** Live (and intermission), then pre-game, then scheduled (and postponed) by start time, then final (§5.2). */
         fun order(games: List<GameSnapshot>, league: League = League.NHL): List<GameSnapshot> =

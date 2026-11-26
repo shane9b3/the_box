@@ -47,10 +47,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.SportsConstants
+import app.thebox.core.sports.LeagueGroup
 import app.thebox.core.sports.hub.ClipKind
 import app.thebox.core.sports.hub.ClipRef
+import app.thebox.core.sports.hub.GameClip
 import app.thebox.core.sports.hub.GoalItem
 import app.thebox.player.api.PositionSnapshot
+import app.thebox.core.sports.group
 import app.thebox.ui.R
 import app.thebox.ui.full.PlayerUi
 import app.thebox.ui.guide.screen.Chip
@@ -74,6 +77,9 @@ fun clipErrorButtonTag(i: Int) = "hub_clip_error_button:$i"
  *
  * (WP-5, additive) [game] and [goals] (the page's `GameDetail.goals`) give the sub-line its teams and "Goal k of n ·
  * 1st 5:11"; without them it names the clip kind only.
+ *
+ * (NFL hub §3.3) [videos]: the shown NFL game's More videos clips (oldest first), for "Video 2 of 4". Every ESPN clip's
+ * sub-line ends "· Video: ESPN", with or without the game (the only attribution left with the footer gone).
  */
 @Composable
 fun ClipPlayerLayer(
@@ -82,6 +88,7 @@ fun ClipPlayerLayer(
     modifier: Modifier = Modifier,
     game: GameSnapshot? = null,
     goals: List<GoalItem> = emptyList(),
+    videos: List<GameClip> = emptyList(),
 ) {
     val res = LocalResources.current
     val state by session.state.collectAsState()
@@ -180,7 +187,7 @@ fun ClipPlayerLayer(
         if (s is ClipSession.State.Failed) {
             ClipErrorCard(res, errorFocus, Modifier.align(Alignment.Center))
         } else if (barShown && s !is ClipSession.State.Idle) {
-            TransportBar(res, s, pos, game, goals)
+            TransportBar(res, s, pos, game, goals, videos)
         }
     }
 }
@@ -196,7 +203,7 @@ private val BAR_GRADIENT = Brush.verticalGradient(listOf(Color.Transparent, Colo
 
 /** y 852 → 1080 over a static black gradient; title 32/600, sub-line 24/500, progress 1728 × 6 at y 990, times, hints. */
 @Composable
-private fun TransportBar(res: Resources, s: ClipSession.State, pos: PositionSnapshot?, game: GameSnapshot?, goals: List<GoalItem>) {
+private fun TransportBar(res: Resources, s: ClipSession.State, pos: PositionSnapshot?, game: GameSnapshot?, goals: List<GoalItem>, videos: List<GameClip>) {
     val (queue, index, title) = when (s) {
         is ClipSession.State.Playing -> Triple(s.queue, s.index, s.info?.title)
         is ClipSession.State.Resolving -> Triple(s.queue, s.index, null)
@@ -210,7 +217,7 @@ private fun TransportBar(res: Resources, s: ClipSession.State, pos: PositionSnap
                     Line(title ?: "", GuideUi.sans(32, FontWeight.SemiBold), Modifier.weight(1f))
                     Line(clipHints(res), GuideUi.sans(22, FontWeight.Medium, GuideUi.Fg70))
                 }
-                clipSubLine(res, ref, game, goals)?.let { Line(it, GuideUi.sans(24, FontWeight.Medium, GuideUi.Fg70)) }
+                clipSubLine(res, ref, game, goals, videos, queue, index)?.let { Line(it, GuideUi.sans(24, FontWeight.Medium, GuideUi.Fg70)) }
             }
             val duration = pos?.durationMs?.takeIf { it > 0 }
             val at = pos?.positionMs?.coerceAtLeast(0) ?: 0L
@@ -242,8 +249,36 @@ private fun clipHints(res: Resources): String {
     ).joinToString(sep)
 }
 
-/** "Goal 1 of 6 · UTA at WPG · 1st 5:11" / "Game recap · UTA at WPG"; null without the game. */
-internal fun clipSubLine(res: Resources, ref: ClipRef, game: GameSnapshot?, goals: List<GoalItem>): String? {
+/**
+ * "Goal 1 of 6 · UTA at WPG · 1st 5:11" / "Game recap · UTA at WPG"; null without the game. (NFL hub §3.3) An ESPN clip:
+ * "Game highlights · CIN at WSH · Video: ESPN", "Video 2 of 4 · CIN at WSH · Video: ESPN" ([videos]: the More videos
+ * list), "CIN at WSH · Video: ESPN" for a clip not in it, "Video: ESPN" without the game: never without the attribution.
+ * (Code review 2026-11-26, UI m12) "Video k of n" counts the session's own [queue] (fixed when OK was pressed; its PLAY
+ * entries, [index] the one playing), so a skipped or expired entry never shifts the numbers; [videos] only when the
+ * queue does not hold [ref].
+ */
+internal fun clipSubLine(
+    res: Resources,
+    ref: ClipRef,
+    game: GameSnapshot?,
+    goals: List<GoalItem>,
+    videos: List<GameClip> = emptyList(),
+    queue: List<ClipRef> = emptyList(),
+    index: Int = -1,
+): String? {
+    if (ref.gameId.league.group == LeagueGroup.NFL) {
+        game ?: return res.getString(R.string.sports_hub_clip_espn_only)
+        val a = game.away.abbrev
+        val h = game.home.abbrev
+        if (ref.kind == ClipKind.RECAP) return res.getString(R.string.sports_hub_clip_highlights_sub_espn, a, h)
+        if (index in queue.indices && queue[index] == ref && ref.kind == ClipKind.PLAY) {
+            val k = (0..index).count { queue[it].kind == ClipKind.PLAY }
+            val n = queue.count { it.kind == ClipKind.PLAY }
+            return res.getString(R.string.sports_hub_clip_video_sub_espn, k, n, a, h)
+        }
+        val i = videos.indexOfFirst { it.videoId == ref.videoId }
+        return if (i >= 0) res.getString(R.string.sports_hub_clip_video_sub_espn, i + 1, videos.size, a, h) else res.getString(R.string.sports_hub_clip_espn_sub, a, h)
+    }
     game ?: return null
     val a = game.away.abbrev
     val h = game.home.abbrev
@@ -254,6 +289,7 @@ internal fun clipSubLine(res: Resources, ref: ClipRef, game: GameSnapshot?, goal
             val i = goals.indexOfFirst { it.clipId == ref.videoId }
             if (i < 0) null else res.getString(R.string.sports_hub_clip_goal_sub, i + 1, goals.size, a, h, goalWhen(res, goals[i]))
         }
+        ClipKind.PLAY -> null
     }
 }
 

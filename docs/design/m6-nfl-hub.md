@@ -446,8 +446,10 @@ Mitigations, all required:
   `Expired`), then `ClipStream(hlsUrl, HLS, captionsUrl = null)`. When the catalog is fresh, nothing is looked up just to
   play: the URLs are unsigned and stable, and the master request is itself the freshness check.
 - `stream(ref, fresh = true)`: the record lookup, bypassing the catalog. 404 → `NotFound` ("ESPN removed this video").
-  200 with the same HLS URL as the catalog → `Failed(HTTP_OTHER)`, with no replay of the dead URL. 200 with a new URL →
-  catalog updated, play. The resolver never reads a summary.
+  200 with a new URL → catalog updated, play. (Code review 2026-11-26, §19 D1) 200 with the **same** HLS URL → play it
+  too: ESPN's URLs are stable, so after a transient failure Try again must recover; a really dead URL 403s again
+  (`CLIP_EXPIRED`) and `ClipSession`'s one re-resolve per clip ends at the error card, so there is no loop. (Was
+  `Failed(HTTP_OTHER)`, which made Try again unrecoverable.) The resolver never reads a summary.
 - Record lookup: `GET https://content.core.api.espn.com/v1/video/clips/{id}` (`EspnEndpoints.clipBase`, debug override
   `{origin}/espn-core/v1/video/clips/`), `@ApiClient`, call timeout 10 s, through `EspnHttp` with the
   `ESPN_CLIP_RECORD_MAX` (64 KB) cap. The answer is `{videos: [ {…} ]}`, a one-item list, decoded into
@@ -1041,7 +1043,7 @@ are in the past by release time.
 | `EspnHttpTest` (`:data`, MockWebServer) | P2 | per-call cap; drain; 403 and 202 + `x-amzn-waf-action` → `HTTP_429` on board, summary and record calls; HTML 404 |
 | `EspnSummaryDecodeTest` | P2 | decode of each fixture; a synthetic 1.5 MB `drives` generated in the test decodes; over 2 MiB → `BAD_BODY`; the same body with `header` first and last decodes equally; cancel mid-body drops the answer; allocated bytes per decode recorded and bounded (< 8 MB) |
 | `EspnDetailSourceTest` | P2 | summary path and query; 404 JSON / HTML; 429 with `Retry-After`; 5xx; WAF; catalog filled with offered entries only; skew from `Date`; the box in the answer |
-| `EspnClipResolverTest` | P2 | `info` hit and miss make no request; `stream` hit makes no request; a miss → one record lookup → catalog; `fresh`: 404 → `NotFound`, same URL → `Failed(HTTP_OTHER)`, new URL plays; 401 / 403 → `Failed(HTTP_429)`; expired / embargoed → `Expired`; https only; a log capture finds no URL beyond the host |
+| `EspnClipResolverTest` | P2 | `info` hit and miss make no request; `stream` hit makes no request; a miss → one record lookup → catalog; `fresh`: 404 → `NotFound`, same URL plays (§19 D1), new URL plays; 401 / 403 → `Failed(HTTP_429)`; expired / embargoed → `Expired`; https only; a log capture finds no URL beyond the host |
 | `ClipResolversTest` | P2 | routing by league; `ESPN_VIDEO_ENABLED` false → `NotFound` |
 | `GameDetailRepositoryImplTest` | P2 | NFL routed to the ESPN fetcher with the dwell; the same numeric id in NHL and NFL kept apart (`league:id`, every map); box via the loop: slot hit, miss → one fetch shared with the poll, a deferred completed on failure, closed gate; NHL tests unchanged |
 | `PlaybackControllerClipTest` (`:player`) | P2 | a low-RAM clip cycle carries 720 / 30; the next live cycle clears both; a normal device sets none |
@@ -1080,7 +1082,8 @@ The NHL and CHL panel and sheet goldens must hash equal after commit 0's move an
   - `none`;
   - `expired`: the highlight's `expirationDate` 1 h ago, which the app must not offer;
   - `expiring`: 2 min from now, inside the margin, not offered;
-  - `gone`: listed, but the master answers 404 and the record 404 (the `CLIP_EXPIRED` → fresh path);
+  - `gone`: listed, but the media answer 403 (the player's `CLIP_EXPIRED`) and the record 404 (the `CLIP_EXPIRED` →
+    fresh path; code review 2026-11-26 data #10: a 404 master was not `CLIP_EXPIRED`);
   - `slow_records`: records answer after 8 s.
 - `fakepanel.py`: route table and `DEFAULTS` (commit 0 only). Tests `test_sports_nfl.py` and `test_sports_video.py` are
   extended (P2).
@@ -1096,8 +1099,8 @@ The NHL and CHL panel and sheet goldens must hash equal after commit 0's move an
 3. Scoring sheet (`espn`): play a More videos row; "Up next" to the next; Back lands on the row.
 4. Final (`single`): OK, OK plays Game highlights; captions on with Menu; Back → slot 1.
 5. Final (`expired`): art with the reason, "No highlights" (or ▶ From start), no chip; the sheet's info row.
-6. Final (`expiring`) and (`gone`): not offered; on `gone`, play from the catalog → master 404 → fresh lookup → the
-   removed toast.
+6. Final (`expiring`): not offered. (`gone`): offered; play from the catalog → master 403 (`CLIP_EXPIRED`) → one fresh
+   lookup → record 404 → the removed toast.
 7. Fault `summary_status: 503`: the failure text, Retry in slot 1; `403`: the limiting text.
 8. Largest text size: pre-game, live and final panels (§2.6 drops).
 9. Fire TV Stick (device): parse time of the padded final summary < 400 ms, and no visible GC stall while browsing ten
@@ -1393,3 +1396,243 @@ from the final shapes and marked provisional.
 | Division standing, home / road records | Not asked for. `standings` (V) and `record[type=home|road]` (V) are in the pre-game summary. | One Matchup sheet line each. |
 | Weather, next game, the last-play text, "No channel found · on Netflix" in the channel line | Weather: unit and dome handling. Next game: next week's board. The last-play text: the mapper keeps only the penalty flag. The channel line: shared NHL code. | Each is a small follow-up. |
 | A shared ESPN back-off between the score and detail actors | Arch M6's optional item; the two keep independent back-offs today. | If the live capture or users show WAF blocks. |
+| (Code review 2026-11-26) Replacing the two still-provisional live fixtures (`summary-live-401873079-2/-3`, tests `…_provisional`) | No capture has shown an in-game clip or an embargoed clip yet (GB @ LAR was a Netflix game: `videos[]` stayed `[]` at Q2 and at halftime). | A capture of an ESPN-aired game in play with a OnePlay clip, reduced with `tools/espn/reduce_summary.py`. |
+| (Code review 2026-11-26, data #8) Pipeline tests whose expected value is independent of the mapper | `NflHubPipeline.expected(case)` is the real mapper's output, so `everyCaseThrough…` proves wiring, not mapping. Known limitation; mitigated by `EspnDetailMapperTest`'s pinned values, `theRealPipelinesFactsPerCase` and (§19) two or three hand-written spot values per case on the repository's own output. | Hand-written expected `GameDetail`s per case, if the mapper ever changes shape. |
+| (Code review 2026-11-26, UI #1 rows 5, 8, 15–17) The cosmetic league checks left outside `HubLeagueUi` | `clipKeyPrefix`, `playNoVideo`'s league, the sheets' `nfl` word / layout switches, the clip sub-line and toast words, `HubToast.league`'s NHL default: each is correct today and none decides a slot or an offer. | A `HubLeagueUi` word table (`HubSource`) when a fourth league comes. |
+
+---
+
+## 16. Commit 0 notes
+
+Commit 0 (lead's implementer, 2026-11-25) followed §9.1. These are the places where the code needed something the design
+did not say, or said differently; each is the smallest change that keeps P1, P2 and P3 independent.
+
+| # | What | Why |
+|---|---|---|
+| 1 | The type-36 fixture is **`summary-final-401873077.json`** (MIN @ SF, "Interception Return Touchdown"). `summary-final-401873066.json` (IND @ HOU) covers the safety ("SF", type 20) only. | §8.1 put both in IND @ HOU; the sample has no type 36 (checked across all ten summaries). |
+| 2 | `HubLeagueUi.clipRefs` gains `goalsOpen: Boolean`. | Today's `ensureClipInfos` looks up the NHL condensed game only while its Goals sheet is open, which the view model knows and the league UI does not. |
+| 3 | `HubSlots.default(c)` stays, as `HubLeagues.of(c.group).slots(c)`; `goalsSheetRows` and `goalQueue` moved verbatim to `NhlHubUi.kt` as top-level functions with the same names; `GoalsSheet` still draws `GoalsRow`. `ScoringRow` and `RowIcon` are declared in `GoalsSheet.kt`; every `scoringRows` (NHL included) is a P3 stub. | The view model, `HubEventChannelsTextTest` and `HubSheetsTest` call these by name; keeping the names keeps every existing test untouched. Building the NHL rows "with the same words" needs the sheet's rework, which is P3's file. |
+| 4 | `ScoringRow.Event` has `clip: ClipRef? = null` (the NHL goal's clip; null for an NFL play). `RowIcon` is `Headshot(url)`, `TeamLogo(side)`, `None`. | §6.6 named both without a shape. |
+| 5 | `sports_hub_more_soon` is **not** reworded in commit 0. `sports_hub_more_soon_chl` holds the new words; P3 switches `ChlHubUi` to it (a `// P3` marker is there). | The lead's acceptance: the CHL panel unchanged byte for byte after commit 0. |
+| 6 | `EspnArticleDto` declares `type` as well as `headline`, and the reducer keeps both. | §6.1 shows the headline of a *Recap* article only; pre-game summaries carry a "Preview" article. |
+| 7 | `EspnSummaryDto` leaves: `JsonElement?` for every id, `awayScore` / `homeScore`, `period.number`, `value` and `duration` (numbers ESPN may send as text); `String?` / `Boolean?` elsewhere. The header's `status` declares `type` only (the summary carries no period or clock there). | §5.3's rule, applied to the recorded shapes. |
+| 8 | `HubPanelContents.build(res, m, clock24, factor, measure, locale, lowEnd = false)`: `measure` is required, `lowEnd` defaulted. `HubPanelContentsTest` passes a stub measure (NHL words never read it). | A defaulted measure would silently measure 0 in production. |
+| 9 | `RowsSpec(header, rows, extra, loading, error, moreSoon)` and `SummarySpec(lines, extra)`; `HubSource { NHL_COM, ESPN, NONE }` (NONE: the CHL). | §6.6 named the types without fields. |
+| 10 | `NflHubUi.detailed` is `false` in commit 0 (today's NFL is board-only); P3 sets it with the detail. | `detailed` is read by nothing yet; true would misdescribe today's NFL. |
+| 11 | `DetailCadence.NHL.gameLengthMs` (9 000 000) replaces the repository's `GAME_LENGTH_MS` constant (kept as an alias). `nextAt` already honours `liveAligned = false` (a plain `lastOk + liveMs`); the phase-change floor and `playsWaitMs` are P1's (`fetchedPhase` and `FinalFacts.playClips` are accepted and unused). | Pure and NHL-neutral; it keeps P1's change inside `DetailPollPolicy.kt`. |
+| 12 | `EspnEndpoints.clipBase` is a fourth constructor field; `EspnScoreSourceTest.endpointOverrideParsing` lists it. | The data class's equality includes it. |
+| 13 | `DetailAnswer` is `internal` top-level in `GameDetailRepositoryImpl.kt`. `DetailFetcher.of(nhl, espn)` routes NFL to `EspnDetailSource`, but the loop still publishes `BoardOnly` for every non-NHL game (its `step` and `nextWake` guards), so the stub is never called. | P2 removes the guards. |
+| 14 | Fake panel: `fakepanel.py` routes the summary path and the `/espn-core/` and `/espn-media/` prefixes to `sports_nfl.handle_summary(h, path)` and `sports_video.handle_espn(h, path)`, found with `getattr`, so P2 adds those functions without touching `fakepanel.py` (until then: 404 "not served yet"). `DEFAULTS` gains `sports_nfl_summary_pad_kb` (400) and `sports_nfl_clips` ("espn", one of `NFL_CLIP_MODES`), validated by `check_nfl_hub_config`. The summary faults (`summary_status`, `summary_pad_kb` over the cap) are `sports_nfl_faults` keys, which live in `sports_nfl.py` (P2). New test file `test_nfl_hub_routes.py`. | §8.4 gave the ESPN HLS media no path; `/espn-media/` is under P2's handler. |
+| 15 | Stub shapes for P2: `EspnClipCatalog.get(id)`, `put(entries)`, `trim(keep)`; `EspnDetailSource(client, mono, endpoints, catalog, mapDetail, mapBox)`; `EspnClipResolver(client, mono, endpoints, catalog)`; `ClipResolvers(nhl, espn, espnVideo)` (the `@Inject` one passes `ESPN_VIDEO_ENABLED`). `FakeClipResolver` also records `streamFresh`. `NflHubFixtures` (testFixtures) names every commit-0 fixture and decodes them. | §6.5 named the classes only. |
+| 16 | `ClipOffer.changesAt` answers null when the embargo lifts at or after `expiresMs − margin` (never offered, so nothing changes). `EspnVideoMapper` also honours a `blacklist` `deviceRestrictions` (settop must not be listed), applies the https rule to the thumbnail, and keeps a blank headline as "". `StatRules.better` compares fractions other than THIRD_DOWN by `made`, as the panel did. | Edge cases the rules did not cover. |
+| 17 | `SummaryLine.oneLine` is already drawn (`maxLines = 1` when set) and `HubPanelPlan.plan`'s `extraFloor` already governs the extra rows; both default to today's behaviour. `StatValue` arms: `Fraction.dash` draws "4-12", `Decimal` its places, `Clock` "m:ss", `Text` as is; Text and Clock are never compared. The panel's `statRow` still uses its PIM / GIVEAWAYS rule; P3 switches it to `StatRules.better`. | The NHL goldens hash equal; the switch belongs with the NFL rows. |
+| 18 | Risk: the board DTO's `highlights` is a typed list (as §5.1 asks), so a structural change of that one field by ESPN would fail the whole board decode (`BAD_BODY`, the stale path), not just the chip. Every leaf is nullable, so only a non-list or non-object breaks it. | Noted for the integration review; a `JsonElement?` field mapped through `EspnVideoMapper` would remove the risk. |
+
+### 17.1 P1 notes
+
+P1 (`:core`, 2026-11-25) implemented `EspnDetailMapper`, the NFL rules of `DetailPollPolicy`, and the board highlight and
+`delayed` in `EspnMapper`. These are the places where the code needed something the design did not say, or said
+differently. No frozen signature changed.
+
+| # | What | Why |
+|---|---|---|
+| 1 | The phase-change rule compares phase **groups**, not phases: pre-game (SCHEDULED, PRE), play (LIVE, INTERMISSION), FINAL, POSTPONED. A re-read is forced only when the effective phase is in a later group than `fetchedPhase`. The summary header's "pre" maps to SCHEDULED (the board alone knows the PRE window). | Taken literally ("effective != fetched"), a board at halftime over a detail fetched LIVE, or a board in its PRE window over a detail mapped SCHEDULED, forces a re-read every 15 s until the summary agrees, which for SCHEDULED/PRE is never. Breaks are already covered by the plain 60 s loop. Residual risk: if ESPN's summary header lags the board's FINAL, the detail is re-read every 15 s until it catches up (bounded by ESPN's lag; back-off still wins). |
+| 2 | `EspnDetailMapper.detail(dto, id, atMs, httpOk)` overload; the frozen three-argument form is `httpOk = false`. | Clips and headshots on the fake panel's plain-http origin would otherwise never be offered in `GameDetail.clips`. P2 passes `httpOk` for the debug override origin, as it does to `EspnVideoMapper` for the catalog. |
+| 3 | `Leader.name` is ESPN's `shortName` as sent ("J. Cook III", "A. St. Brown"). The §2.4 rule is `EspnDetailMapper.leaderSurname(shortName)`, to be applied once, where the name is drawn. | The rule is not idempotent ("St. Brown" → "Brown" if applied twice), so it must live in exactly one place; the UI decides where names are drawn. |
+| 4 | `GameDetail.injuries` keeps at most 2 × `HUB_NFL_INJURIES_PER_TEAM` (12) qualifying lines per team, away first, ESPN's order; the sheet draws 6 and "+n more" from the rest (n is a floor above 12). | §5.3 says "≤ 6 shown per team (all counted)", but `GameDetail` has no count field; §5.4's budget is 2 × 12. |
+| 5 | `EspnCompetitionDto.highlights` keeps its type but is decoded by `TolerantVideoListSerializer` (in `EspnDto.kt`): a non-list value is an empty list, and an entry that is not an object or does not decode as `EspnVideoDto` is dropped on its own. | §16 #18 (lead's instruction): the field can no longer fail the board. Keeping the type keeps `EspnVideoMapperTest` and P2 untouched. `EspnMapperHubTest` covers a string, a number, an object, a list of junk and an object with a wrong-typed leaf. |
+| 6 | The board highlight's `httpOk` is "the logo base is plain http", which only the debug override origin is. | `EspnMapper.board` / `game` have no `httpOk` parameter (frozen); production's logo base is https. |
+| 7 | `GameSnapshot.media` is set from `highlights` on both the day board and the follow's `game()` snapshot. | A follow snapshot replacing the day one must not drop the chip. |
+| 8 | Stat rows are emitted only when **both** sides parse; the UI draws "–" for a kind the list lacks (§2.2). `gameStats` carries all seven game kinds whenever ESPN sends them (live included); the UI picks First downs and Time of possession for finals. `seasonStats` is filled only when the header says "pre"; `gameStats` only after it. | `StatRow` cannot carry an absent side; the phase's row choice is a panel rule. |
+| 9 | `ScoringPlay`: a play without `team.id` takes the side whose score went up; a play still without a side, period or both scores is dropped; more than `HUB_NFL_MAX_PLAYS` keeps the latest (the live "Latest score" line). DEF_TD also on type id 36. A missing id becomes `play-{index}`. | Defensive reading; §6.1 names the type rule only. |
+| 10 | `clips`: the offered RECAP first, then PLAY oldest first (`originalPublishDate`), one per id, ≤ `HUB_NFL_MAX_CLIPS`. | §3.1's sheet order, so the cap never drops the highlight. |
+| 11 | `box(dto)` is null only without two header sides; a summary without `boxscore.players` (pre-game, first snap) answers empty tables. Columns are the design's labels; a key ESPN does not send draws "–". | Null is `BAD_BODY` to the caller; an early-game box is not a bad body. |
+| 12 | `detail()` is null when the header names another event id, or has no known `status.type.state`. The mapper leaves `serverDateMs` null and `clockSkewMs` 0: `EspnDetailSource` sets both (`copy`). | The mapper is pure and has no `Date` header. |
+| 13 | Live fixtures `summary-live-401873079-{1,2,3}.json` are **hand-built (provisional)** from the pre-game and MNF final shapes: Q1 with a field goal; halftime with one OnePlay clip and `header` first; Q4 with a safety, negative passing yards and a clip embargoed until 02:58Z. The tests are named `…_provisional`. | No `live-sum-401873079-*.json` existed when P1 ran (first capture due ≈ 21:05). The real capture, reduced with `tools/espn/reduce_summary.py`, replaces them before the decision note closes. |
+
+### 17.2 P2 notes
+
+P2 (`:data`, the clip rendition in `:player`, the fake panel), 2026-11-25. Places where the code needed something the
+design did not say, or said differently. Frozen signatures are unchanged.
+
+| # | What | Why |
+|---|---|---|
+| 1 | The NHL box score keeps today's on-demand path (`BoxFlight`, one request per game at a time); only the NFL goes through `Input.Box`. | §5.5 said "the NHL keeps its own request, through the same input", but the loop's "an id that is not shown gets `Failed`" rule would change the NHL sheet (its tests ask for a box with no game shown). The NHL never had the two-parse problem: its box is its own endpoint. |
+| 2 | NFL `Input.Box`: a slot hit answers at once (final: any age; else ≤ the phase's interval); a miss while `failures > 0` answers the last failure **without** forcing (back-off wins); otherwise it clears the rest, sets `force` (or joins the parse in flight) and is completed from the next `Fetched` (its box, or its failure; an answer without a box is `BAD_BODY`). A move, Sports off or a gate that closes before the fetch starts completes it with `HTTP_OTHER`. | §5.5 left the back-off and rest cases open. |
+| 3 | `EspnDetailSource` and `EspnClipResolver` constructors gained trailing defaulted parameters (`wallNow`; the source also `callTimeoutMs`, `mapDispatcher`). `GameDetailRepositoryImpl`'s internal constructor gained `onTrim` (the `@Inject` one passes `EspnDetailSource.trimMemory`). | The skew and the offer check need a wall clock; the tests need a virtual one. Internal constructors only; nothing frozen moved. |
+| 4 | The skew lives in `EspnClipCatalog.skewMs`: the newest ESPN `Date` − wall clock of a summary **or** a record answer, clamped to ±1 h. The resolver checks `ClipOffer` at `wallNow() + catalog.skewMs`. | §4.2 said "`ClipOffer` at `now + skew`" without saying where the resolver gets the skew; it never reads a summary (arch M3). |
+| 5 | The source sets `GameDetail.clockSkewMs` (always) and `serverDateMs` (when the mapper left it null) on the mapper's answer, and calls the mapper with `atMs = wall + skew`. | `EspnDetailMapper.detail(dto, id, atMs)` has no skew or `Date` input. **P1**: leave both at their defaults; the source owns them. |
+| 6 | The catalog remembers the last clip handed to the player (`lastServed`); `trim()` on the repository (the `onTrimMemory` path) calls `catalog.trimToServed()` and drops the box slot. | §5.4 "except the playing clip's entry" needed an owner of that id. |
+| 7 | http media (and thumbnails) are allowed whenever the ESPN endpoints are a debug override (`apiBase != API_BASE`); the URL's origin is not compared with the override's. | `EspnVideoMapper.entry` takes one Boolean; a debug build only. |
+| 8 | A record that maps to nothing (no https HLS, a device list without `settop`, an unknown coverage type, the wrong id) is `ClipResult.Failed(BAD_BODY)`, which the UI words as "This video can't play on this device" (§3.4). The record is mapped with `atMs = null` and the time rule applied afterwards, so an expired or embargoed record is `Expired`, not `BAD_BODY`. A 401 on a record is mapped to `HTTP_429` by the resolver (EspnHttp's rule is 403 and the 202 only, as §5.3 says). | §4.2 listed the HTTP outcomes but not a 200 that cannot play. |
+| 9 | The WAF rule sits in `EspnHttp.classify`, before the status `when`: the day board's 403, which was `HTTP_OTHER`, is now `HTTP_429` (one assertion in `EspnScoreSourceTest.statusCodesAndHtml404s` updated). `EspnScoreSource`'s own `403 → 429` mappings are now no-ops and were left (commit-0 file). `Answer.code` still carries 403. | Arch M6: every ESPN call. |
+| 10 | `EspnHttp.decodeCapped(input, serializer, cap)` (internal, the body of `classify`'s 200 branch, unchanged in behaviour) so `EspnSummaryDecodeTest` measures the transport's own decode on the test thread. | The decode otherwise runs on OkHttp's thread, where `ThreadMXBean` cannot attribute it. |
+| 11 | NFL `FinalFacts`: `recapPosted` = a RECAP clip in the detail offered at `now + skew`, or the board's `media.recapId` offered by `recapExpiresMs` (a null expiry counts as posted); `playClips` = the detail lists any PLAY clip. The NHL rule is unchanged. | §5.2, arch M7: an expired highlight is not "posted", so it never ends the 2 h wait early (it is ≥ 48 h old anyway). |
+| 12 | `ClipRendition` holds three constants: `LOW_RAM_MAX_WIDTH = 1280` beside the height / fps pair. | §4.5 wrote `setMaxVideoSize(1280, …)` with a literal. |
+| 13 | Test-only edits outside the P2 list: `player/…/controller/fakes/Fakes.kt` (`FakeEngine.isLowRam` `val` → `var`), the NHL repository test's NFL-BoardOnly case narrowed to the CHL (the NFL cases are in the new `GameDetailRepositoryNflTest`), and the `EspnScoreSourceTest` assertion of row 9. | Needed for the rendition test and for the NFL routing, which the old cases asserted against. |
+| 14 | Fake panel: NYJ @ NE (401899003) carries the `sports_nfl_clips` mode's clips; week 8's DEN @ SEA (401898001) always an expired highlight; the featured KC @ BUF never lists clips (the no-clip game, live and final). The 59.94 fps variant is the panel's 50 fps clip declared at 59.94. Summary faults are `sports_nfl_faults.summary_status` / `summary_pad_kb` / `summary_stall_ms` (§16 row 14 named the first two). | §8.4 named the modes, not which game carries them. |
+| 15 | Cadence tests that depend on P1's NFL rules (the 15 s phase-change floor, the 30 min PLAY wait) are written to hold with or without them (`liveToFinalSwitchesTheCadence` bounds the final read by the 5 min final cadence). Integration can tighten that bound to 15 s after P1. | P2 tests on commit 0 + P2 alone. |
+
+### 17.3 P3 notes (UI, 2026-11-25)
+
+P3 built §2, §3 and the `:ui` half of §4 on commit 0 with hand-made `GameDetail`s (P1's mapper and P2's sources are stubs
+in its worktree). These are the places where the code needed something the design did not say, or said differently.
+
+| # | What | Why |
+|---|---|---|
+| 1 | The fitted summary lines measure in design px: `HubPanel` divides `rememberHubMeasure()` (device px) by the density before `HubPanelContents.build`; the headline keeps the device-px measure. | §2.4 compares with the 664 px line; the commit-0 measure answers device px. |
+| 2 | "Ended" for the highlight wait and the captions is `startUtcMs + HUB_NFL_GAME_LENGTH_MS` (no contract carries an end time). < 2 h: Highlights soon; < 48 h: "ESPN didn't post highlights"; else "ESPN removes videos after a few days". A highlight that was listed (a detail RECAP clip, or the board's `recapId` with `recapExpiresMs`) and is no longer offered always reads "removes videos". | §2.3 / §2.4 name the windows but not the clock they run on. A late-starting or long game shows "Highlights soon" a little longer; harmless. |
+| 3 | A board highlight with `recapExpiresMs == null` is trusted as offered. | §5.1 says the mapper always sets it; failing closed would hide every board highlight if it does not. |
+| 4 | Live line 2, with the detail loaded and no scoring play, reads "Latest score · No points yet": the grey Scoring slot's **visible** reason (UX M4 asks for one on screen as well as spoken). Within the §2.6 budget (live is 2 lines). | §2.3 gave the spoken reason only. |
+| 5 | A final whose detail is still loading keeps the board's two lines (Passing, Rushing), as §2.5 does for the failed state. Pre-game and live loading show only what §2.5 says. | A final would otherwise flash an empty summary. |
+| 6 | `Leader.name` is taken as ESPN's raw `shortName` ("J. Burrow", "A. St. Brown"); the UI applies §2.4's after-the-first-". " rule. **P1 must not pre-strip it** (the rule is not idempotent: "St. Brown" would become "Brown"). | §6.1 does not say which form the mapper stores. |
+| 7 | "+n more" in the injury report counts `GameDetail.injuries` per team beyond `HUB_NFL_INJURIES_PER_TEAM`, so the mapper must pass **every** Out / Doubtful / Questionable line (§5.3's "≤ 6 shown per team, all counted" has no count field). | Contract gap; the UI degrades to no "+n more" if the list is cut to 6. |
+| 8 | `BoxTable.columns` may be ESPN's keys (`completions/passingAttempts`, `QBRating`, …) or the sheet's words; `boxColumnLabel` maps the keys and shows anything else as given. Values are drawn in column order, "–" when short. | §6.1 leaves the column form open. |
+| 9 | The situation line's "CIN ball" is its semibold label; Kickoff, After the score and the delay line have none. The spoken form keeps every piece the board gave (the dropped Timeouts are also read on their extra row). | §2.4's "label 600" names no label for this line. |
+| 10 | Header and info rows of the Scoring and Matchup sheets never take focus. `HubSheetFrame` gains `focusableRows` (none focusable: the frame's title holds focus, so Back works) and `scrollTo` (the open scrolls to the label rows above the initial row, so a section header shows with its first row). The NHL Matchup also scrolls to its first header now (no pixel change in any golden; it was scrolled one row down before). | §3.1 makes the rows non-focusable without saying where focus goes when nothing else is listed. |
+| 11 | `HubLogo` gains `codeColor` (the code shown until the logo loads): the scoring row passes the row's ink, so the code is readable on the focused (light) row. Cards keep `Fg60`. | Found on the golden. |
+| 12 | Three strings were missing from §6.8 and live in a new file, `strings_sports_hub_p3.xml`: the plurals for spoken records ("6 wins, 4 losses", "1 tie"), "%1$s at %2$s · Video: ESPN" (an ESPN clip not in the More videos list) and "Video: ESPN" (no game). The lead may fold them into `strings_sports_hub.xml`. | §3.3 wants "Video: ESPN" on every ESPN clip; §3.7 wants records spoken. |
+| 13 | NFL toasts: VIDEO_UNAVAILABLE / VIDEO_LATER use the ESPN twins, VIDEO_REMOVED (`NotFound`) uses "ESPN removed this video; …", VIDEO_REFUSED (ESPN never refuses, §4.2) uses "ESPN's video service didn't answer". The league comes from `ClipSession.lastRequested`. | §3.4 lists the words, not the mapping per kind. |
+| 14 | `SportsViewModel.playClips` refuses a clip `ClipOffer` no longer holds (the VIDEO_EXPIRED toast, nothing streamed), and hands the session the same check: `ClipSession.play(queue, i, offered)` skips refused entries when it advances ("Up next" names the next offered one). | §4.3 lists the checks; this is where the sheet rows and the queue meet it. |
+| 15 | `NflHubUi.detailed` is true; until P2 removes the repository's guards an NFL game is `BoardOnly`, which the NFL panel draws as loading (labels with "–"). The final NFL panel draws the channel line for a catch-up airing (as the NHL). | §16 note 10. |
+| 16 | The grey Matchup slot (pre-game, no rows) speaks no reason: §6.8 has no string for it. It is grey only while the detail loads or when ESPN lists no leaders, last five or injuries. | Gap for the lead. |
+| 17 | The CHL panel's line switched to `sports_hub_more_soon_chl` (§16 note 5). | §6.7. |
+| 18 | Measured slot sets (Paint, the panel's fonts; px of 664 at 0.9 / Default / Larger / Largest): ▶ Highlights · Scoring (12) · Box score 545 / 592 / 570 / 597; ▶ From start … 549 / 594 / 572 / 602; Highlights soon … 569 / 620 / 602 / 631; No highlights … 546 / 594 / 573 / 599; ↻ Retry · Scoring · Box score 458 / 491 / 461 / 482; Following ✓ · Channels (36) · Scoring (12) 572 / 627 / 607 / 637; + Follow · Channels (36) · Scoring (12) 539 / 588 / 564 / 592; Following ✓ · Channels (36) · Matchup 545 / 596 / 573 / 599. §2.6's height table holds exactly (226 / 234 / 172 / 188 / 133 / 264 / 133). | §2.3's table is advance-width sums; `HubPanelFitTest` asserts these. |
+| 19 | Goldens: 21 new `sports-tab/nfl-hub-*.png` (§8.3's list; the Scoring sheet's ESPN case opens on a More videos row so both video sections are in the shot). Every existing NHL / CHL / NFL-bug hash is unchanged: no existing golden shows a grey Recap soon, so the no-glyph rule changes no pixel, and no CHL golden shows the reworded line. | `sports-hashes.txt` header note of 2026-11-25. |
+
+---
+
+## 18. Integration (2026-11-25)
+
+The integration pass (code only; no emulator) wired P1's mapper, P2's sources and P3's UI with no stand-ins and closed
+the contract gaps of §16–§17. Every change is the smallest that resolves a gap one way; nothing deferred (§15) was built.
+
+### 18.1 The real pipeline, end to end
+
+- `core/src/testFixtures/…/hub/NflHubPipeline.kt` names the cases (pre-game GB @ LAR; live GB @ LAR; final with a
+  highlight, MNF; final whose highlight expired, PIT @ PHI after 2026-11-26T21:29Z; final with no clip, MIA @ BUF; and an
+  edited pre-game with "A. St. Brown" and 17 GB injuries), the board snapshot each is shown with (the real week-11 board
+  through `EspnMapper.board` where it lists the game), and `expected(case)`: the real `EspnDetailMapper` at
+  `wall + skew` with the debug-override http rule, plus the source's `clockSkewMs` / `serverDateMs`.
+- `:data` `NflHubPipelineDataTest`: each case's body from a MockWebServer → `EspnDetailSource` (no `mapDetail`: the real
+  mapper) → the app's NFL route of `DetailFetcher` → `GameDetailRepositoryImpl` (real time) publishes exactly
+  `expected(case)`; the box score comes through the loop's `Input.Box` from the same single request; the catalog holds
+  every offered clip with the same skew; the resolver plays a summary clip from that catalog with no record lookup; the
+  kill switch's router answers `NotFound`. One request in flight at a time held over every case.
+- `:ui` `NflHubPipelineUiTest`: `:ui` cannot see `:data`'s internal classes, so it publishes `expected(case)` (proved
+  above to be what the repository publishes) into `SportsViewModel` → `HubLeagues` / `NflHubUi` → `HubPanelContents`
+  (rows, summary lines, media, slots, spoken reasons) and the Scoring, Box score (through `onSlot` and the repository's
+  box) and Matchup sheets. P3's hand-built `NflHubTestKit` tests stay; P2's stand-in mapper (`EspnHubTestSupport`) stays
+  for the transport tests, complemented by the real-pipeline tests.
+- Hilt: `SportsModule` binds `ClipResolvers` (NHL → `NhlClipResolver`, NFL → `EspnClipResolver`) and
+  `GameDetailRepositoryImpl` (with `EspnDetailSource` and `EspnClipCatalog`, both `@Singleton` `@Inject`);
+  `:app:assembleDebug` compiles the graph.
+
+### 18.2 Contract gaps, each resolved one way
+
+| # | Gap | Resolution |
+|---|---|---|
+| a | `httpOk` (P1 #2/#6, P2 #7) | **One rule**: `EspnVideoMapper.httpOkFor(logoBase)`, true only when the ESPN endpoints are not ESPN's own (the debug override, which only a debuggable build loads). `EspnEndpoints.httpMediaOk` applies it; the board mapper applies it to its logo base (was "the logo base is http"); `EspnDetailSource` now calls `EspnDetailMapper.detail(…, httpOk)` (it called the three-argument form, so detail clips and headshots were never offered on the fake panel) and uses it for the catalog; `EspnClipResolver` for records. `EspnEndpoints.LOGO_BASE` is `EspnVideoMapper.PRODUCTION_LOGO_BASE`. Test: production endpoints with http media offer no clip and no headshot. |
+| b | `clockSkewMs` / `serverDateMs` ownership (P1 #12, P2 #4/#5) | The source sets both (`serverDateMs` is now always the answer's `Date`); the mapper leaves the defaults. The view model keeps the newest NFL detail's skew (`espnSkewMs`) for the cards' board chips and their timer (`HubCard(skewMs)`, `nextOfferChange(…, skewMs)`), so every UI offer check runs at `now + skew` (§4.3); the resolver's catalog holds the same skew. The board mapper still evaluates its highlight at the board's own `Date`. |
+| c | Leader surname (P1 #3, P3 #6) | `Leader.name` is ESPN's raw `shortName`; `NflHubUi.shortName` delegates to `EspnDetailMapper.leaderSurname` (one implementation), applied only where names are drawn. "A. St. Brown" → "St. Brown" and "J. Cook III" → "Cook III" through the real pipeline. |
+| d | Injuries count (P1 #4, P3 #7) | `GameDetail.injuryCounts: Map<Side, Int> = emptyMap()` (appended, defaulted): every qualifying line ESPN listed. The mapper now keeps the `HUB_NFL_INJURIES_PER_TEAM` lines drawn (was 12) and the sheet's "+n more" is the count minus those (a side absent from the map counts its lines). |
+| e | Box score columns (P3 #8) | `BoxTable.columns` are ESPN's stat keys (stable; KDoc on `BoxTable`); `boxColumnLabel` words them from `:ui` resources and no longer accepts words (or `adjQBR`, which the mapper never emits). |
+| f | Game end time (P3 #2) | No source carries it within the budget: the only end instant is `drives…plays[].wallclock` of "END GAME", inside the 336–414 KB `drives` the parse skips by design (§5.3); the summary's header and `scoringPlays` and the board carry none. **Kept the estimate** (start + `HUB_NFL_GAME_LENGTH_MS`) for the panel's "Highlights soon" window; the repository's cadence still uses the instant it saw the game turn FINAL when it did. |
+| g | `Failed(BAD_BODY)` clip (P2 #8) | Already `Failure.NOT_PLAYABLE` → `VIDEO_NOT_PLAYABLE` → "This video can't play on this device. Scores and stats still work." (§3.4); a view-model test now covers it for an NFL clip. |
+| h | Phase-change polling (P1 #1) | `SportsConstants.HUB_NFL_PHASE_LAG_TRIES` (3). The repository counts good answers in a row whose phase still lags the board (`DetailPollPolicy.lagging`); `nextAt(…, lagTries)` (appended, defaulted) forces the 15 s floor only below the cap, then the phase's own interval (live 60 s; FINAL `HUB_DETAIL_IDLE_MS`, even when no final wait holds, since the detail is not final yet). P2's loose `liveToFinalSwitchesTheCadence` now asserts the read at once (30 s after the live answer); new tests for the 15 s floor and the capped lag (15 s × 3, then 5 min). |
+| i | `EspnScoreSource` 403 → 429 (P2 #9) | Removed (three places): `EspnHttp.classify` already answers 403 with `Failed(HTTP_429, Retry-After, received)`, so they were identity copies. |
+| j | P3 strings (P3 #12, #16) | `strings_sports_hub_p3.xml` folded into `strings_sports_hub.xml` (file deleted). The grey Matchup slot speaks `sports_hub_reason_matchup_loading` ("Matchup details are still loading. Try again in a moment.") or `sports_hub_reason_matchup_none` ("ESPN hasn't posted matchup details for this game yet. Check back closer to kick-off."). |
+| k | The fake panel's summary through the real DTO | `tools/fakepanel/test_nfl_summary_golden.py` pins three small samples (`fakepanel-summary-{pre,live,final}.json` in the shared fixtures, origin rewritten to `http://fakepanel.invalid`, no `drives` padding): the running panel must still produce their exact shape (keys, JSON types, key order). `NflHubPipelineDataTest` decodes and maps each through `EspnDetailSource` and the real mapper. |
+
+### 18.3 Review-level checks
+
+- League branching: the only `when (group)` is `HubLeagues.of`. There are still `group == LeagueGroup.NFL` tests outside
+  the `HubLeagueUi` implementations (HubPanel `HubSlots.forAction` / `playableRecap`, `SportsViewModel` WATCH_RECAP,
+  offer timer and video off, `HubCard.cardHighlights`, `MatchupSheet`, `BoxScoreSheet`, `GoalsSheet`,
+  `ClipPlayerLayer`): left for the code review (moving them is more than an integration fix).
+- Logs: ESPN lines carry a path label, a result kind, a content type and a length; clip URLs `Redact.host` only. No
+  ESPN data is persisted (the catalog, the detail LRU and the box slot are memory). No odds field is declared or read.
+- The kill switch: with `ESPN_VIDEO_ENABLED = false` the NFL panel is `videoOff`; the real-data test shows the rows and
+  summary unchanged, matchup art with "ESPN videos aren't available right now", no playable highlight, Scoring and Box
+  score usable, the Scoring sheet's info row in place of the video rows.
+- Memory (the real pipeline: capped decode + `EspnDetailMapper.detail` + `box` + the catalog's video mapping), MNF padded
+  to a 600 KB body (613 794 B): **2.43 MB allocated per parse** on the JVM (the decode 2.36 MB, all mapping 69 KB);
+  bounded at 6 MB in `NflHubPipelineDataTest`. Within §5.3's 1–2 MB-order churn per parse; the device check compares
+  against this.
+- Fixtures and tests use `.invalid` hosts (two P2/P3 tests that used `cmp-espn.media.dssott.com` and `img.test` were
+  changed); ESPN's API hosts appear only as the production endpoint constants and in docs.
+
+### 18.4 The live capture (GB @ LAR, 2026-11-26T02:04Z, Q2 11:29, LAR 13–3)
+
+Two captures were in by the end of the pass (02:04Z, 02:44Z; the 03:35Z one was not). The first (`live-sum-401873079-0204.json`, 272 KB decoded / 28 KB gz; `live-sbevent-401873079-0204.json`) was
+reduced with `tools/espn/reduce_summary.py` into `summary-live-401873079-1.json` (29 KB) and, wrapped as `{events: [ … ]}`
+through the board reducer with logos rewritten to `img.invalid`, `scoreboard-event-live-401873079.json`. They replace P1's
+provisional Q1 body: `EspnDetailMapperTest.liveSecondQuarterFromTheRealCapture` (was `liveFirstQuarter_provisional`) and
+the pipeline's `LIVE` case (the board event through `EspnMapper.game`, the summary through the source). `-2` (halftime
+with a clip) and `-3` (Q4) are still hand-built and their tests stay `…_provisional`.
+
+What the real live shape showed, against what the mapper, the design and the fake panel assumed:
+
+| Area | Assumed | Real (live) | Change |
+|---|---|---|---|
+| `videos[]` in play | one OnePlay clip by halftime (provisional) | `[]` at Q2 11:29 (Netflix game, not ESPN-aired) | none needed; More videos stays empty; re-check at the later captures |
+| `article` | the Preview stays up in play (provisional) | **absent** in play | mapper already null-safe; fake panel now sends no `article` in play |
+| `leaders` | live: three categories (fake panel), GB without sacks (provisional) | all five categories listed; one nobody leads yet (`sacks`) has **no `leaders` key** | mapper already skipped it; reducer no longer writes `leaders: []` for it; fake panel sends the five, sacks without leaders |
+| Leader `value` | ≥ 0 | **negative** yards: value −8.0 with displayValue "3 CAR, **-** YDS" (no number) | mapper keeps negative values (it dropped the leader) |
+| `lastFiveGames` | pre-game only | absent in play, as assumed | — |
+| `injuries` | the week's report | the **game-day inactives**: every line "Out", mostly "Coach's Decision" | none (the Matchup sheet is pre-game); fake panel sends Out lines in play |
+| header `status` | `type` only (§16 #7) | also `displayClock`, `period`, `displayPeriod` (not declared; the board's clock is used) | — |
+| `boxscore.teams` | | `possessionTime` " 5:34" with a **leading space**; `rushingYards` "-8" | mapper already trimmed / parsed both; tested |
+| `boxscore.players` | three categories mapped | ten categories listed (passing … punting) | — (skipped by name) |
+| `scoringPlays[].id` | string | string, event id + sequence, **varying length** ("401873079344", "4018730791209") | — |
+| Top-level | | `odds`, `againstTheSpread`, `standings`, `format`, `meta`, `broadcasts`, `wallclockAvailable` too | undeclared, skipped; the reducer drops them (pickcenter stub blanked) |
+| board `situation` | `possession` with every down | after a kick-off touchback: down / distance / `possessionText` "GB 20", timeouts, **no `possession`** | handled (no "… ball" label); the fake panel always sends `possession` (left as is: it is the NFL bug's shared code) |
+| board `highlights` | | `[]` in play | — |
+| half-time header (02:44Z capture) | `STATUS_HALFTIME` → INTERMISSION | `type.name` "STATUS_HALFTIME", `id` "23", `state` "in", `displayClock` "0:00", period 2: as assumed | none; real fixture `summary-live-401873079-half.json` + `scoreboard-event-half-401873079.json`, tests `liveHalftimeFromTheRealCapture`, `halftimeFromTheRealCapture`, pipeline case `LIVE_HALFTIME` |
+| board `situation` at halftime | none | a **stale** down / distance / yard line and the timeouts, no `possession`, no `downDistanceText`; `lastPlay` "End of Half" (EH) | handled: the halftime break draws no situation line |
+| `videos[]` at halftime | ≥ 1 OnePlay (provisional `-2`) | still `[]` (and the board's `highlights` `[]`) | none; `-2` / `-3` stay provisional for the in-game clip and the embargo paths, which no capture has shown yet |
+
+---
+
+## 19. Code review changes (2026-11-26)
+
+The fix pass for `docs/review/2026-11-26-nfl-hub-code-review-data.md` (D: 1 Major, 10 Minor) and
+`…-code-review-ui.md` (U: 1 Major, 12 Minor, plus the leftover league checks). Each review file ends with a Resolution
+table mapping every finding. NHL and CHL behaviour is unchanged (the NHL resolver, cadence, `recapPosted`, end instant,
+frozen slots and Matchup sheet are as before; `:ui:sportsHashGate` proves the pixels).
+
+### 19.1 Data, core and tools
+
+| # | Change | Test |
+|---|---|---|
+| D1 (Major) | `EspnClipResolver.stream(fresh = true)` plays the same URL instead of `Failed(HTTP_OTHER)` (review option a): Try again after a transient failure recovers. A really dead URL 403s again → `CLIP_EXPIRED` → `ClipSession`'s one re-resolve per clip (`expiredRetriedIndex`) → the error card; each Try again costs at most one lookup and one re-resolve. `NhlClipResolver` ignores `fresh` (its `stream` is always one new lookup, the signed URL new each time), now tested. | `EspnClipResolverTest.freshWithTheSameUrlPlaysIt`, `ClipSessionTest.aStableUrlThatIsReallyDeadEndsAfterOneReResolve`, `NhlClipResolverTest.freshIsIgnoredStreamIsAlwaysOneNewLookup` |
+| D2 | `EspnDetailSource.mapDetail` is the non-null four-argument seam `(dto, id, atMs, httpOk) -> GameDetail?` defaulting to `EspnDetailMapper::detail`; the stand-in takes (and records) the flag. One code path. | `EspnDetailSourceTest.theStandInMapperReceivesTheHttpFlag` |
+| D3 | Embargoed clips are kept: `EspnDetailMapper.videoEntries` maps with no time check, then keeps entries not past `expires − margin` (`ClipOffer.listed`, new). The UI and the resolver still check `ClipOffer.offered` (embargo too), and `nextOfferChange` already armed the embargo lift, so the clip appears at that instant. The board's highlight still drops an embargoed entry (its `GameMedia` has no embargo field; the board re-reads). | `EspnDetailSourceTest.anEmbargoedClipIsKeptForTheEmbargoLift`, `EspnDetailMapperTest.embargoedClipsAreKeptButNotOffered`, `SportsViewModelNflReviewTest.anEmbargoedHighlightIsSoonThenOffered` |
+| D4 | The http rule fails closed: `EspnEndpoints.debugOverride` (true only from `fromOverride`) and `httpMediaOk = debugOverride && httpOkFor(logoBase)`; `EspnVideoMapper.httpOkFor` is now "the logo base is plain http" (any https base, ESPN's or not, is false). | `NflHubPipelineDataTest.theHttpMediaRuleFailsClosed`, `EspnScoreSourceTest.endpointOverrideParsing` |
+| D5 | The catalog is filled from the detail's own selection (`EspnDetailMapper.videoEntries`: highlight first, deduped, ≤ 24), so the highlight is always in both. | `EspnDetailSourceTest.theCatalogAndTheDetailShareOneSelection` (30 plays + the highlight last) |
+| D6 | With `ESPN_VIDEO_ENABLED = false` an NFL final waits for nothing: `recapPosted` true and `playClips` false (`GameDetailRepositoryImpl(espnVideo)`). | `GameDetailRepositoryNflTest.theKillSwitchSkipsTheFinalWaits` |
+| D7 | NFL only: a game seen turning FINAL whose last unfinished sighting (board or detail) is more than `HUB_NFL_END_SIGHTING_GAP_MS` (10 min) old ends at the start + game-length estimate, kept between that sighting and now. A game watched to its end still starts the wait at once; the NHL keeps "now". | `GameDetailRepositoryNflTest.aFinalSeenLongAfterTheLastLiveSightingUsesTheEndEstimate` (and the unchanged `theFinalWaitEndsTwoHoursAfterTheEnd`) |
+| D8 | Deferred (§15): mapper-derived expected values. Added hand-written spot values per case (venue, last score, a passer) on the repository's published detail. | `NflHubPipelineDataTest.spot` |
+| D9 | Fake panel `split_score`: 8 = TD + two-point, 15 = 7 + 8, 4 = two safeties; 2 is the only safety value. | `test_sports_nfl.TestSummary.test_odd_scores_never_make_a_one_point_safety` |
+| D10 | Fake panel `gone`: the media answer **403** (the player's `CLIP_EXPIRED`; 404 was not), the record 404, so the app's one fresh lookup ends in "ESPN removed this video". Doc, README and §8.4 / §8.5 corrected. | `test_sports_video.test_gone_lists_the_clips_but_the_master_403s_and_the_record_404s` |
+| D11 | `reduce_summary.py` writes blanked one-item stubs of `odds` and `againstTheSpread` (no odds values). The fake panel still sends neither (its own shape test forbids odds keys, the design's "no odds field" rule); the decoder's skip is covered from the real live fixture with those sections injected. | `EspnSummaryDecodeTest.theLiveCapturesOtherTopLevelSectionsAreSkipped` |
+| checked list | The board `highlights` tolerance under the production streaming decoder (`EspnHttp.decodeCapped`) is now a committed test. | `EspnBoardHighlightsStreamTest` |
+
+### 19.2 UI
+
+| # | Change | Test |
+|---|---|---|
+| U-M1 | NFL Matchup is pre-game only (`NflHubUi.matchupSlot`: `c.pre` and a focusable row). The view model closes an open Matchup sheet when the game leaves pre-game (`HubLeagueUi.matchupOpen`), and the screen sends focus to the panel's first usable slot when the view model closes a sheet with focus in the panel. A frozen set re-freezes to the new phase's default slots at a phase-group change (`HubLeagueUi.refreezeOnPhaseChange`, NFL only; the NHL keeps its set as before). `nflLeaderLine` drops a part whose number has no digit and draws "–" when nothing is left ("3 CAR, - YDS" → "–"). New reason string for a grey Matchup after kick-off. | `SportsViewModelNflReviewTest.matchupIsPreGameOnlyAndTheFrozenSetIsReEvaluatedAtKickoff`, `NflHubScreenFocusTest`, `NflSheetsReviewTest.aLeaderLineNeverDrawsAPartWithoutANumber` |
+| m1 | `NflHubUi.nextOfferChange` also returns "ended + 2 h" and "ended + 48 h" on a final without an offered highlight (wall clock, as the captions read it). | `SportsViewModelNflReviewTest.theHighlightWindowsAreOnTheOfferTimer` (`SportsViewModelNflTest`'s timer test now counts the two windows) |
+| m2 | `anyExpired` counts only `expires − margin ≤ now` (`ClipOffer.listed`): an embargoed highlight reads Highlights soon. | `anEmbargoedHighlightIsSoonThenOffered` |
+| m3 | WATCH_RECAP via `HubLeagueUi.recapRef`; nothing offered → `recapGoneToast` (NFL: VIDEO_EXPIRED, "ESPN removed this video…"). | `aFrozenHighlightThatJustExpiredSaysSo` |
+| m4 | Grey Matchup reason: failed (new `sports_hub_reason_matchup_failed`), loading, none, after kick-off. | `NflSheetsReviewTest.theGreyMatchupReasonSaysFailedOrLoading` |
+| m5 | `nflMatchupHasRows(d)` = the sheet's `any { focusable }` (shared `nflLeaders`). | `theMatchupSlotNeedsAFocusableRow`, `theMatchupRuleMatchesTheSheetsRows` |
+| m6 | Confirmed real by a Robolectric scroll test (both sheets failed before the fix). `HubSheetFrame` provides `LocalSheetRevealTop`; the first focusable `HubSheetRow` gaining focus scrolls the list to its top when it is not there. No golden changes: at open the list is already at its top. | `NflSheetsReviewTest.theMatchupHeadersComeBack…`, `theBoxScoreTableHeaderComesBack…` |
+| m7 | The Scoring sheet remembers the focused row's index; after a change that loses focus, `refocusIndex` picks the row now in its place, else the one before (`scoringNeighbour`). | `anExpiringFocusedVideoHandsFocusToItsNeighbour` |
+| m8 | After a clip, focus goes to `nearestUsableSlot(slots, lastSlot)` (a tie takes the later slot), else the card. | `theNearestUsableSlot` |
+| m9 | Confirmed real for results that wrap: at Larger / Largest two lines of results do not fit 96 px (34 + 2 + 2 × 34 at Largest) and were cut. The Last 5 row is `recentRowHeight()` = 96 × max(1, factor) (96 at Default: no golden changes). The real GB line fits one line at Largest. | `NflSheetsReviewTest.theLastFiveRowFitsAtTheLargestTextSize` (worst case: five road games) |
+| m10 | `PlayGlyph` builds its `Path` in `drawWithCache`. | goldens unchanged |
+| m11 | The CHL final rules have their test back (no catch-up: three empty slots, `enterPanel` null; a catch-up airing: Watch from start alone); the NFL test renamed. Behaviour unchanged. | `SportsViewModelHubTest.aFinalChlGameOffersWatchFromStartOnlyWithACatchUpAiring` |
+| m12 | "Video k of n" counts the session's queue (PLAY entries, its index), falling back to the panel's list. | `NflSheetsReviewTest.videoKOfNComesFromTheQueue` |
+| #1 | Behind `HubLeagueUi`: `slotFor` (rows 2–4 and Matchup), `playableRecap` (1), `recapRef` / `recapGoneToast` (7), `offeredRef` (9), `videoKilled` with the one `videoOffLeagues` set the screen reads (10), `nextOfferChange` (11), the skew by `HubSource.ESPN` (12), `detailCarriesScore` (13), `cardHighlights` (14). `Ctx.nhl` deleted (6). Rows 5, 8, 15–17 deferred (§15). | every existing NHL / CHL / NFL test and golden hash |

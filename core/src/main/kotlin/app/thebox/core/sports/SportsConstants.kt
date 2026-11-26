@@ -931,6 +931,53 @@ object SportsConstants {
     const val HUB_LOOKAHEAD_MIN = 720
     /** Stage T: the most rows `GuideQueries.teamChannelCandidates` returns per league (§8.2). */
     const val HUB_TEAM_QUERY_MAX = 400
+
+    // ---- (NFL hub commit 0, docs/design/m6-nfl-hub.md §10)
+
+    /** The decoded cap of ESPN's game summary (the largest sample is 641 KB). Over it = `BAD_BODY` (§5.3). */
+    const val ESPN_SUMMARY_MAX_BYTES = 2_097_152L
+    /** The decoded cap of one ESPN clip record (§4.2). */
+    const val ESPN_CLIP_RECORD_MAX = 65_536L
+    /** The NFL video kill switch (§4.1): false turns every NFL video row, slot, chip and poster disc off. */
+    const val ESPN_VIDEO_ENABLED = true
+    /** NFL pre-game: the summary is re-read every 30 min (§5.2). */
+    const val HUB_NFL_PRE_MS = 1_800_000L
+    /** NFL live and both kinds of break: a plain 60 s loop, not bucket-aligned (§5.2). */
+    const val HUB_NFL_LIVE_MS = 60_000L
+    /** A phase change is due at once, but no earlier than this after the last good answer (§5.2). */
+    const val HUB_NFL_REFETCH_FLOOR_MS = 15_000L
+    /**
+     * (Integration §18) Forced phase-change re-reads in a row whose answer still lags the board (ESPN's summary header
+     * behind the board's FINAL); after this many the phase's normal cadence applies, so a lagging header cannot hold the
+     * 15 s floor indefinitely.
+     */
+    const val HUB_NFL_PHASE_LAG_TRIES = 3
+    /** NFL final: re-read every `HUB_DETAIL_IDLE_MS` until a highlight is offered, for this long after the end (§5.2). */
+    const val HUB_NFL_HIGHLIGHT_WAIT_MS = 7_200_000L
+    /** NFL final: also while the detail lists single-play clips, for this long after the end (§5.2). */
+    const val HUB_NFL_PLAYS_WAIT_MS = 1_800_000L
+    /** The end estimate of an NFL game first seen final: start + 3 h 15 min (§5.2). */
+    const val HUB_NFL_GAME_LENGTH_MS = 11_700_000L
+    /**
+     * (NFL hub code review 2026-11-26, data #7) A game seen unfinished longer ago than this before it is seen FINAL did not
+     * end "now": the final wait starts from the start + game-length estimate instead (kept between the two sightings).
+     */
+    const val HUB_NFL_END_SIGHTING_GAP_MS = 600_000L
+    /** A clip this close to its expiry is never offered (§4.3). */
+    const val HUB_CLIP_EXPIRY_MARGIN_MS = 300_000L
+    /** The effective expiry of a clip without `expirationDate`: 48 h after it was published (§4.3). */
+    const val HUB_CLIP_DEFAULT_LIFE_MS = 172_800_000L
+    /** The clamp of the server-date clock skew (§4.3). */
+    const val HUB_CLOCK_SKEW_MAX_MS = 3_600_000L
+    /** Parse truncation: scoring plays and clips kept per game (§5.3). */
+    const val HUB_NFL_MAX_PLAYS = 60
+    const val HUB_NFL_MAX_CLIPS = 24
+    /** Athletes per box table (§3.5). */
+    const val HUB_NFL_BOX_LINES = 8
+    /** Injury lines shown per team in the Matchup sheet, then "+n more" (§3.6). */
+    const val HUB_NFL_INJURIES_PER_TEAM = 6
+    /** The in-memory clip catalog's LRU size (§4.2). */
+    const val ESPN_CLIP_CATALOG_MAX = 64
 }
 
 /**

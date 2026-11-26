@@ -778,5 +778,230 @@ class TestHubBoardFacts(NflCase):
         self.assertEqual({"away": [5, 5, 5, 5], "home": [6, 6, 6, 5]}, self.quarters(fin))
 
 
+
+SUMMARY = "/apis/site/v2/sports/football/nfl/summary?event="
+
+
+class TestSummary(NflCase):
+    """(NFL hub section 8.4) The game summary: the kept sections in the shapes the app's DTO reads (EspnSummaryDto),
+    pre-game / live / final, team order by section, the padded `drives`, gzip, the faults."""
+
+    def summary(self, eid, headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("GET", SUMMARY + eid, headers=headers or {})
+        r = c.getresponse()
+        body = r.read()
+        c.close()
+        return r.status, {k.lower(): v for k, v in r.getheaders()}, body
+
+    def doc(self, eid):
+        st, h, body = self.summary(eid)
+        self.assertEqual(200, st, body[:200])
+        self.assertEqual("application/json", h["content-type"])
+        return json.loads(body)
+
+    def check_shape(self, d):
+        """The leaves EspnSummaryDto declares, with their JSON types (a wrong type would be BAD_BODY in the app)."""
+        comp = d["header"]["competitions"][0]
+        self.assertIsInstance(comp["status"]["type"]["state"], str)
+        self.assertEqual(["home", "away"], [c["homeAway"] for c in comp["competitors"]], "header: home first")
+        for c in comp["competitors"]:
+            self.assertIsInstance(c["record"], list)
+            self.assertEqual("total", c["record"][0]["type"])
+            self.assertIsInstance(c["team"]["id"], str)
+            self.assertIsInstance(c["team"]["abbreviation"], str)
+        home_id = comp["competitors"][0]["team"]["id"]
+        away_id = comp["competitors"][1]["team"]["id"]
+        self.assertEqual([away_id, home_id], [t["team"]["id"] for t in d["boxscore"]["teams"]], "boxscore: away first")
+        for t in d["boxscore"]["teams"]:
+            for stat in t["statistics"]:
+                self.assertIsInstance(stat["name"], str)
+                self.assertIsInstance(stat["displayValue"], str)
+        self.assertEqual([home_id, away_id], [t["team"]["id"] for t in d["leaders"]], "leaders: home first")
+        for t in d["leaders"]:
+            for cat in t["leaders"]:
+                if "leaders" not in cat:  # a live category nobody leads yet (the real capture's sacks)
+                    self.assertNotEqual("pre", comp["status"]["type"]["state"])
+                    continue
+                lead = cat["leaders"][0]
+                self.assertIsInstance(lead["displayValue"], str)
+                self.assertIsInstance(lead["value"], float)
+                self.assertIn(". ", lead["athlete"]["shortName"])
+                self.assertIsInstance(lead["athlete"]["headshot"]["href"], str)
+        self.assertEqual([home_id, away_id], [t["team"]["id"] for t in d["injuries"]], "injuries: home first")
+        for t in d["injuries"]:
+            for i in t["injuries"]:
+                self.assertIsInstance(i["athlete"]["position"]["abbreviation"], str)
+                self.assertIsInstance(i["details"]["type"], str)
+        self.assertIsInstance(d["gameInfo"]["venue"]["fullName"], str)
+        if comp["status"]["type"]["state"] == "in":
+            self.assertNotIn("article", d, "no article in play (the real live capture)")
+        else:
+            self.assertIsInstance(d["article"]["headline"], str)
+        self.assertIsInstance(d["videos"], list)
+        for key in ("odds", "againstTheSpread", "predictor"):
+            self.assertNotIn(key, d)
+
+    def test_pre_game(self):
+        d = self.doc("401899002")
+        self.check_shape(d)
+        self.assertEqual("pre", d["header"]["competitions"][0]["status"]["type"]["state"])
+        self.assertNotIn("scoringPlays", d, "absent, not empty, as ESPN's")
+        self.assertNotIn("drives", d)
+        self.assertNotIn("players", d["boxscore"])
+        names = [s["name"] for s in d["boxscore"]["teams"][0]["statistics"]]
+        for n in ("totalPointsPerGame", "totalPointsPerGameAllowed", "yardsPerGame", "yardsPerGameAllowed"):
+            self.assertIn(n, names)
+        cats = [c["name"] for c in d["leaders"][0]["leaders"]]
+        self.assertEqual(["passingYards", "rushingYards", "receivingYards", "sacks", "totalTackles"], cats)
+        self.assertEqual("5.5", d["leaders"][0]["leaders"][3]["leaders"][0]["displayValue"])
+        self.assertEqual(2, len(d["lastFiveGames"]))
+        self.assertEqual(5, len(d["lastFiveGames"][0]["events"]))
+        self.assertIn("Injured Reserve", [i["status"] for i in d["injuries"][0]["injuries"]])
+        self.assertEqual("Preview", d["article"]["type"])
+        self.assertEqual([], d["videos"])
+
+    def test_live_scoring_plays_follow_the_timeline(self):
+        self.at("q3 KC ball", 3)
+        d = self.doc(sports_nfl.FEATURED_ID)
+        self.check_shape(d)
+        self.assertEqual("in", d["header"]["competitions"][0]["status"]["type"]["state"])
+        plays = d["scoringPlays"]
+        kinds = [p["type"]["abbreviation"] for p in plays]
+        self.assertEqual(["TD", "FG", "TD", "SF", "TD"], kinds)
+        self.assertEqual("36", plays[-1]["type"]["id"], "the defensive touchdown")
+        self.assertIn("Kick", plays[0]["text"])
+        self.assertEqual((7, 0), (plays[0]["awayScore"], plays[0]["homeScore"]), "the extra point folds into the TD")
+        self.assertEqual((14, 13), (plays[-1]["awayScore"], plays[-1]["homeScore"]), "the two-point try too")
+        self.assertIsInstance(plays[0]["id"], str)
+        self.assertEqual(1, plays[0]["period"]["number"])
+        stats = {s["name"]: s["displayValue"] for s in d["boxscore"]["teams"][0]["statistics"]}
+        self.assertEqual("251", stats["totalYards"], "the window's yards")
+        self.assertRegex(stats["thirdDownEff"], r"^\d+-\d+$")
+        self.assertRegex(stats["possessionTime"], r"^\d+:\d\d$")
+        self.assertEqual(3, len(d["boxscore"]["players"][0]["statistics"]))
+        self.assertIn("drives", d)
+        self.assertEqual([], d["videos"], "the featured game is the no-clip game")
+
+    def test_live_totals_grow(self):
+        self.at("q1 BUF 2nd and 7", 3)
+        early = {s["name"]: int(s["displayValue"]) for s in self.doc(sports_nfl.FEATURED_ID)["boxscore"]["teams"][0]["statistics"]
+                 if s["name"] == "totalYards"}
+        self.at("end 4th", 3)
+        late = {s["name"]: int(s["displayValue"]) for s in self.doc(sports_nfl.FEATURED_ID)["boxscore"]["teams"][0]["statistics"]
+                if s["name"] == "totalYards"}
+        self.assertGreater(late["totalYards"], early["totalYards"])
+
+    def test_final_with_highlight_and_the_clip_modes(self):
+        d = self.doc("401899003")
+        self.check_shape(d)
+        self.assertEqual("Recap", d["article"]["type"])
+        cov = [v["tracking"]["coverageType"] for v in d["videos"]]
+        self.assertEqual(["Final Game Highlight", "OnePlay", "OnePlay", "OnePlay"], cov)
+        v = d["videos"][0]
+        self.assertIsInstance(v["id"], int)
+        self.assertTrue(v["links"]["source"]["HLS"]["href"].endswith("/espn-media/%d/master.m3u8" % v["id"]))
+        self.assertIn("settop", v["deviceRestrictions"]["devices"])
+        self.assertEqual(sum(1 for p in d["scoringPlays"]) > 0, True)
+        _, j = self.get_json(BOARD)
+        fin = next(x for x in j["events"] if x["id"] == "401899003")
+        self.assertEqual([v["id"]], [x["id"] for x in self.comp(fin)["highlights"]], "the board lists the highlight only")
+        self.panel.cfg["sports_nfl_clips"] = "single"
+        self.assertEqual(1, len(self.doc("401899003")["videos"]))
+        self.panel.cfg["sports_nfl_clips"] = "none"
+        self.assertEqual([], self.doc("401899003")["videos"])
+        _, j = self.get_json(BOARD)
+        self.assertNotIn("highlights", self.comp(next(x for x in j["events"] if x["id"] == "401899003")))
+        self.panel.cfg["sports_nfl_clips"] = "expired"
+        import datetime as dt
+        import time
+        exp = self.doc("401899003")["videos"][0]["timeRestrictions"]["expirationDate"]
+        self.assertLess(dt.datetime.strptime(exp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).timestamp(), time.time())
+        self.panel.cfg["sports_nfl_clips"] = "expiring"
+        exp = self.doc("401899003")["videos"][0]["timeRestrictions"]["expirationDate"]
+        left = dt.datetime.strptime(exp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).timestamp() - time.time()
+        self.assertTrue(0 < left < 300, left)
+        self.panel.cfg["sports_nfl_clips"] = "espn"
+
+    def test_final_with_an_expired_clip_and_the_no_clip_game(self):
+        d = self.doc("401898001")
+        self.check_shape(d)
+        self.assertEqual(1, len(d["videos"]))
+        self.assertEqual("Final Game Highlight", d["videos"][0]["tracking"]["coverageType"])
+        self.at("final", 5)
+        d = self.doc(sports_nfl.FEATURED_ID)
+        self.assertEqual("post", d["header"]["competitions"][0]["status"]["type"]["state"])
+        self.assertEqual([], d["videos"])
+        self.assertEqual((22, 16), (d["scoringPlays"][-1]["awayScore"], d["scoringPlays"][-1]["homeScore"]))
+
+    def test_odd_scores_never_make_a_one_point_safety(self):
+        # (NFL hub code review 2026-11-26, data #9) 8 = TD + two-point conversion, 15 = 7 + 8, 4 = two safeties; the
+        # only safety value is 2.
+        for n in range(0, 61):
+            parts = sports_nfl.split_score(n)
+            self.assertEqual(n, sum(parts), n)
+            if n != 1:
+                self.assertNotIn(1, parts, n)
+            self.assertTrue(set(parts) <= {1, 2, 3, 7, 8}, (n, parts))
+        self.assertEqual([8], sports_nfl.split_score(8))
+        self.assertEqual([8, 7], sports_nfl.split_score(15))
+        self.assertEqual([2, 2], sports_nfl.split_score(4))
+        # Through the summary: a scripted final at 15–22 lists no 1-point play and no "Safety" worth 1.
+        self.admin("/admin/config", {"sports_nfl_script": {"401899002": {"away": 15, "home": 22, "state": "post", "name": "STATUS_FINAL", "period": 4, "clock": 0}}})
+        plays = self.doc("401899002")["scoringPlays"]
+        prev = {"away": 0, "home": 0}
+        for p in plays:
+            delta = (p["awayScore"] - prev["away"]) + (p["homeScore"] - prev["home"])
+            prev = {"away": p["awayScore"], "home": p["homeScore"]}
+            self.assertNotEqual(1, delta, p["text"])
+            if p["type"]["abbreviation"] == "SF":
+                self.assertEqual(2, delta, p["text"])
+        self.assertEqual((15, 22), (plays[-1]["awayScore"], plays[-1]["homeScore"]))
+        self.assertTrue(any("Two-Point" in p["text"] for p in plays))
+
+    def test_key_order_differs_by_event(self):
+        odd = list(self.doc("401899003").keys())
+        even = list(self.doc("401899002").keys())
+        self.assertEqual("header", odd[0])
+        self.assertEqual("header", even[-1])
+
+    def test_padding_and_gzip(self):
+        self.at("q2 BUF ball", 3)
+        self.panel.cfg["sports_nfl_summary_pad_kb"] = 600
+        st, h, body = self.summary(sports_nfl.FEATURED_ID)
+        self.assertGreater(len(body), 600 * 1024)
+        self.assertLess(len(body), 700 * 1024)
+        st, h, gz = self.summary(sports_nfl.FEATURED_ID, {"Accept-Encoding": "gzip"})
+        self.assertEqual("gzip", h["content-encoding"])
+        import gzip
+        self.assertEqual(json.loads(body)["header"]["id"], json.loads(gzip.decompress(gz))["header"]["id"])
+        self.assertLess(len(gz), len(body) // 5)
+        self.panel.cfg["sports_nfl_faults"] = {"summary_pad_kb": 2100}
+        st, _, body = self.summary(sports_nfl.FEATURED_ID)
+        self.assertGreater(len(body), 2 * 1024 * 1024, "over the app's 2 MiB cap")
+        self.panel.cfg["sports_nfl_summary_pad_kb"] = 400
+
+    def test_faults_and_errors(self):
+        self.panel.cfg["sports_nfl_faults"] = {"summary_status": 202}
+        st, h, body = self.summary("401899003")
+        self.assertEqual(202, st)
+        self.assertEqual("challenge", h["x-amzn-waf-action"])
+        self.assertIn(b"<html", body)
+        self.panel.cfg["sports_nfl_faults"] = {"summary_status": 403}
+        self.assertEqual(403, self.summary("401899003")[0])
+        self.panel.cfg["sports_nfl_faults"] = {"summary_status": 429, "retry_after": 30}
+        st, h, _ = self.summary("401899003")
+        self.assertEqual((429, "30"), (st, h["retry-after"]))
+        self.panel.cfg["sports_nfl_faults"] = {"summary_status": 503}
+        self.assertEqual(503, self.summary("401899003")[0])
+        self.panel.cfg["sports_nfl_faults"] = {}
+        self.assertEqual(404, self.summary("401800000")[0])
+        self.assertEqual(400, self.summary("abc")[0])
+        for bad in ({"summary_status": "x"}, {"summary_pad_kb": -1}, {"summary_pad_kb": True}, {"summary_stall_ms": -5}):
+            with self.assertRaises(ValueError):
+                sports_nfl.check_config({"sports_nfl_faults": bad})
+        sports_nfl.check_config({"sports_nfl_faults": {"summary_status": 202, "summary_pad_kb": 2100, "summary_stall_ms": 10}})
+
+
 if __name__ == "__main__":
     unittest.main()

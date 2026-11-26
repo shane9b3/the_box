@@ -60,6 +60,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   can draw a frame (A-S2).
  * - `CLIP_EXPIRED` → exactly one fresh lookup and `playClip` at the playhead per clip; any other failure, or a second
  *   expiry, → [State.Failed] (the layer's Try again / Back card). `controller.retry()` is never called on a clip.
+ * - (NFL hub §4.2, §4.6) That re-resolve and Try again call `stream(ref, fresh = true)` (the ESPN resolver then bypasses
+ *   its catalog); every other lookup `fresh = false`. "Up next" applies to GOAL and PLAY clips. On an auto-advance an
+ *   entry that [play]'s `offered` check refuses, or that `stream()` answers `Expired`, is skipped; the session ends (with
+ *   the resume) only when none remain. A first entry answered `Expired` is [Failure.EXPIRED].
  * - Must be called on the main thread (the view model's scope).
  *
  * [nowMs] is the device clock `ArchiveStatus.atMs` is read on (tests pass a fake).
@@ -97,7 +101,8 @@ class ClipSession(
      * Why a clip did not start; the page shows the §6.8 toast. [LATER]: the service asked for a wait of more than a minute
      * (`Retry-After`, or the key read's back-off), so "Try again in a minute" would not be true.
      */
-    enum class Failure { UNAVAILABLE, OFFLINE, REFUSED, GEO, NOT_FOUND, NOT_PLAYABLE, NO_CLIP, LATER }
+    /** [EXPIRED] (NFL hub §4.6): the clip is past its expiry margin or embargoed. */
+    enum class Failure { UNAVAILABLE, OFFLINE, REFUSED, GEO, NOT_FOUND, NOT_PLAYABLE, NO_CLIP, LATER, EXPIRED }
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -131,15 +136,27 @@ class ClipSession(
     private var watchJob: Job? = null
     /** Bumped on every start and end; a lookup that comes back under an older one is dropped. */
     private var generation = 0L
+    /** (NFL hub §4.3) The offer check of the current queue ([play]). */
+    private var offered: (ClipRef) -> Boolean = { true }
+    /**
+     * (NFL hub §3.4) The clip of the last lookup this session started (kept after the session ends), so the page names the
+     * right service (ESPN or NHL.com) in a failure's toast.
+     */
+    var lastRequested: ClipRef? = null
+        private set
     /**
      * (Sports Hub code review 2026-11-25, H1) The player state when the session began, until a different one is seen:
      * a `Stopped(BACKGROUND)` that was already there is not "Home during the lookup".
      */
     private var stateAtStart: PlaybackState? = null
 
-    /** Plays [queue]`[`[index]`]`, then the later entries (goals auto-advance; a recap or condensed game is a queue of one). */
-    fun play(queue: List<ClipRef>, index: Int) {
+    /**
+     * Plays [queue]`[`[index]`]`, then the later entries (goals and NFL plays auto-advance; a recap or condensed game is a
+     * queue of one). [offered] (NFL hub §4.3): the view model's `ClipOffer` check, asked again before each auto-advance.
+     */
+    fun play(queue: List<ClipRef>, index: Int, offered: (ClipRef) -> Boolean = { true }) {
         if (index !in queue.indices) return
+        this.offered = offered
         if (resolver == null) {
             _failures.tryEmit(Failure.UNAVAILABLE)
             return
@@ -194,11 +211,11 @@ class ClipSession(
         }
     }
 
-    /** The error card's Try again: re-resolve and `playClip` at the playhead. */
+    /** The error card's Try again: re-resolve (fresh, NFL hub §4.2) and `playClip` at the playhead. */
     fun retry() {
         val s = _state.value as? State.Failed ?: return
         expiredRetriedIndex = -1
-        start(s.queue, s.index, lastPositionMs)
+        start(s.queue, s.index, lastPositionMs, fresh = true)
     }
 
     /** Back: end the session with resume. */
@@ -230,15 +247,20 @@ class ClipSession(
         State.Idle -> null
     }
 
-    private fun start(queue: List<ClipRef>, index: Int, startMs: Long) {
+    /**
+     * [fresh] (NFL hub §4.2): bypass the resolver's cache (the expired-link re-resolve and Try again). [advancing]: an
+     * auto-advance, whose `Expired` answer skips to the next offered entry instead of failing (§4.6).
+     */
+    private fun start(queue: List<ClipRef>, index: Int, startMs: Long, fresh: Boolean = false, advancing: Boolean = false) {
         val r = resolver ?: return
         job?.cancel()
         val gen = ++generation
         if (index != expiredRetriedIndex) expiredRetriedIndex = -1
         val ref = queue[index]
+        lastRequested = ref
         _state.value = State.Resolving(ref, queue, index)
         job = scope.launch {
-            val result = r.stream(ref)
+            val result = r.stream(ref, fresh)
             currentCoroutineContext().ensureActive()
             if (gen != generation) return@launch
             when (result) {
@@ -281,6 +303,11 @@ class ClipSession(
                 ClipResult.NotFound -> fail(Failure.NOT_FOUND)
                 ClipResult.Geo -> fail(Failure.GEO)
                 ClipResult.Refused -> fail(Failure.REFUSED)
+                // (NFL hub §4.6, arch m12) On an auto-advance an expired entry is skipped; the queue ends only when none remain.
+                ClipResult.Expired -> if (advancing) {
+                    val next = nextOffered(queue, index + 1)
+                    if (next == null) endWithResume() else start(queue, next, 0L, advancing = true)
+                } else fail(Failure.EXPIRED)
                 is ClipResult.Failed -> fail(
                     when {
                         result.kind == FailKind.OFFLINE -> Failure.OFFLINE
@@ -358,16 +385,21 @@ class ClipSession(
         if (st.error.code == PlaybackErrorCode.CLIP_EXPIRED && expiredRetriedIndex != index) {
             BoxLog.i(TAG) { "clip link expired: one fresh lookup" }
             expiredRetriedIndex = index
-            start(queue, index, at)
+            start(queue, index, at, fresh = true)
             return
         }
         BoxLog.i(TAG) { "clip failed: ${st.error.code}" }
         _state.value = State.Failed(queue, index)
     }
 
+    /** The first entry from [from] on that the queue's offer check accepts (NFL hub §4.3); null for none. */
+    private fun nextOffered(queue: List<ClipRef>, from: Int): Int? = (from until queue.size).firstOrNull { offered(queue[it]) }
+
     private fun onEnded(s: State.Playing) {
-        val nextIndex = s.index + 1
-        if (s.queue[s.index].kind != ClipKind.GOAL || nextIndex >= s.queue.size) {
+        val kind = s.queue[s.index].kind
+        // (NFL hub §4.6) Goals and NFL plays advance, skipping entries no longer offered; a recap is a queue of one.
+        val nextIndex = if (kind == ClipKind.GOAL || kind == ClipKind.PLAY) nextOffered(s.queue, s.index + 1) else null
+        if (nextIndex == null) {
             endWithResume()
             return
         }
@@ -382,7 +414,7 @@ class ClipSession(
                 delay(SportsConstants.HUB_UP_NEXT_MS)
             }
             if (gen != generation) return@launch
-            start(s.queue, nextIndex, 0L)
+            start(s.queue, nextIndex, 0L, advancing = true)
         }
     }
 

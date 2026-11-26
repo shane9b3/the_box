@@ -39,14 +39,17 @@ class FakeClipResolver : ClipResolver {
     val streams = mutableMapOf<Long, ClipResult<Pair<ClipInfo, ClipStream>>>()
     val infoCalls = mutableListOf<ClipRef>()
     val streamCalls = mutableListOf<ClipRef>()
+    /** (NFL hub commit 0) The `fresh` flag of each [stream] call, in the order of [streamCalls]. */
+    val streamFresh = mutableListOf<Boolean>()
 
     override suspend fun info(ref: ClipRef): ClipResult<ClipInfo> {
         infoCalls += ref
         return infos[ref.videoId] ?: ClipResult.NotFound
     }
 
-    override suspend fun stream(ref: ClipRef): ClipResult<Pair<ClipInfo, ClipStream>> {
+    override suspend fun stream(ref: ClipRef, fresh: Boolean): ClipResult<Pair<ClipInfo, ClipStream>> {
         streamCalls += ref
+        streamFresh += fresh
         return streams[ref.videoId] ?: ClipResult.NotFound
     }
 

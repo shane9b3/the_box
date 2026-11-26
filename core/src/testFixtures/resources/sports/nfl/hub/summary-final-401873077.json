@@ -1,0 +1,1419 @@
+{
+ "boxscore": {
+  "teams": [
+   {
+    "team": {
+     "id": "16",
+     "location": "Minnesota",
+     "name": "Vikings",
+     "abbreviation": "MIN",
+     "displayName": "Minnesota Vikings",
+     "shortDisplayName": "Vikings"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "19"
+     },
+     {
+      "name": "firstDownsPassing",
+      "displayValue": "13"
+     },
+     {
+      "name": "firstDownsRushing",
+      "displayValue": "5"
+     },
+     {
+      "name": "firstDownsPenalty",
+      "displayValue": "1"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "7-14"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "1-3"
+     },
+     {
+      "name": "totalOffensivePlays",
+      "displayValue": "65"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "324"
+     },
+     {
+      "name": "yardsPerPlay",
+      "displayValue": "5.0"
+     },
+     {
+      "name": "totalDrives",
+      "displayValue": "10"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "255"
+     },
+     {
+      "name": "completionAttempts",
+      "displayValue": "29/43"
+     },
+     {
+      "name": "yardsPerPass",
+      "displayValue": "5.8"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1"
+     },
+     {
+      "name": "sacksYardsLost",
+      "displayValue": "1-9"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "69"
+     },
+     {
+      "name": "rushingAttempts",
+      "displayValue": "21"
+     },
+     {
+      "name": "yardsPerRushAttempt",
+      "displayValue": "3.3"
+     },
+     {
+      "name": "redZoneAttempts",
+      "displayValue": "1-3"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "3-23"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "2"
+     },
+     {
+      "name": "fumblesLost",
+      "displayValue": "1"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1"
+     },
+     {
+      "name": "defensiveTouchdowns",
+      "displayValue": "0"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "32:23"
+     }
+    ],
+    "homeAway": "away"
+   },
+   {
+    "team": {
+     "id": "25",
+     "location": "San Francisco",
+     "name": "49ers",
+     "abbreviation": "SF",
+     "displayName": "San Francisco 49ers",
+     "shortDisplayName": "49ers"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "20"
+     },
+     {
+      "name": "firstDownsPassing",
+      "displayValue": "15"
+     },
+     {
+      "name": "firstDownsRushing",
+      "displayValue": "4"
+     },
+     {
+      "name": "firstDownsPenalty",
+      "displayValue": "1"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "4-9"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "0-0"
+     },
+     {
+      "name": "totalOffensivePlays",
+      "displayValue": "53"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "343"
+     },
+     {
+      "name": "yardsPerPlay",
+      "displayValue": "6.5"
+     },
+     {
+      "name": "totalDrives",
+      "displayValue": "9"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "253"
+     },
+     {
+      "name": "completionAttempts",
+      "displayValue": "22/27"
+     },
+     {
+      "name": "yardsPerPass",
+      "displayValue": "9.0"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0"
+     },
+     {
+      "name": "sacksYardsLost",
+      "displayValue": "1-7"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "90"
+     },
+     {
+      "name": "rushingAttempts",
+      "displayValue": "25"
+     },
+     {
+      "name": "yardsPerRushAttempt",
+      "displayValue": "3.6"
+     },
+     {
+      "name": "redZoneAttempts",
+      "displayValue": "4-4"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "6-49"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "0"
+     },
+     {
+      "name": "fumblesLost",
+      "displayValue": "0"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0"
+     },
+     {
+      "name": "defensiveTouchdowns",
+      "displayValue": "1"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "27:37"
+     }
+    ],
+    "homeAway": "home"
+   }
+  ],
+  "players": [
+   {
+    "team": {
+     "id": "16",
+     "location": "Minnesota",
+     "name": "Vikings",
+     "abbreviation": "MIN",
+     "displayName": "Minnesota Vikings",
+     "shortDisplayName": "Vikings"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "14880",
+         "displayName": "Kirk Cousins"
+        },
+        "stats": [
+         "26/38",
+         "235",
+         "6.2",
+         "0",
+         "1",
+         "1-9",
+         "64.8",
+         "73.9"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "2573079",
+         "displayName": "Carson Wentz"
+        },
+        "stats": [
+         "3/5",
+         "29",
+         "5.8",
+         "0",
+         "0",
+         "0-0",
+         "26.1",
+         "76.2"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4360569",
+         "displayName": "Jordan Mason"
+        },
+        "stats": [
+         "11",
+         "38",
+         "3.5",
+         "0",
+         "16"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "3042519",
+         "displayName": "Aaron Jones Sr."
+        },
+        "stats": [
+         "8",
+         "30",
+         "3.8",
+         "1",
+         "11"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4262921",
+         "displayName": "Justin Jefferson"
+        },
+        "stats": [
+         "7",
+         "86",
+         "12.3",
+         "0",
+         "29",
+         "9"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4036133",
+         "displayName": "T.J. Hockenson"
+        },
+        "stats": [
+         "6",
+         "55",
+         "9.2",
+         "0",
+         "20",
+         "7"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "25",
+     "location": "San Francisco",
+     "name": "49ers",
+     "abbreviation": "SF",
+     "displayName": "San Francisco 49ers",
+     "shortDisplayName": "49ers"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4361741",
+         "displayName": "Brock Purdy"
+        },
+        "stats": [
+         "21/26",
+         "255",
+         "9.8",
+         "3",
+         "0",
+         "1-7",
+         "98.6",
+         "146.0"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4241464",
+         "displayName": "Mac Jones"
+        },
+        "stats": [
+         "1/1",
+         "5",
+         "5.0",
+         "0",
+         "0",
+         "0-0",
+         "1.1",
+         "87.5"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "3117251",
+         "displayName": "Christian McCaffrey"
+        },
+        "stats": [
+         "12",
+         "49",
+         "4.1",
+         "1",
+         "10"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "3126486",
+         "displayName": "Deebo Samuel Sr."
+        },
+        "stats": [
+         "2",
+         "27",
+         "13.5",
+         "0",
+         "20"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "16737",
+         "displayName": "Mike Evans"
+        },
+        "stats": [
+         "6",
+         "109",
+         "18.2",
+         "1",
+         "34",
+         "7"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "15818",
+         "displayName": "Keenan Allen"
+        },
+        "stats": [
+         "3",
+         "38",
+         "12.7",
+         "0",
+         "17",
+         "4"
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "id": "8219",
+   "fullName": "Estadio Banorte"
+  }
+ },
+ "drives": {
+  "previous": [
+   {
+    "id": "4018730771",
+    "description": "7 plays, 72 yards, 3:44",
+    "yards": 72,
+    "isScore": true,
+    "result": "TD",
+    "displayResult": "Touchdown",
+    "plays": [
+     {
+      "id": "40187307739",
+      "sequenceNumber": "3900",
+      "type": {
+       "id": "53",
+       "text": "Kickoff",
+       "abbreviation": "K"
+      },
+      "text": "W.Reichard kicks 61 yards from MIN 35 to SF 4. D.Samuel to SF 28 for 24 yards (J.Jones).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "15:00"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "40187307762",
+      "sequenceNumber": "6200",
+      "type": {
+       "id": "5",
+       "text": "Rush",
+       "abbreviation": "RUSH"
+      },
+      "text": "C.McCaffrey right guard to SF 31 for 3 yards (J.Metellus; J.Pierre).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "14:55"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "40187307784",
+      "sequenceNumber": "8400",
+      "type": {
+       "id": "24",
+       "text": "Pass Reception",
+       "abbreviation": "REC"
+      },
+      "text": "B.Purdy pass short right to K.Juszczyk to SF 37 for 6 yards (A.Van Ginkel).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "14:24"
+      },
+      "scoringPlay": false
+     }
+    ]
+   }
+  ]
+ },
+ "leaders": [
+  {
+   "team": {
+    "id": "25",
+    "displayName": "San Francisco 49ers",
+    "abbreviation": "SF"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "Passing Yards",
+     "leaders": [
+      {
+       "displayValue": "21/26, 255 YDS, 3 TD",
+       "value": 255.0,
+       "athlete": {
+        "id": "4361741",
+        "lastName": "Purdy",
+        "displayName": "Brock Purdy",
+        "shortName": "B. Purdy",
+        "jersey": "13",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4361741.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "Rushing Yards",
+     "leaders": [
+      {
+       "displayValue": "12 CAR, 49 YDS, 1 TD",
+       "value": 49.0,
+       "athlete": {
+        "id": "3117251",
+        "lastName": "McCaffrey",
+        "displayName": "Christian McCaffrey",
+        "shortName": "C. McCaffrey",
+        "jersey": "23",
+        "position": {
+         "abbreviation": "RB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3117251.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "Receiving Yards",
+     "leaders": [
+      {
+       "displayValue": "6 REC, 109 YDS, 1 TD",
+       "value": 109.0,
+       "athlete": {
+        "id": "16737",
+        "lastName": "Evans",
+        "displayName": "Mike Evans",
+        "shortName": "M. Evans",
+        "jersey": "5",
+        "position": {
+         "abbreviation": "WR"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/16737.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "Sacks",
+     "leaders": [
+      {
+       "displayValue": "0.5",
+       "value": 0.5,
+       "athlete": {
+        "id": "2971282",
+        "lastName": "Buckner",
+        "displayName": "DeForest Buckner",
+        "shortName": "D. Buckner",
+        "jersey": "99",
+        "position": {
+         "abbreviation": "DT"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/2971282.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "Tackles",
+     "leaders": [
+      {
+       "displayValue": "9",
+       "value": 9.0,
+       "athlete": {
+        "id": "4427325",
+        "lastName": "Green",
+        "displayName": "Renardo Green",
+        "shortName": "R. Green",
+        "jersey": "0",
+        "position": {
+         "abbreviation": "CB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4427325.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "16",
+    "displayName": "Minnesota Vikings",
+    "abbreviation": "MIN"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "Passing Yards",
+     "leaders": [
+      {
+       "displayValue": "26/38, 235 YDS, 1 INT",
+       "value": 235.0,
+       "athlete": {
+        "id": "14880",
+        "lastName": "Cousins",
+        "displayName": "Kirk Cousins",
+        "shortName": "K. Cousins",
+        "jersey": "8",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/14880.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "Rushing Yards",
+     "leaders": [
+      {
+       "displayValue": "11 CAR, 38 YDS",
+       "value": 38.0,
+       "athlete": {
+        "id": "4360569",
+        "lastName": "Mason",
+        "displayName": "Jordan Mason",
+        "shortName": "J. Mason",
+        "jersey": "27",
+        "position": {
+         "abbreviation": "RB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4360569.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "Receiving Yards",
+     "leaders": [
+      {
+       "displayValue": "7 REC, 86 YDS",
+       "value": 86.0,
+       "athlete": {
+        "id": "4262921",
+        "lastName": "Jefferson",
+        "displayName": "Justin Jefferson",
+        "shortName": "J. Jefferson",
+        "jersey": "18",
+        "position": {
+         "abbreviation": "WR"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4262921.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "Sacks",
+     "leaders": [
+      {
+       "displayValue": "1",
+       "value": 1.0,
+       "athlete": {
+        "id": "3056916",
+        "lastName": "Wilson",
+        "displayName": "Eric Wilson",
+        "shortName": "E. Wilson",
+        "jersey": "55",
+        "position": {
+         "abbreviation": "LB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3056916.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "Tackles",
+     "leaders": [
+      {
+       "displayValue": "9",
+       "value": 9.0,
+       "athlete": {
+        "id": "3728281",
+        "lastName": "Cashman",
+        "displayName": "Blake Cashman",
+        "shortName": "B. Cashman",
+        "jersey": "51",
+        "position": {
+         "abbreviation": "LB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3728281.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "injuries": [
+  {
+   "team": {
+    "id": "25",
+    "displayName": "San Francisco 49ers",
+    "abbreviation": "SF"
+   },
+   "injuries": [
+    {
+     "status": "Injured Reserve",
+     "date": "2026-11-25T20:43Z",
+     "athlete": {
+      "id": "4710714",
+      "lastName": "Stribling",
+      "displayName": "De'Zhaun Stribling",
+      "shortName": "D. Stribling",
+      "jersey": "7",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Ankle",
+      "location": "Leg",
+      "detail": "Surgery",
+      "side": "Left",
+      "returnDate": "2026-12-13"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T20:07Z",
+     "athlete": {
+      "id": "16737",
+      "lastName": "Evans",
+      "displayName": "Mike Evans",
+      "shortName": "M. Evans",
+      "jersey": "5",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Achilles",
+      "location": "Leg",
+      "detail": "Tendinitis",
+      "side": "Right",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T19:57Z",
+     "athlete": {
+      "id": "4361741",
+      "lastName": "Purdy",
+      "displayName": "Brock Purdy",
+      "shortName": "B. Purdy",
+      "jersey": "13",
+      "position": {
+       "abbreviation": "QB"
+      }
+     },
+     "details": {
+      "type": "Ankle",
+      "location": "Leg",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-11-29"
+     }
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "16",
+    "displayName": "Minnesota Vikings",
+    "abbreviation": "MIN"
+   },
+   "injuries": [
+    {
+     "status": "Doubtful",
+     "date": "2026-11-25T19:37Z",
+     "athlete": {
+      "id": "4429205",
+      "lastName": "Addison",
+      "displayName": "Jordan Addison",
+      "shortName": "J. Addison",
+      "jersey": "3",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Thumb",
+      "location": "Arm",
+      "detail": "Surgery",
+      "side": "Not Specified",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-24T12:39Z",
+     "athlete": {
+      "id": "4044540",
+      "lastName": "Rodgers",
+      "displayName": "Isaiah Rodgers",
+      "shortName": "I. Rodgers",
+      "jersey": "2",
+      "position": {
+       "abbreviation": "CB"
+      }
+     },
+     "details": {
+      "type": "Quadriceps",
+      "location": "Leg",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Injured Reserve",
+     "date": "2026-11-19T01:59Z",
+     "athlete": {
+      "id": "4875564",
+      "lastName": "Richter",
+      "displayName": "Bo Richter",
+      "shortName": "B. Richter",
+      "jersey": "98",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Foot",
+      "location": "Leg",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-12-20"
+     }
+    }
+   ]
+  }
+ ],
+ "pickcenter": [
+  {
+   "provider": {
+    "id": "x",
+    "name": "x",
+    "priority": 0
+   },
+   "details": "x",
+   "overUnder": 0,
+   "spread": 0,
+   "overOdds": 0,
+   "underOdds": 0,
+   "awayTeamOdds": {
+    "favorite": false,
+    "underdog": false,
+    "moneyLine": 0,
+    "spreadOdds": 0,
+    "team": {},
+    "teamId": "x",
+    "favoriteAtOpen": false
+   },
+   "homeTeamOdds": {
+    "favorite": false,
+    "underdog": false,
+    "moneyLine": 0,
+    "spreadOdds": 0,
+    "team": {},
+    "teamId": "x",
+    "favoriteAtOpen": false
+   },
+   "moneyline": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "home": {
+     "close": {
+      "odds": "x"
+     },
+     "open": {
+      "odds": "x"
+     }
+    },
+    "away": {
+     "close": {
+      "odds": "x"
+     },
+     "open": {
+      "odds": "x"
+     }
+    }
+   },
+   "pointSpread": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "home": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    },
+    "away": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    }
+   },
+   "total": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "over": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    },
+    "under": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    }
+   },
+   "link": {
+    "text": "x",
+    "language": "x",
+    "rel": [
+     "x"
+    ],
+    "href": "x",
+    "isExternal": false,
+    "isPremium": false
+   },
+   "header": {
+    "text": "x"
+   },
+   "footer": {
+    "disclaimer": "x"
+   }
+  }
+ ],
+ "scoringPlays": [
+  {
+   "id": "401873077208",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "George Kittle 17 Yd pass from Brock Purdy (Eddy Pineiro Kick)",
+   "awayScore": 0,
+   "homeScore": 7,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 676.0,
+    "displayValue": "11:16"
+   },
+   "team": {
+    "id": "25",
+    "displayName": "San Francisco 49ers",
+    "abbreviation": "SF"
+   }
+  },
+  {
+   "id": "401873077850",
+   "type": {
+    "id": "68",
+    "text": "Rushing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Aaron Jones Sr. 11 Yd Rush (Will Reichard Kick)",
+   "awayScore": 7,
+   "homeScore": 7,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 73.0,
+    "displayValue": "1:13"
+   },
+   "team": {
+    "id": "16",
+    "displayName": "Minnesota Vikings",
+    "abbreviation": "MIN"
+   }
+  },
+  {
+   "id": "4018730771033",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "George Kittle 8 Yd pass from Brock Purdy (Eddy Pineiro Kick)",
+   "awayScore": 7,
+   "homeScore": 14,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 853.0,
+    "displayValue": "14:13"
+   },
+   "team": {
+    "id": "25",
+    "displayName": "San Francisco 49ers",
+    "abbreviation": "SF"
+   }
+  },
+  {
+   "id": "4018730771408",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Will Reichard 48 Yd Field Goal ",
+   "awayScore": 10,
+   "homeScore": 14,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 408.0,
+    "displayValue": "6:48"
+   },
+   "team": {
+    "id": "16",
+    "displayName": "Minnesota Vikings",
+    "abbreviation": "MIN"
+   }
+  },
+  {
+   "id": "4018730771660",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Mike Evans 4 Yd pass from Brock Purdy (Eddy Pineiro Kick)",
+   "awayScore": 10,
+   "homeScore": 21,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 129.0,
+    "displayValue": "2:09"
+   },
+   "team": {
+    "id": "25",
+    "displayName": "San Francisco 49ers",
+    "abbreviation": "SF"
+   }
+  },
+  {
+   "id": "4018730771735",
+   "type": {
+    "id": "36",
+    "text": "Interception Return Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Ji'Ayir Brown 18 Yd Interception Return (Eddy Pineiro Kick)",
+   "awayScore": 10,
+   "homeScore": 28,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 119.0,
+    "displayValue": "1:59"
+   },
+   "team": {
+    "id": "25",
+    "displayName": "San Francisco 49ers",
+    "abbreviation": "SF"
+   }
+  },
+  {
+   "id": "4018730773056",
+   "type": {
+    "id": "68",
+    "text": "Rushing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Christian McCaffrey 6 Yd Rush (Eddy Pineiro Kick)",
+   "awayScore": 10,
+   "homeScore": 35,
+   "period": {
+    "number": 4
+   },
+   "clock": {
+    "value": 806.0,
+    "displayValue": "13:26"
+   },
+   "team": {
+    "id": "25",
+    "displayName": "San Francisco 49ers",
+    "abbreviation": "SF"
+   }
+  }
+ ],
+ "article": {
+  "type": "Recap",
+  "headline": "Brock Purdy carves up the Vikings' D with 3 TD passes in the 49ers' 35-10 win in Mexico City"
+ },
+ "news": {
+  "articles": [
+   {
+    "id": 50597534,
+    "type": "HeadlineNews",
+    "headline": "Sources: Mike McCarthy has Steelers' full support after Aaron Rodgers interview"
+   }
+  ]
+ },
+ "winprobability": [
+  {
+   "homeWinPercentage": 0.6319,
+   "tiePercentage": 0.0,
+   "playId": "4018730771"
+  }
+ ],
+ "header": {
+  "id": "401873077",
+  "season": {
+   "year": 2026,
+   "current": true,
+   "type": 2
+  },
+  "competitions": [
+   {
+    "id": "401873077",
+    "date": "2026-11-23T01:20Z",
+    "neutralSite": true,
+    "competitors": [
+     {
+      "id": "25",
+      "order": 0,
+      "homeAway": "home",
+      "winner": true,
+      "score": "35",
+      "record": [
+       {
+        "type": "total",
+        "summary": "9-1",
+        "displayValue": "9-1"
+       },
+       {
+        "type": "home",
+        "summary": "6-0",
+        "displayValue": "6-0"
+       }
+      ],
+      "possession": false,
+      "team": {
+       "id": "25",
+       "location": "San Francisco",
+       "name": "49ers",
+       "nickname": "49ers",
+       "abbreviation": "SF",
+       "displayName": "San Francisco 49ers"
+      }
+     },
+     {
+      "id": "16",
+      "order": 1,
+      "homeAway": "away",
+      "winner": false,
+      "score": "10",
+      "record": [
+       {
+        "type": "total",
+        "summary": "7-3",
+        "displayValue": "7-3"
+       },
+       {
+        "type": "road",
+        "summary": "4-2",
+        "displayValue": "4-2"
+       }
+      ],
+      "possession": false,
+      "team": {
+       "id": "16",
+       "location": "Minnesota",
+       "name": "Vikings",
+       "nickname": "Vikings",
+       "abbreviation": "MIN",
+       "displayName": "Minnesota Vikings"
+      }
+     }
+    ],
+    "status": {
+     "type": {
+      "id": "3",
+      "name": "STATUS_FINAL",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "detail": "Final",
+      "shortDetail": "Final"
+     },
+     "isTBDFlex": false
+    }
+   }
+  ],
+  "week": 11
+ },
+ "videos": []
+}

@@ -150,19 +150,44 @@ class SportsViewModelHubTest {
         assertEquals(listOf(SlotAction.WATCH_RECAP, SlotAction.GOALS, SlotAction.BOX_SCORE), m.actions())
         assertEquals("recap not posted yet: disabled", SlotLabel.RECAP_SOON, m.panel.value.slots[0].label)
         assertFalse(m.panel.value.slots[0].enabled)
-        // NFL: Follow · Channel · (empty); final: nothing without a catch-up airing.
+        // (NFL hub §2.3, P3) NFL: Follow · Channel · Scoring; final: the grey Highlights soon (no catch-up airing), Scoring,
+        // Box score; OK on the card lands on Scoring.
         val nflLive = SportsFixtures.nflGame(id = "N1")
         repo.prefs.value = SportsPrefs(league = League.NFL)
         repo.day.value = DayState.Board(DayBoard("w2026-2-9", "w2026-2-8", "w2026-2-10", listOf(nflLive, nflFinal)), 0L, false)
         val n = vm()
         n.onCardFocused("N1")
-        assertEquals(listOf(SlotAction.FOLLOW, SlotAction.CHANNEL, null), n.actions())
+        assertEquals(listOf(SlotAction.FOLLOW, SlotAction.CHANNEL, SlotAction.GOALS), n.actions())
         n.onCardFocused("NF")
-        assertEquals(listOf<SlotAction?>(null, null, null), n.actions())
-        assertNull("the footer shows no OK", n.panel.value.firstEnabled)
+        assertEquals(listOf(SlotAction.WATCH_RECAP, SlotAction.GOALS, SlotAction.BOX_SCORE), n.actions())
+        assertEquals(SlotLabel.HIGHLIGHTS_SOON, n.panel.value.slots[0].label)
+        assertEquals("OK lands on Scoring", 1, n.panel.value.firstEnabled)
     }
 
-    @Test fun aFinalNflOrChlGameOffersWatchFromStartOnlyWithACatchUpAiring() {
+    /**
+     * (Code review 2026-11-26, UI m11) The CHL's final rules, unchanged from `main` (`ChlHubUi.slots`): no catch-up airing,
+     * no slot at all and OK on the card does nothing; a catch-up airing, ▶ Watch from start alone.
+     */
+    @Test fun aFinalChlGameOffersWatchFromStartOnlyWithACatchUpAiring() {
+        val r = FakeScoreRepository(SportsPrefs(league = League.OHL))
+        val chlFinal = SportsFixtures.game(id = "C1", phase = GamePhase.FINAL, league = League.OHL, finalKind = PeriodKind.REG, clock = null)
+        r.board(chlFinal, day = "1969-12-31")
+        val m = vm(r)
+        m.onCardFocused("C1")
+        assertEquals(listOf<SlotAction?>(null, null, null), m.actions())
+        assertNull("nothing to enter", m.enterPanel("C1"))
+        // With a catch-up airing: Watch from start, and nothing else.
+        matcher.answers[chlFinal.id] = listOf(candidate(airing = GuideFixtures.info(100, 280)))
+        val n = vm(r)
+        n.onCardFocused("C1")
+        assertEquals(0, n.enterPanel("C1"))
+        assertEquals(listOf<SlotAction?>(SlotAction.WATCH_FROM_START, null, null), n.actions())
+        val effects = collect(n)
+        n.onSlot(0)
+        assertTrue(effects.single() is SportsEffect.PlayArchive)
+    }
+
+    @Test fun aFinalNflGameOffersWatchFromStartOnlyWithACatchUpAiring() {
         repo.prefs.value = SportsPrefs(league = League.NFL)
         val nflFinal = SportsFixtures.nflGame(id = "NF", phase = GamePhase.FINAL, detail = null)
         repo.day.value = DayState.Board(DayBoard("w2026-2-9", "w2026-2-8", "w2026-2-10", listOf(nflFinal)), 0L, false)
@@ -170,7 +195,8 @@ class SportsViewModelHubTest {
         val m = vm()
         m.onCardFocused("NF")
         assertEquals(0, m.enterPanel("NF"))
-        assertEquals(listOf(SlotAction.WATCH_FROM_START, null, null), m.actions())
+        // (NFL hub §2.3, P3) ▶ From start, then Scoring and Box score.
+        assertEquals(listOf(SlotAction.WATCH_FROM_START, SlotAction.GOALS, SlotAction.BOX_SCORE), m.actions())
         val effects = collect(m)
         m.onSlot(0)
         assertTrue(effects.single() is SportsEffect.PlayArchive)

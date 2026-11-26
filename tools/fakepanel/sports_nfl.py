@@ -57,6 +57,7 @@ import zlib
 from zoneinfo import ZoneInfo
 
 import sports
+import sports_video
 
 ET = ZoneInfo("America/New_York")
 TIMELINE_DEFAULT_S = 985
@@ -73,7 +74,11 @@ DEFAULTS = {
     "sports_nfl_script": {},          # {event id: {state() key: value}}
     "sports_nfl_faults": {},          # the NHL fault keys (sports.FAULT_KEYS)
 }
-NFL_FAULT_KEYS = sports.FAULT_KEYS + ("event_status", "event_older_s", "stats_status", "stats_stall_ms")
+# (NFL hub P2, docs/design/m6-nfl-hub.md section 8.4) The summary's faults: `summary_status` (any HTTP status; 403 is an
+# HTML block and 202 ESPN's WAF challenge with `x-amzn-waf-action`), `summary_pad_kb` (overrides `sports_nfl_summary_pad_kb`,
+# e.g. 2100 to pass the app's 2 MiB cap) and `summary_stall_ms`.
+SUMMARY_FAULT_KEYS = ("summary_status", "summary_pad_kb", "summary_stall_ms")
+NFL_FAULT_KEYS = sports.FAULT_KEYS + ("event_status", "event_older_s", "stats_status", "stats_stall_ms") + SUMMARY_FAULT_KEYS
 STATE_KEYS = ("state", "name", "period", "clock", "away", "home", "possession", "down", "distance", "yardLine",
               "possessionText", "shortDownDistanceText", "isRedZone", "lastPlayType", "lastPlayScoreValue",
               "lastPlayTeam", "situation", "gone", "awayTimeouts", "homeTimeouts", "lastPlayText", "lastPlayId",
@@ -370,6 +375,15 @@ def check_config(patch):
         if "stats_stall_ms" in f and f["stats_stall_ms"] is not None and (
                 isinstance(f["stats_stall_ms"], bool) or not isinstance(f["stats_stall_ms"], (int, float)) or f["stats_stall_ms"] < 0):
             raise ValueError("stats_stall_ms must be a number of milliseconds, 0 or more")
+        if "summary_status" in f and f["summary_status"] is not None and (
+                isinstance(f["summary_status"], bool) or not isinstance(f["summary_status"], int) or not 100 <= f["summary_status"] <= 599):
+            raise ValueError("summary_status must be an HTTP status 100..599")
+        if "summary_pad_kb" in f and f["summary_pad_kb"] is not None and (
+                isinstance(f["summary_pad_kb"], bool) or not isinstance(f["summary_pad_kb"], int) or not 0 <= f["summary_pad_kb"] <= 4096):
+            raise ValueError("summary_pad_kb must be an integer 0..4096")
+        if "summary_stall_ms" in f and f["summary_stall_ms"] is not None and (
+                isinstance(f["summary_stall_ms"], bool) or not isinstance(f["summary_stall_ms"], (int, float)) or f["summary_stall_ms"] < 0):
+            raise ValueError("summary_stall_ms must be a number of milliseconds, 0 or more")
 
 
 # ------------------------------------------------------------------ the slate
@@ -581,6 +595,12 @@ class SportsNfl:
         # leaders are season leaders) and the national broadcaster.
         comp["leaders"] = self.leaders(away, home, ids, s, started)
         comp["broadcasts"] = [{"market": "national", "names": [BROADCASTS.get(eid, "CBS")]}]
+        # (NFL hub section 8.4) The board's `highlights[]`: a final's Final Game Highlight, as ESPN lists it (expired ones
+        # too; the app decides what is offered).
+        if state == "post":
+            hl = sports_video.espn_highlights(self.panel, eid, base)
+            if hl:
+                comp["highlights"] = hl
         local = dt.datetime.fromtimestamp(start, ET)
         return {"id": eid, "uid": f"s:20~l:28~e:{eid}", "date": iso_min(start), "name": f"{TEAMS[away][1]} {TEAMS[away][2]} at {TEAMS[home][1]} {TEAMS[home][2]}",
                 "shortName": f"{away} @ {home}", "season": {"year": SEASON, "type": 2, "slug": "regular-season"},
@@ -906,3 +926,349 @@ def admin(h, path, data):
     return h.json({"enabled": bool(h.panel.cfg.get("sports") and h.panel.cfg.get("sports_nfl")), "anchor_unix": sp.anchor,
                    "featured": FEATURED_ID, "featured_day": sp.featured_day().isoformat(), "games": games,
                    "windows": sp.windows(now)})
+
+
+# ------------------------------------------------------------------ the game summary (NFL hub, docs/design/m6-nfl-hub.md 8.4)
+
+SUMMARY_PATH = API_PREFIX + "summary"
+VENUES = {"BUF": "Highmark Stadium", "NE": "Gillette Stadium", "SEA": "Lumen Field", "DEN": "Empower Field at Mile High",
+          "KC": "GEHA Field at Arrowhead Stadium", "NYJ": "MetLife Stadium", "SF": "Levi's Stadium", "LV": "Allegiant Stadium"}
+KICKERS = {"KC": "Harrison Butker", "BUF": "Tyler Bass", "NYJ": "Greg Zuerlein", "NE": "Andres Borregales",
+           "SF": "Jake Moody", "SEA": "Jason Myers", "LV": "Daniel Carlson", "DEN": "Wil Lutz"}
+DEFENDERS = {abbr: (f"{TEAMS[abbr][2][:-1]} Edge", f"{TEAMS[abbr][2][:-1]} Linebacker") for abbr in TEAMS}
+WAF_BODY = b"<html><head><title>Human Verification</title></head><body>challenge</body></html>"
+TD_TYPE = {"id": "67", "abbreviation": "TD", "text": "Passing Touchdown"}
+DEF_TD_TYPE = {"id": "36", "abbreviation": "TD", "text": "Interception Return Touchdown"}
+FG_TYPE = {"id": "59", "abbreviation": "FG", "text": "Field Goal Good"}
+SF_TYPE = {"id": "20", "abbreviation": "SF", "text": "Safety"}
+
+
+def all_games(sp):
+    return sp.games() + sp.other_week_games(8) + sp.other_week_games(10)
+
+
+def short_name(full):
+    first, rest = full.split(" ", 1)
+    return first[0] + ". " + rest
+
+
+def split_score(n):
+    """A team's [n] points as real NFL scores: touchdowns with the kick (7), field goals (3) and safeties (2). (NFL hub
+    code review 2026-11-26, data #9) A greedy split that would leave a single point never does: one 7 becomes a touchdown
+    with a two-point conversion (8, so 8 = TD + 2-pt and 15 = 7 + 8), or, without a 7, one 3 becomes two safeties (4 = 2 +
+    2). Only a total of 1 (not a real NFL score) is left as it is."""
+    parts = []
+    left = max(int(n), 0)
+    while left >= 7:
+        parts.append(7)
+        left -= 7
+    while left >= 3:
+        parts.append(3)
+        left -= 3
+    if left == 2:
+        parts.append(2)
+    elif left == 1:
+        if 7 in parts:
+            parts[parts.index(7)] = 8
+        elif 3 in parts:
+            parts.remove(3)
+            parts += [2, 2]
+        else:
+            parts.append(1)
+    return parts
+
+
+def scoring_changes(sp, game, at):
+    """[(state at the change, side, points)] for every score change up to [at], in game order. The featured game replays its
+    timeline window by window (the timeline is a pure function of time); any other (or scripted) game splits its score
+    into touchdowns and field goals."""
+    s_now = sp.state(game, at)
+    scripted = (sp.panel.cfg.get("sports_nfl_script") or {}).get(game[0])
+    if game[0] == FEATURED_ID and not scripted:
+        out, prev = [], {"away": 0, "home": 0}
+        for start in sp.window_starts():
+            t = sp.anchor + start + 0.01
+            if t > at:
+                break
+            st = sp.featured(t)
+            for side in ("away", "home"):
+                v = int(st.get(side) or 0)
+                if v > prev[side]:
+                    out.append((st, side, v - prev[side]))
+                    prev[side] = v
+        return out
+    out = []
+    period = max(int(s_now.get("period") or 4), 1)
+    for side in ("away", "home"):
+        q = 1
+        for pts in split_score(int(s_now.get(side) or 0)):
+            out.append(({"period": min(q, period), "clock": 300 + 60 * len(out)}, side, pts))
+            q = q % period + 1
+    out.sort(key=lambda c: (c[0]["period"], -c[0]["clock"]))
+    return out
+
+
+def scoring_plays(sp, game, at, ids):
+    """ESPN's `scoringPlays[]`: a touchdown absorbs the conversion that follows it (the text gains the kick), a lone 2 is a
+    safety, 3 a field goal; the scores are after the play."""
+    eid, away, home = game[0], game[1], game[2]
+    abbr = {"away": away, "home": home}
+    score = {"away": 0, "home": 0}
+    plays = []
+    for st, side, pts in scoring_changes(sp, game, at):
+        team = abbr[side]
+        last = plays[-1] if plays else None
+        if pts in (1, 2) and last and last["_side"] == side and last["_open"]:
+            score[side] += pts
+            last["text"] += " (%s)" % (KICKERS[team] + " Kick" if pts == 1 else "Two-Point Pass Conversion")
+            last["awayScore"], last["homeScore"] = score["away"], score["home"]
+            last["_open"] = False
+            continue
+        score[side] += pts
+        qb, rb, wr = (LEADERS[team][k] for k in ("passingYards", "rushingYards", "receivingYards"))
+        yards = 5 + (len(plays) * 7) % 40
+        if pts >= 6 and str(st.get("lastPlayType")) == "36":
+            typ, text = DEF_TD_TYPE, f"{DEFENDERS[team][1]} {yards} Yd Interception Return"
+        elif pts >= 6:
+            typ, text = TD_TYPE, f"{wr} {yards} Yd pass from {qb}"
+            if pts == 7:
+                text += f" ({KICKERS[team]} Kick)"
+            elif pts == 8:
+                text += " (Two-Point Pass Conversion)"
+        elif pts == 3:
+            typ, text = FG_TYPE, f"{KICKERS[team]} {20 + yards} Yd Field Goal"
+        else:
+            typ, text = SF_TYPE, f"{DEFENDERS[team][0]} Safety"
+        period = int(st.get("period") or 1)
+        plays.append({"id": "%s%04d" % (eid, 100 + len(plays) * 37), "type": dict(typ), "text": text,
+                      "awayScore": score["away"], "homeScore": score["home"], "period": {"number": period},
+                      "clock": {"value": float(st.get("clock") or 0), "displayValue": clock_text(int(st.get("clock") or 0))},
+                      "team": {"id": ids[side], "abbreviation": team}, "scoringType": {"name": "touchdown" if pts >= 6 else "other"},
+                      "_side": side, "_open": pts == 6})
+    for pl in plays:
+        pl.pop("_side")
+        pl.pop("_open")
+    return plays
+
+
+def _named(name, value):
+    return {"name": name, "displayValue": value, "value": value, "label": name}
+
+
+def team_stats(s, side, started):
+    """`boxscore.teams[].statistics`: the pre-game season averages, or the game totals so far (grown from the window's
+    yards and the score)."""
+    pts = int(s.get(side) or 0)
+    other = int(s.get("home" if side == "away" else "away") or 0)
+    if not started:
+        base = 20.0 + (len(side) * 1.7)
+        return [_named("totalPointsPerGame", "%.1f" % (base + 2.3)), _named("totalPointsPerGameAllowed", "%.1f" % (base - 1.1)),
+                _named("yardsPerGame", "%.1f" % (340.2 + pts)), _named("yardsPerGameAllowed", "%.1f" % (318.6 + other)),
+                _named("passingYardsPerGame", "221.4"), _named("passingYardsPerGameAllowed", "207.9"),
+                _named("rushingYardsPerGame", "118.8"), _named("rushingYardsPerGameAllowed", "110.7")]
+    period = max(int(s.get("period") or 1), 1)
+    total = s.get(side + "Yards")
+    total = int(total) if total is not None else 60 * period + 9 * pts
+    rush = max(0, total // 3)
+    passing = total - rush
+    plays = 12 * period + pts
+    return [_named("firstDowns", str(4 * period + pts // 3)), _named("thirdDownEff", "%d-%d" % (period + pts // 7, 3 * period + 1)),
+            _named("fourthDownEff", "0-%d" % (period // 3)), _named("totalYards", str(total)), _named("netPassingYards", str(passing)),
+            _named("rushingYards", str(rush)), _named("totalPenaltiesYards", "%d-%d" % (period, 5 * period)),
+            _named("turnovers", str((period + len(side)) // 4)), _named("interceptions", str(period // 4)),
+            _named("possessionTime", "%d:%02d" % (7 * period + pts % 3, (13 * period + pts) % 60)),
+            _named("totalPlays", str(plays)), _named("interceptions", str(period // 4))]
+
+
+def box_players(team, ids_side, s, side):
+    pts = int(s.get(side) or 0)
+    period = max(int(s.get("period") or 1), 1)
+    qb, rb, wr = (LEADERS[team][k] for k in ("passingYards", "rushingYards", "receivingYards"))
+
+    def cat(name, keys, labels, rows):
+        return {"name": name, "keys": keys, "labels": labels,
+                "athletes": [{"athlete": {"id": "9%s%d" % (ids_side, i), "displayName": n,
+                                          "headshot": {"href": "https://img.invalid/h/9%s%d.png" % (ids_side, i)}},
+                              "stats": st} for i, (n, st) in enumerate(rows)]}
+    return {"team": {"id": ids_side, "abbreviation": team}, "statistics": [
+        cat("passing", ["completions/passingAttempts", "passingYards", "yardsPerPassAttempt", "passingTouchdowns", "interceptions",
+                        "sacks-sackYardsLost", "adjQBR", "QBRating"],
+            ["C/ATT", "YDS", "AVG", "TD", "INT", "SACKS", "QBR", "RTG"],
+            [(qb, ["%d/%d" % (5 * period + pts // 7, 8 * period + 2), str(55 * period + 4 * pts), "6.8", str(pts // 7), "0", "1-7",
+                   "61.2", "98.4"])]),
+        cat("rushing", ["rushingAttempts", "rushingYards", "yardsPerRushAttempt", "rushingTouchdowns", "longRushing"],
+            ["CAR", "YDS", "AVG", "TD", "LONG"],
+            [(rb, [str(4 * period), str(18 * period), "4.5", "0", "14"]), (qb, [str(period), str(3 * period), "3.0", "0", "7"])]),
+        cat("receiving", ["receptions", "receivingYards", "yardsPerReception", "receivingTouchdowns", "longReception", "receivingTargets"],
+            ["REC", "YDS", "AVG", "TD", "LONG", "TGTS"],
+            [(wr, [str(2 * period), str(30 * period + 2 * pts), "12.1", str(pts // 7), "31", str(3 * period)])]),
+    ]}
+
+
+def leaders_section(away, home, ids, s, started):
+    """`leaders[]`, home first: per team its passing, rushing and receiving leader (and pre-game sacks and tackles)."""
+    out = []
+    for side, team in (("home", home), ("away", away)):
+        pts = int(s.get(side) or 0)
+        cats = []
+        names = [("passingYards", LEADERS[team]["passingYards"], "%d/%d, %s YDS, %d TD, 3 INT" % (
+                    (180, 280, "2,1%02d" % pts, 14) if not started else (12 + pts, 20 + pts, str(90 + 9 * pts), pts // 7))),
+                 ("rushingYards", LEADERS[team]["rushingYards"], "%s CAR, %s YDS, %d TD" % (
+                    ("121", "612", 4) if not started else (str(8 + pts // 3), str(30 + 2 * pts), pts // 14))),
+                 ("receivingYards", LEADERS[team]["receivingYards"], "%s REC, %s YDS, %d TD" % (
+                    ("52", "701", 5) if not started else (str(3 + pts // 7), str(40 + 3 * pts), pts // 14)))]
+        if not started:
+            names += [("sacks", DEFENDERS[team][0], "5.5"), ("totalTackles", DEFENDERS[team][1], "67")]
+        else:
+            # (Integration section 18, the real live capture) In play ESPN lists all five categories; one nobody leads yet
+            # (sacks early on) has no `leaders` key at all.
+            names += [("sacks", None, None), ("totalTackles", DEFENDERS[team][1], str(2 + pts // 7))]
+        for i, (cat, name, line) in enumerate(names):
+            if name is None:
+                cats.append({"name": cat, "displayName": cat})
+                continue
+            m = re.search(r"([\d,]+) YDS", line)
+            value = float(m.group(1).replace(",", "")) if m else float(line)
+            aid = "8%s%d" % (ids[side], i)
+            cats.append({"name": cat, "displayName": cat, "leaders": [{"displayValue": line, "value": value,
+                         "athlete": {"id": aid, "displayName": name, "shortName": short_name(name),
+                                     "headshot": {"href": "https://img.invalid/h/%s.png" % aid}}}]})
+        out.append({"team": {"id": ids[side], "abbreviation": team}, "leaders": cats})
+    return out
+
+
+def last_five(away, home, ids):
+    """`lastFiveGames[]`, home first, each team's last five oldest first (winner-first scores, as ESPN)."""
+    opp = ["NYJ", "NE", "SF", "SEA", "LV", "DEN", "KC", "BUF"]
+    out = []
+    for side, team in (("home", home), ("away", away)):
+        evs = []
+        for i, o in enumerate([x for x in opp if x not in (away, home)][:5]):
+            res = "WLWWT"[i] if team == home else "LWWLW"[i]
+            score = "23-13" if res == "W" else "20-17" if res == "L" else "20-20"
+            evs.append({"gameDate": "2026-10-%02dT17:00:00Z" % (4 + 7 * i), "atVs": "@" if i % 2 else "vs",
+                        "opponent": {"id": TEAMS[o][0], "abbreviation": o}, "gameResult": res, "score": score})
+        out.append({"team": {"id": ids[side], "abbreviation": team}, "events": evs})
+    return out
+
+
+def injuries(away, home, ids, started=False):
+    """Pre-game: the week's report (IR included). In play (the real live capture): the game-day inactives, all Out."""
+    out = []
+    for side, team in (("home", home), ("away", away)):
+        rows = [("Questionable", "G", "Triceps"), ("Out", "WR", "Hamstring"), ("Injured Reserve", "LB", "Knee")]
+        if started:
+            rows = [("Out", "QB", "Coach's Decision"), ("Out", "WR", "Hamstring"), ("Out", "LB", "Coach's Decision")]
+        out.append({"team": {"id": ids[side], "abbreviation": team}, "injuries": [
+            {"status": st, "athlete": {"displayName": f"{TEAMS[team][2]} Player {i + 1}", "position": {"abbreviation": pos}},
+             "details": {"type": d}} for i, (st, pos, d) in enumerate(rows)]})
+    return out
+
+
+def drives_pad(kb, eid):
+    """A `drives` section of about [kb] KB of play objects (the app skips it), in ESPN's shape."""
+    prev, size, i = [], 0, 0
+    while size < kb * 1024:
+        d = {"id": "%s%03d" % (eid, i), "description": "9 plays, 75 yards, 4:41", "team": {"id": "1", "logos": [{"href": "https://img.invalid/l.png"}]},
+             "plays": [{"id": "%s%03d%d" % (eid, i, k), "text": "(Shotgun) pass short right for %d yards" % (3 + k),
+                        "clock": {"displayValue": "%d:%02d" % (14 - k, 30 + k)}, "start": {"yardLine": 25 + 5 * k, "down": 1 + k % 3},
+                        "statYardage": 3 + k, "wallclock": "2026-11-08T18:%02d:00Z" % (i % 60)} for k in range(6)]}
+        prev.append(d)
+        size += len(json.dumps(d)) + 1
+        i += 1
+    return {"previous": prev}
+
+
+def summary(sp, game, at, base, pad_kb, h):
+    """ESPN's `summary?event=` for [game] at [at]: the kept sections typed as the app reads them, home-first and away-first
+    sections as ESPN orders them, a padded `drives`, one-item `news` / `winprobability` / `pickcenter` stubs, and a key order
+    that differs by event (header first for odd ids, last for even ones)."""
+    eid, away, home = game[0], game[1], game[2]
+    s = sp.state(game, at)
+    state = s.get("state", "pre")
+    started = state != "pre"
+    ev = sp.event(game, at, base)
+    comp = ev["competitions"][0]
+    ids = {"away": TEAMS[away][0], "home": TEAMS[home][0]}
+    competitors = [{"id": c["id"], "homeAway": c["homeAway"], "order": c["order"], "winner": c.get("winner"),
+                    "record": [{"type": r["type"], "summary": r["summary"]} for r in c["records"]],
+                    "team": {"id": c["team"]["id"], "abbreviation": c["team"]["abbreviation"], "displayName": c["team"]["displayName"]}}
+                   for c in comp["competitors"]]  # home first, as the board's
+    header = {"id": eid, "competitions": [{"id": eid, "date": comp["date"], "status": comp["status"], "competitors": competitors,
+                                           "broadcasts": comp["broadcasts"]}]}
+    o = {}
+    head_first = int(eid) % 2 == 1
+    if head_first:
+        o["header"] = header
+    o["boxscore"] = {"teams": [{"team": {"id": ids[side], "abbreviation": t}, "statistics": team_stats(s, side, started)}
+                               for side, t in (("away", away), ("home", home))]}
+    if started:
+        o["boxscore"]["players"] = [box_players(t, ids[side], s, side) for side, t in (("away", away), ("home", home))]
+    o["gameInfo"] = {"venue": {"fullName": VENUES.get(home, "Stadium")}, "weather": {"temperature": 41}}
+    if started:
+        o["drives"] = drives_pad(pad_kb, eid)
+    o["leaders"] = leaders_section(away, home, ids, s, started)
+    if not started:
+        o["lastFiveGames"] = last_five(away, home, ids)
+    o["injuries"] = injuries(away, home, ids, started)
+    o["pickcenter"] = [{"provider": {"name": "fake"}, "details": "none"}]
+    if started:
+        o["scoringPlays"] = scoring_plays(sp, game, at, ids)
+    o["news"] = {"header": "News", "articles": [{"headline": "A fake news item"}]}
+    o["winprobability"] = [{"homeWinPercentage": 0.5, "playId": "1"}]
+    # (Integration section 18) The real live summary has no `article` at all: a Preview before, a Recap after.
+    if state == "post":
+        o["article"] = {"type": "Recap", "headline": f"{TEAMS[away][2]} and {TEAMS[home][2]} trade blows in a game the fake panel made up for the hub",
+                        "description": "not read", "story": "<p>not read</p>"}
+    elif not started:
+        o["article"] = {"type": "Preview", "headline": f"{TEAMS[away][2]} at {TEAMS[home][2]}: what to watch"}
+    o["videos"] = sports_video.espn_videos(h, eid) if state == "post" else []
+    if not head_first:
+        o["header"] = header
+    return o
+
+
+def handle_summary(h, path):
+    """`GET /apis/site/v2/sports/football/nfl/summary?event={id}` (fakepanel.py's `nfl_hub` route; the NFL switches already
+    checked). Faults: `sports_nfl_faults.summary_status` / `summary_pad_kb` / `summary_stall_ms`, plus `retry_after` and
+    `no_date`. gzip-encoded when the client accepts it, as ESPN's."""
+    p = h.panel
+    sp = p.sports_nfl
+    f = p.cfg.get("sports_nfl_faults") or {}
+    if f.get("summary_stall_ms"):
+        time.sleep(float(f["summary_stall_ms"]) / 1000.0)
+    now = time.time()
+    headers = {"Cache-Control": "max-age=%d" % (int(f["max_age"]) if f.get("max_age") is not None else 5)}
+    if not f.get("no_date"):
+        headers["Date"] = sports.http_date(now)
+    q = getattr(h, "q", {}) or {}
+    st = f.get("summary_status")
+    if st:
+        st = int(st)
+        hd = dict(headers)
+        if f.get("retry_after") is not None:
+            hd["Retry-After"] = str(int(f["retry_after"]))
+        p.sports.note(path, st)
+        if st == 202:
+            hd["x-amzn-waf-action"] = "challenge"
+            return sports.send(h, 202, WAF_BODY, "text/html", hd)
+        if st == 403:
+            return sports.send(h, 403, b"<html><body>403 Forbidden</body></html>", "text/html", hd)
+        if st == 404 and f.get("html_404"):
+            return sports.send(h, 404, NOT_FOUND_HTML, "text/html", hd)
+        return sports.send(h, st, json.dumps({"code": st, "message": "fakepanel NFL summary fault"}), "application/json", hd)
+    eid = q.get("event", "")
+    if not re.fullmatch(r"\d{1,12}", eid):
+        p.sports.note(path, 400)
+        return sports.send(h, 400, json.dumps({"code": 400, "message": "Invalid event: " + eid}), "application/json", headers)
+    game = next((g for g in all_games(sp) if g[0] == eid), None)
+    if game is None or sp.state(game, now).get("gone"):
+        p.sports.note(path, 404)
+        return sports.send(h, 404, json.dumps({"code": 404, "message": "Failed to get event summary"}), "application/json", headers)
+    pad = f.get("summary_pad_kb")
+    pad = int(p.cfg.get("sports_nfl_summary_pad_kb", 400) if pad is None else pad)
+    body = json.dumps(summary(sp, game, now, h.base(), pad, h)).encode()
+    p.sports.note(path, 200)
+    if "gzip" in (h.headers.get("Accept-Encoding") or ""):
+        return sports.send(h, 200, gzip.compress(body), "application/json", dict(headers, **{"Content-Encoding": "gzip"}))
+    return sports.send(h, 200, body, "application/json", headers)

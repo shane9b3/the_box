@@ -374,4 +374,283 @@
     <string name="sports_hub_beyond_guide_one">Not in guide yet: %1$s team channel</string>
     <string name="sports_hub_beyond_guide">Your guide doesn\'t cover this game yet</string>
     <string name="sports_hub_beyond_guide_none">Channels show 12 hours before the game</string>
+
+    <!-- ==== (NFL hub commit 0, docs/design/m6-nfl-hub.md §6.8) Every NFL text of the panel, sheets and clip player,
+         FROZEN with commit 0: P3 adds none on its own (a missing string goes through the lead). Words: Scoring,
+         Highlights, Game highlights, More videos, Recap, Leaders, Injury report. ESPN is named where the NHL texts name
+         NHL.com. Never "feed", "API", "summary", "endpoint" or "clip id". Panel text at 22/24 design px. -->
+
+    <!-- Slots (§2.3). The ▶ glyph is drawn, not text; a disabled slot draws no glyph. -->
+    <string name="sports_hub_slot_highlights">Highlights</string>
+    <string name="sports_hub_slot_highlights_soon">Highlights soon</string>
+    <string name="sports_hub_slot_no_highlights">No highlights</string>
+    <string name="sports_hub_slot_from_start">From start</string>
+    <string name="sports_hub_slot_scoring">Scoring</string>
+    <!-- %1$d = the scoring plays. -->
+    <string name="sports_hub_slot_scoring_n">Scoring (%1$d)</string>
+    <!-- Spoken reasons of disabled slots (§2.3). Highlights soon uses sports_hub_caption_highlights_soon, No highlights
+         the caption in force, the NHL's Recap soon sports_hub_caption_recap_soon. -->
+    <string name="sports_hub_reason_no_points">No points yet</string>
+    <!-- Spoken. The first usable slot while one or two are grey: %1$s = its label, %2$s = the grey slot's label(s),
+         %3$s = the reason(s). "Scoring (9). Highlights unavailable: ESPN didn't post highlights for this game". -->
+    <string name="sports_hub_desc_slot_note">%1$s. %2$s unavailable: %3$s</string>
+    <!-- Joins two grey slots' labels or reasons in the line above. -->
+    <string name="sports_hub_desc_join">%1$s; %2$s</string>
+
+    <!-- Tags and captions (§2.4). Poster caption 26/600, art captions 22/500, in 632 px. -->
+    <string name="sports_hub_tag_highlights">HIGHLIGHTS</string>
+    <!-- %1$s = the duration ("1:14"). -->
+    <string name="sports_hub_caption_highlights">Game highlights (%1$s)</string>
+    <string name="sports_hub_caption_highlights_soon">Highlights about 15 min after the game</string>
+    <string name="sports_hub_caption_highlights_none">ESPN didn\'t post highlights for this game</string>
+    <string name="sports_hub_caption_highlights_removed">ESPN removes videos after a few days</string>
+    <string name="sports_hub_caption_videos_off_espn">ESPN videos aren\'t available right now</string>
+    <!-- Pre-game, live, postponed. %1$s = the venue ("SoFi Stadium"), %2$s = the network ("Netflix"). -->
+    <string name="sports_hub_caption_venue_network">%1$s · %2$s</string>
+    <!-- Spoken media: the highlight poster. %1$s = the spoken duration ("1 minute 14 seconds"). -->
+    <string name="sports_hub_desc_media_highlights">Game highlights, %1$s</string>
+
+    <!-- Stat labels (§2.2), the centre column at 24/500 in 332 px. RECORD uses sports_hub_stat_record and the extra
+         Timeouts row sports_hub_stat_timeouts. -->
+    <string name="sports_hub_stat_total_yards">Total yards</string>
+    <string name="sports_hub_stat_pass_yards">Passing yards</string>
+    <string name="sports_hub_stat_rush_yards">Rushing yards</string>
+    <string name="sports_hub_stat_first_downs">First downs</string>
+    <string name="sports_hub_stat_third_down">3rd down</string>
+    <string name="sports_hub_stat_turnovers">Turnovers</string>
+    <string name="sports_hub_stat_possession_time">Time of possession</string>
+    <string name="sports_hub_stat_last5">Last 5</string>
+    <string name="sports_hub_stat_points_pg">Points scored per game</string>
+    <string name="sports_hub_stat_points_allowed_pg">Points allowed per game</string>
+    <string name="sports_hub_stat_yards_pg">Yards gained per game</string>
+    <string name="sports_hub_stat_yards_allowed_pg">Yards allowed per game</string>
+
+    <!-- Summary labels (§2.4): label 600, text 400, one line. -->
+    <string name="sports_hub_summary_leaders">Leaders</string>
+    <string name="sports_hub_summary_recap">Recap</string>
+    <string name="sports_hub_summary_latest_score">Latest score</string>
+    <string name="sports_hub_summary_passing_leaders">Passing leaders</string>
+    <string name="sports_hub_summary_rushing_leaders">Rushing leaders</string>
+    <!-- Latest score text. %1$s = the play text before " (", %2$s = the scoring team's abbreviation. -->
+    <string name="sports_hub_summary_score_play">%1$s (%2$s)</string>
+
+    <!-- The live situation line (§2.4), from the board. Pieces joined by sports_hub_summary_sep. Downs use
+         sports_hub_nfl_down_distance / sports_hub_nfl_down_goal ("2nd &amp; 7", "1st &amp; Goal"). -->
+    <!-- %1$s = the team in possession ("CIN"). -->
+    <string name="sports_hub_sit_ball">%1$s ball</string>
+    <!-- %1$s = the down ("2nd &amp; 7"), %2$s = the field side's abbreviation ("WSH"), %3$d = the yard line. -->
+    <string name="sports_hub_sit_at">%1$s at %2$s %3$d</string>
+    <!-- %1$s = the down. -->
+    <string name="sports_hub_sit_at_midfield">%1$s at midfield</string>
+    <string name="sports_hub_sit_red_zone">Red zone</string>
+    <!-- %1$d / %2$d = away / home timeouts left. -->
+    <string name="sports_hub_sit_timeouts">Timeouts %1$d–%2$d</string>
+    <!-- %1$s = the kicking team's abbreviation. -->
+    <string name="sports_hub_sit_kickoff">Kickoff · %1$s</string>
+    <string name="sports_hub_sit_after_score">After the score</string>
+    <string name="sports_hub_sit_delayed">Delayed · Play is stopped; the clock restarts when it resumes</string>
+
+    <!-- Pills (§2.1, §6.6). %1$s = the quarter ("Q1", "OT"). -->
+    <string name="sports_hub_pill_end_quarter">END %1$s</string>
+    <!-- %1$s = the period and clock ("Q3 5:32"). -->
+    <string name="sports_hub_pill_delayed">DELAYED · %1$s</string>
+
+    <!-- Leader pieces (§2.4). %1$s = the name ("Burrow"), %2$d = the yards. -->
+    <string name="sports_hub_leader_pass">%1$s %2$d pass</string>
+    <string name="sports_hub_leader_rush">%1$s %2$d rush</string>
+    <string name="sports_hub_leader_rec">%1$s %2$d rec</string>
+    <!-- %1$s = a leader piece, %2$s = the team's abbreviation. -->
+    <string name="sports_hub_leader_team">%1$s (%2$s)</string>
+    <!-- Pre-game. %1$s = the name, %2$s = ESPN's value ("2,838"). -->
+    <string name="sports_hub_leader_value">%1$s %2$s</string>
+
+    <!-- Scoring sheet (§3.1, §3.2). %1$s / %2$s = away / home abbreviations. -->
+    <string name="sports_hub_sheet_scoring">Scoring · %1$s at %2$s</string>
+    <!-- Type words (PlayScore); OTHER has none. -->
+    <string name="sports_hub_play_td">TD</string>
+    <string name="sports_hub_play_fg">FG</string>
+    <string name="sports_hub_play_safety">Safety</string>
+    <string name="sports_hub_play_def_td">Def TD</string>
+    <!-- %1$s = the team's abbreviation, %2$s = the type word ("CIN TD"). -->
+    <string name="sports_hub_play_team_type">%1$s %2$s</string>
+    <!-- Line 2 pieces: the period uses sports_hub_quarter_n / sports_hub_period_ot with sports_hub_goal_when; leads and
+         ties sports_hub_goal_leads / sports_hub_goal_tied. -->
+    <string name="sports_hub_row_game_highlights">Game highlights</string>
+    <string name="sports_hub_header_more_videos">More videos</string>
+    <string name="sports_hub_scoring_loading">Loading the scoring plays from ESPN. They show here in a moment; press Back to close.</string>
+    <string name="sports_hub_scoring_failed">ESPN didn\'t send the scoring plays. It tries again on its own; press Back to close and check back shortly.</string>
+    <string name="sports_hub_scoring_live_none">No scoring yet. Plays appear here as teams score; press Back to close.</string>
+    <string name="sports_hub_scoring_final_none">No points were scored in this game.</string>
+    <!-- OK on a scoring row (PLAY_NO_VIDEO). -->
+    <string name="sports_hub_play_no_video_toast">ESPN posts videos of only a few plays, mostly in games it airs. Any it posted are under More videos.</string>
+
+    <!-- Clip player sub-lines (§3.3): "Video: ESPN" always. %1$s / %2$s = away / home abbreviations. -->
+    <string name="sports_hub_clip_highlights_sub_espn">Game highlights · %1$s at %2$s · Video: ESPN</string>
+    <!-- %1$d / %2$d = video k of n; %3$s / %4$s = away / home abbreviations. -->
+    <string name="sports_hub_clip_video_sub_espn">Video %1$d of %2$d · %3$s at %4$s · Video: ESPN</string>
+
+    <!-- ESPN video toasts (§3.4). Offline and not-playable use the shared texts; the mid-clip card
+         sports_hub_error_video_stopped. -->
+    <string name="sports_hub_error_video_expired_espn">ESPN removed this video; game videos stay up for a few days. Pick another one.</string>
+    <string name="sports_hub_error_video_unavailable_espn">ESPN\'s video service didn\'t answer. Try again in a minute.</string>
+    <string name="sports_hub_error_video_later_espn">ESPN\'s video service asked the app to wait a while before asking again. Try again later.</string>
+
+    <!-- ESPN panel failure texts (§2.5); offline uses sports_hub_error_detail_offline. -->
+    <string name="sports_hub_error_detail_retry_espn">Couldn\'t load game stats from ESPN. Trying again automatically. Select Retry to try now.</string>
+    <string name="sports_hub_error_detail_auto_espn">Couldn\'t load game stats from ESPN. Trying again automatically. Select Highlights to see the game.</string>
+    <string name="sports_hub_error_detail_back_espn">Couldn\'t load game stats from ESPN. Trying again automatically. Press Back, then OK, to retry now.</string>
+    <string name="sports_hub_error_detail_limited_espn">ESPN is limiting requests right now. Stats load again in a few minutes.</string>
+    <string name="sports_hub_error_detail_changed_espn">ESPN changed how it sends game stats. Scores still update; stats need an app update.</string>
+    <string name="sports_hub_error_box_score_espn">Couldn\'t load the box score from ESPN. Select Retry, or press Back to close.</string>
+
+    <!-- Box score (§3.5). The line score uses sports_hub_row_quarter_n, sports_hub_row_ot and sports_hub_row_total. -->
+    <string name="sports_hub_box_passing">Passing</string>
+    <string name="sports_hub_box_rushing">Rushing</string>
+    <string name="sports_hub_box_receiving">Receiving</string>
+    <string name="sports_hub_box_c_att">C/ATT</string>
+    <string name="sports_hub_box_yds">YDS</string>
+    <string name="sports_hub_box_td">TD</string>
+    <string name="sports_hub_box_int">INT</string>
+    <string name="sports_hub_box_rtg">RTG</string>
+    <string name="sports_hub_box_car">CAR</string>
+    <string name="sports_hub_box_avg">AVG</string>
+    <string name="sports_hub_box_long">LONG</string>
+    <string name="sports_hub_box_rec">REC</string>
+
+    <!-- Matchup (§3.6). -->
+    <string name="sports_hub_matchup_season_leaders">Season leaders</string>
+    <string name="sports_hub_matchup_passing">Passing</string>
+    <string name="sports_hub_matchup_rushing">Rushing</string>
+    <string name="sports_hub_matchup_receiving">Receiving</string>
+    <string name="sports_hub_matchup_sacks">Sacks</string>
+    <string name="sports_hub_matchup_tackles">Tackles</string>
+    <string name="sports_hub_matchup_last5">Last 5 games</string>
+    <string name="sports_hub_matchup_injuries">Injury report</string>
+    <!-- Leader line units, lower-cased from ESPN's ("2,623 yds · 19 TD · 10 INT"). %1$s = ESPN's number. -->
+    <string name="sports_hub_unit_yds">%1$s yds</string>
+    <string name="sports_hub_unit_rec">%1$s rec</string>
+    <string name="sports_hub_unit_td">%1$s TD</string>
+    <string name="sports_hub_unit_int">%1$s INT</string>
+    <string name="sports_hub_unit_sacks">%1$s sacks</string>
+    <string name="sports_hub_unit_tackles">%1$s tackles</string>
+    <!-- Last 5, one game. %1$s = W / L / T, %2$s = the score winner first ("23–13"), %3$s = the opponent. -->
+    <string name="sports_hub_recent_vs">%1$s %2$s %3$s</string>
+    <string name="sports_hub_recent_at">%1$s %2$s @ %3$s</string>
+    <string name="sports_hub_result_w">W</string>
+    <string name="sports_hub_result_l">L</string>
+    <string name="sports_hub_result_t">T</string>
+    <!-- Injury statuses. -->
+    <string name="sports_hub_injury_out">Out</string>
+    <string name="sports_hub_injury_doubtful">Doubtful</string>
+    <string name="sports_hub_injury_questionable">Questionable</string>
+    <!-- "K. Zeitler · G · Questionable (triceps)". %1$s name, %2$s position, %3$s status, %4$s the injury. -->
+    <string name="sports_hub_injury_line">%1$s · %2$s · %3$s (%4$s)</string>
+    <string name="sports_hub_injury_line_plain">%1$s · %2$s · %3$s</string>
+    <!-- %1$d = the players not listed. -->
+    <string name="sports_hub_more_n">+%1$d more</string>
+
+    <!-- Spoken forms (§3.7). -->
+    <!-- A fraction: %1$d of %2$d ("4 of 12"). -->
+    <string name="sports_hub_desc_fraction">%1$d of %2$d</string>
+    <!-- A clock: %1$d minutes, %2$d seconds ("28 minutes 29"). -->
+    <string name="sports_hub_desc_clock">%1$d minutes %2$d</string>
+    <!-- The situation: pieces joined by ", ". -->
+    <string name="sports_hub_desc_sit_ball">%1$s ball</string>
+    <!-- %1$s = the spoken down ("second"), %2$d = the distance. -->
+    <string name="sports_hub_desc_sit_down">%1$s and %2$d</string>
+    <string name="sports_hub_desc_sit_goal">%1$s and goal</string>
+    <!-- %1$s = the field side's nickname, %2$d = the yard line. -->
+    <string name="sports_hub_desc_sit_at">at the %1$s %2$d</string>
+    <string name="sports_hub_desc_sit_midfield">at midfield</string>
+    <string name="sports_hub_desc_sit_red_zone">red zone</string>
+    <string name="sports_hub_desc_sit_timeouts">timeouts %1$d and %2$d</string>
+    <string name="sports_hub_desc_join_comma">%1$s, %2$s</string>
+    <string name="sports_hub_desc_down_1">first</string>
+    <string name="sports_hub_desc_down_2">second</string>
+    <string name="sports_hub_desc_down_3">third</string>
+    <string name="sports_hub_desc_down_4">fourth</string>
+    <!-- A scoring row: "Bengals touchdown. Tee Higgins 31 yard pass from Joe Burrow. Second quarter, 1:55. Bengals lead
+         10 to 0." %1$s team nickname, %2$s type, %3$s the play text (" Yd " read "yard"), %4$s when, %5$s the score. -->
+    <string name="sports_hub_desc_play">%1$s %2$s. %3$s. %4$s. %5$s.</string>
+    <string name="sports_hub_desc_play_td">touchdown</string>
+    <string name="sports_hub_desc_play_fg">field goal</string>
+    <string name="sports_hub_desc_play_safety">safety</string>
+    <string name="sports_hub_desc_play_def_td">defensive touchdown</string>
+    <string name="sports_hub_desc_play_other">score</string>
+    <string name="sports_hub_desc_yard">yard</string>
+    <!-- %1$s = "Second" (capitalised spoken quarter), %2$s = the clock. -->
+    <string name="sports_hub_desc_quarter_when">%1$s quarter, %2$s</string>
+    <string name="sports_hub_desc_overtime_when">Overtime, %1$s</string>
+    <string name="sports_hub_desc_quarter_1">First</string>
+    <string name="sports_hub_desc_quarter_2">Second</string>
+    <string name="sports_hub_desc_quarter_3">Third</string>
+    <string name="sports_hub_desc_quarter_4">Fourth</string>
+    <!-- %1$s = the leading nickname, %2$d / %3$d the score, leader first. -->
+    <string name="sports_hub_desc_play_leads">%1$s lead %2$d to %3$d</string>
+    <string name="sports_hub_desc_play_tied">Tied %1$d to %2$d</string>
+    <!-- A video row: %1$s = the spoken duration, %2$s = the headline. -->
+    <string name="sports_hub_desc_video_row">Video, %1$s. %2$s</string>
+    <!-- An injury row: "Kevin Zeitler, guard, questionable, triceps". -->
+    <string name="sports_hub_desc_injury">%1$s, %2$s, %3$s, %4$s</string>
+    <string name="sports_hub_desc_injury_plain">%1$s, %2$s, %3$s</string>
+    <string name="sports_hub_desc_injury_out">out</string>
+    <string name="sports_hub_desc_injury_doubtful">doubtful</string>
+    <string name="sports_hub_desc_injury_questionable">questionable</string>
+    <!-- Position names (§3.7); an unknown abbreviation is read as written. -->
+    <string name="sports_hub_pos_qb">quarterback</string>
+    <string name="sports_hub_pos_rb">running back</string>
+    <string name="sports_hub_pos_fb">fullback</string>
+    <string name="sports_hub_pos_wr">wide receiver</string>
+    <string name="sports_hub_pos_te">tight end</string>
+    <string name="sports_hub_pos_ot">offensive tackle</string>
+    <string name="sports_hub_pos_t">tackle</string>
+    <string name="sports_hub_pos_g">guard</string>
+    <string name="sports_hub_pos_c">center</string>
+    <string name="sports_hub_pos_de">defensive end</string>
+    <string name="sports_hub_pos_dt">defensive tackle</string>
+    <string name="sports_hub_pos_nt">nose tackle</string>
+    <string name="sports_hub_pos_lb">linebacker</string>
+    <string name="sports_hub_pos_olb">outside linebacker</string>
+    <string name="sports_hub_pos_ilb">inside linebacker</string>
+    <string name="sports_hub_pos_cb">cornerback</string>
+    <string name="sports_hub_pos_s">safety</string>
+    <string name="sports_hub_pos_db">defensive back</string>
+    <string name="sports_hub_pos_k">kicker</string>
+    <string name="sports_hub_pos_p">punter</string>
+    <string name="sports_hub_pos_ls">long snapper</string>
+
+    <!-- (§6.7) The CHL panel with nothing extra. Commit 0 adds it; P3 switches ChlHubUi to it (sports_hub_more_soon stays
+         until then, so commit 0 changes no pixel). -->
+    <string name="sports_hub_more_soon_chl">Game stats for this league aren\'t available yet.</string>
+
+    <!-- ==== (NFL hub P3 §17.3 note 12; folded in at integration §18) Texts the frozen §6.8 set did not have. -->
+    <!-- Spoken records and forms ("6-4" is read "6 wins, 4 losses"; "4-5-1" adds ", 1 tie"). Joined with
+         sports_hub_desc_join_comma. -->
+    <plurals name="sports_hub_desc_wins">
+        <item quantity="one">%1$d win</item>
+        <item quantity="other">%1$d wins</item>
+    </plurals>
+    <plurals name="sports_hub_desc_losses">
+        <item quantity="one">%1$d loss</item>
+        <item quantity="other">%1$d losses</item>
+    </plurals>
+    <plurals name="sports_hub_desc_ties">
+        <item quantity="one">%1$d tie</item>
+        <item quantity="other">%1$d ties</item>
+    </plurals>
+
+    <!-- Clip player sub-line of an ESPN clip that is not in the shown game's list (§3.3: "Video: ESPN" always).
+         %1$s / %2$s = away / home abbreviations. -->
+    <string name="sports_hub_clip_espn_sub">%1$s at %2$s · Video: ESPN</string>
+    <!-- The same without the game (the clip's game is no longer the panel's). -->
+    <string name="sports_hub_clip_espn_only">Video: ESPN</string>
+
+    <!-- (Integration §18, P3 note 16) The grey Matchup slot's spoken reason (UX M4): while the summary loads, and when ESPN
+         lists no leaders, last five or injuries. A reason and a next step. -->
+    <string name="sports_hub_reason_matchup_loading">Matchup details are still loading. Try again in a moment.</string>
+    <string name="sports_hub_reason_matchup_none">ESPN hasn\'t posted matchup details for this game yet. Check back closer to kick-off.</string>
+    <!-- (Code review 2026-11-26, UI m4) The summary failed with nothing cached (not "still loading"). -->
+    <string name="sports_hub_reason_matchup_failed">ESPN didn\'t send the matchup details. It tries again on its own; check back shortly.</string>
+    <!-- (UI M1) After kick-off the Matchup (season leaders, the week's injury report) is not offered; Scoring takes its slot. -->
+    <string name="sports_hub_reason_matchup_after_kickoff">The matchup is shown before kick-off only. Open Scoring for this game\'s plays.</string>
 </resources>

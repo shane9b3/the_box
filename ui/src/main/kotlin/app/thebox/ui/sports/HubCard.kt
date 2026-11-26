@@ -135,13 +135,17 @@ internal fun HubCard(
     focusRequester: FocusRequester? = null,
     /** (Review L9) The grid passes one measurer for every card; a lone card makes its own. */
     measure: Measure = rememberHubMeasure(),
+    /** (NFL hub §4.3) The view model's offer tick: the chip's clock is read again at each expiry instant. */
+    offerTick: Int = 0,
+    /** (NFL hub §4.3, integration §18) The view model's ESPN skew: the chip's offer check runs at `now + skew`. */
+    skewMs: Long = 0L,
 ) {
     val res = LocalResources.current
     val g = card.game
     val factor = UiTextScale.factor
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(20.dp)
-    val nowMs = remember(g, clock24) { System.currentTimeMillis() }
+    val nowMs = remember(g, clock24, offerTick) { System.currentTimeMillis() }
     val pill = remember(g, clock24, nowMs) { SportsText.hubPill(res, g, clock24, nowMs) }
     val league = g.id.league
     val away = remember(g) { HubNames.of(league, g.away) }
@@ -206,7 +210,7 @@ internal fun HubCard(
                 TeamRow(g.home, home, league, 1, g.phase, winner, SPORTS_HOME_NAME_TAG + g.id.id, measure)
             }
             Spacer(Modifier.weight(1f))
-            BottomRow(pill, g.id.id, card.followed, showHighlights && g.media?.let { it.recapId != null || it.condensedId != null || it.goalClips > 0 } == true)
+            BottomRow(pill, g.id.id, card.followed, showHighlights && cardHighlights(g, nowMs + skewMs))
         }
     }
 }
@@ -247,6 +251,13 @@ internal fun rememberHubMeasure(): Measure {
         }
     }
 }
+
+/**
+ * Whether the card's "● Highlights" chip lights (§1.2): the NHL with any board video; (NFL hub §2.1, §4.3) the NFL only
+ * while the board's highlight is offered at [nowMs] (`ClipOffer`); the CHL never has one.
+ */
+internal fun cardHighlights(g: app.thebox.core.sports.GameSnapshot, nowMs: Long): Boolean =
+    HubLeagues.of(g.id.league.group).cardHighlights(g, nowMs)
 
 /** The bottom row: the status pill, then at most one chip (§1.2); the chip is hidden when both do not fit, never the pill. */
 @Composable
@@ -310,7 +321,11 @@ internal fun StatusPill(pill: SportsText.HubPill, modifier: Modifier = Modifier,
  * SVG decoder, rasterised and trimmed to its art by [LogoTrim]), so the cards and the bug crop logos the same way.
  */
 @Composable
-internal fun HubLogo(team: TeamLine, league: League, wDp: Int, hDp: Int, modifier: Modifier = Modifier, align: Alignment = Alignment.CenterStart) {
+internal fun HubLogo(
+    team: TeamLine, league: League, wDp: Int, hDp: Int, modifier: Modifier = Modifier, align: Alignment = Alignment.CenterStart,
+    /** (NFL hub P3) The code's ink until the logo loads (a focused sheet row is light). */
+    codeColor: androidx.compose.ui.graphics.Color = GuideUi.Fg60,
+) {
     val loader = LocalShellImageLoader.current
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -335,7 +350,7 @@ internal fun HubLogo(team: TeamLine, league: League, wDp: Int, hDp: Int, modifie
     }
     Box(modifier.size(wDp.dp, hDp.dp), contentAlignment = align) {
         val img = logo
-        if (img == null) Line(team.abbrev, GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg60))
+        if (img == null) Line(team.abbrev, GuideUi.sans(22, FontWeight.SemiBold, codeColor))
         else Image(img, contentDescription = null, contentScale = ContentScale.Fit, alignment = align, modifier = Modifier.size(wDp.dp, hDp.dp))
     }
 }

@@ -155,7 +155,11 @@ data class TvBroadcast(val network: String, val market: Market, val country: Str
 enum class Market { NATIONAL, HOME, AWAY }
 
 /** NHL board video facts: ids from `threeMinRecap` / `condensedGame` (trailing number of the path) and `goals[].highlightClip`. */
-data class GameMedia(val recapId: Long?, val condensedId: Long?, val goalClips: Int)
+/**
+ * [recapExpiresMs] (NFL hub §5.1, §6.2): the effective expiry of the NFL board highlight in [recapId] (the card chip and
+ * slot 1 offer it only while `ClipOffer` holds); the NHL leaves it null.
+ */
+data class GameMedia(val recapId: Long?, val condensedId: Long?, val goalClips: Int, val recapExpiresMs: Long? = null)
 
 /** NFL / CHL board facts the app already receives (Sports Hub §7.1). Every field optional. */
 data class BoardExtras(
@@ -201,6 +205,8 @@ sealed interface LeagueDetail {
          */
         val awayYards: Int? = null,
         val homeYards: Int? = null,
+        /** (NFL hub §2.5; trailing, defaulted) The board's `status.type.name` contains "DELAY": the pill reads DELAYED. */
+        val delayed: Boolean = false,
     ) : LeagueDetail
 }
 

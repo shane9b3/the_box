@@ -321,6 +321,26 @@ class NhlClipResolverTest {
         assertEquals(4, lookups())
     }
 
+    /**
+     * (NFL hub code review 2026-11-26, data #1 / UI "not reviewed") `ClipSession` passes `fresh = true` to the NHL on Try
+     * again and on the expired-link re-resolve. The NHL resolver ignores it: `stream` is one lookup either way (the signed
+     * URL is new each time, so the re-resolve works), with the same answer, and the key is not re-read.
+     */
+    @Test fun freshIsIgnoredStreamIsAlwaysOneNewLookup() = runBlocking {
+        val (r, _) = resolver()
+        val plain = (r.stream(ref(), fresh = false) as ClipResult.Ok).value
+        assertEquals(1, lookups())
+        val fresh = (r.stream(ref(), fresh = true) as ClipResult.Ok).value
+        assertEquals("fresh is exactly one lookup, never two", 2, lookups())
+        assertEquals(plain.first.title, fresh.first.title)
+        assertEquals(plain.second.format, fresh.second.format)
+        assertEquals("the key is read once", 1, scriptReads())
+        // A failure under fresh is relayed as is (Try again then shows the same toast).
+        answers[ref().videoId.toString()] = { json("{}", 404) }
+        assertEquals(ClipResult.NotFound, r.stream(ref(), fresh = true))
+        assertEquals(3, lookups())
+    }
+
     @Test fun theStreamIsTheHttpsHlsMasterWithCaptions() = runBlocking {
         val (r, _) = resolver()
         val (info, stream) = (r.stream(ref()) as ClipResult.Ok).value

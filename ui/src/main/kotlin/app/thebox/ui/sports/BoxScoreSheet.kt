@@ -44,10 +44,14 @@ import androidx.tv.material3.Text
 import app.thebox.core.sports.Fetch
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.Side
+import app.thebox.core.sports.SportsConstants
+import app.thebox.core.sports.hub.BoxCategory
+import app.thebox.core.sports.hub.BoxLine
 import app.thebox.core.sports.hub.BoxScore
 import app.thebox.core.sports.hub.GoalieLine
 import app.thebox.core.sports.hub.SkaterLine
 import app.thebox.core.sports.hub.TeamBox
+import app.thebox.core.sports.group
 import app.thebox.ui.R
 import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
@@ -65,6 +69,10 @@ const val BOX_SCORE_RETRY_TAG = "hub_box_retry"
  *
  * Left / Right on the tabs switch the team; Down enters the rows (44 tall, focusable for scrolling); Up from the first row
  * goes back to the shown team's tab.
+ *
+ * (NFL hub §3.5) An NFL game: the line score by quarter from the board above the tabs (not focusable), then per team the
+ * Passing, Rushing and Receiving tables ([TeamBox.tables], at most `HUB_NFL_BOX_LINES` athletes each, ESPN's order),
+ * and ESPN's failure words.
  */
 @Composable
 fun BoxScoreSheet(
@@ -79,7 +87,8 @@ fun BoxScoreSheet(
     val tabs = remember { Side.entries.associateWith { FocusRequester() } }
     val team: TeamBox? = (box as? Fetch.Ok)?.value?.let { if (side == Side.AWAY) it.away else it.home }
     val failed = box is Fetch.Failed || box is Fetch.NotFound
-    val rows = remember(team, failed) { boxRows(team, failed) }
+    val nfl = game.id.league.group == app.thebox.core.sports.LeagueGroup.NFL
+    val rows = remember(team, failed, nfl) { boxRows(team, failed, nfl) }
     val focusable = rows.indices.filter { rows[it].focusable }
     val requesters = remember(side, rows.size) { List(rows.size) { FocusRequester() } }
     val listState = rememberLazyListState()
@@ -108,6 +117,7 @@ fun BoxScoreSheet(
             if (retry >= 0) requesters[retry] to retry else tabs.getValue(side) to null
         },
         header = {
+            if (nfl) LineScore(res, game)
             Row(Modifier.padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 for (s in Side.entries) {
                     BoxTab(
@@ -130,7 +140,7 @@ fun BoxScoreSheet(
                 val last = focusable.lastOrNull() == i
                 when (row) {
                     BoxRow.Loading -> Line(res.getString(R.string.sports_hub_stat_none), GuideUi.sans(26, color = GuideUi.Fg70), Modifier.padding(horizontal = 16.dp))
-                    BoxRow.Error -> Line(res.getString(R.string.sports_hub_error_box_score), GuideUi.sans(24, color = GuideUi.Fg70), Modifier.padding(horizontal = 16.dp), maxLines = 3)
+                    BoxRow.Error -> Line(res.getString(if (nfl) R.string.sports_hub_error_box_score_espn else R.string.sports_hub_error_box_score), GuideUi.sans(24, color = GuideUi.Fg70), Modifier.padding(horizontal = 16.dp), maxLines = 3)
                     BoxRow.Retry -> HubSheetRow(reqs[i], first, last, key = "retry", height = 56, upTarget = tabs.getValue(side), onClick = onRetry) { c ->
                         Line(res.getString(R.string.sports_hub_slot_retry), GuideUi.sans(26, FontWeight.SemiBold, c), Modifier.testTag(BOX_SCORE_RETRY_TAG))
                     }
@@ -151,6 +161,15 @@ fun BoxScoreSheet(
                         Line(row.line.name, GuideUi.sans(26, FontWeight.Medium, c), Modifier.weight(1f))
                         goalieValues(row.line).zip(GOALIE_COLS).forEach { (v, col) -> Cell(v, c, col.second) }
                     }
+                    is BoxRow.Table -> Line(res.getString(boxCategoryTitle(row.category)), GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg70), Modifier.padding(start = 16.dp, top = 8.dp))
+                    is BoxRow.TableHeader -> TableRow(GuideUi.Fg70, header = true) { c ->
+                        Cell(res.getString(R.string.sports_hub_box_player), c, null)
+                        row.columns.forEach { col -> Cell(boxColumnLabel(res, col), c, nflColWidth(col)) }
+                    }
+                    is BoxRow.Athlete -> HubSheetRow(reqs[i], first, last, key = "nfl:$i", height = ROW_H, upTarget = tabs.getValue(side), onClick = {}) { c ->
+                        Line(row.line.name, GuideUi.sans(26, FontWeight.Medium, c), Modifier.weight(1f))
+                        row.columns.forEachIndexed { k, col -> Cell(row.line.values.getOrNull(k) ?: NONE, c, nflColWidth(col)) }
+                    }
                 }
             }
         }
@@ -169,10 +188,17 @@ internal sealed interface BoxRow {
     data class Skater(val line: SkaterLine) : BoxRow { override val focusable get() = true }
     data object GoalieHeader : BoxRow
     data class Goalie(val line: GoalieLine) : BoxRow { override val focusable get() = true }
+    /** (NFL hub §3.5) A table's title ("Passing"), its column header, and one athlete's line. */
+    data class Table(val category: BoxCategory) : BoxRow
+    data class TableHeader(val columns: List<String>) : BoxRow
+    data class Athlete(val line: BoxLine, val columns: List<String>) : BoxRow { override val focusable get() = true }
 }
 
-/** Skaters (forwards, then defence), then goalies; loading / failure rows. */
-internal fun boxRows(team: TeamBox?, failed: Boolean): List<BoxRow> = buildList {
+/**
+ * Skaters (forwards, then defence), then goalies; loading / failure rows. (NFL hub §3.5) [nfl]: the Passing, Rushing and
+ * Receiving tables in that order, each with at most `HUB_NFL_BOX_LINES` athletes.
+ */
+internal fun boxRows(team: TeamBox?, failed: Boolean, nfl: Boolean = false): List<BoxRow> = buildList {
     if (failed) {
         add(BoxRow.Error)
         add(BoxRow.Retry)
@@ -180,6 +206,16 @@ internal fun boxRows(team: TeamBox?, failed: Boolean): List<BoxRow> = buildList 
     }
     if (team == null) {
         add(BoxRow.Loading)
+        return@buildList
+    }
+    if (nfl) {
+        for (cat in BoxCategory.entries) {
+            val t = team.tables.firstOrNull { it.category == cat } ?: continue
+            if (t.lines.isEmpty()) continue
+            add(BoxRow.Table(cat))
+            add(BoxRow.TableHeader(t.columns))
+            t.lines.take(SportsConstants.HUB_NFL_BOX_LINES).forEach { add(BoxRow.Athlete(it, t.columns)) }
+        }
         return@buildList
     }
     val (defence, forwards) = team.skaters.partition { it.pos.equals("D", ignoreCase = true) }
@@ -203,6 +239,33 @@ internal fun playerCell(res: Resources, name: String, pos: String): String =
     if (pos.isBlank()) name else name + res.getString(R.string.sports_hub_summary_sep) + pos
 
 private const val NONE = "–"
+
+internal fun boxCategoryTitle(c: BoxCategory): Int = when (c) {
+    BoxCategory.PASSING -> R.string.sports_hub_box_passing
+    BoxCategory.RUSHING -> R.string.sports_hub_box_rushing
+    BoxCategory.RECEIVING -> R.string.sports_hub_box_receiving
+}
+
+/**
+ * (NFL hub §3.5; integration §18) A column's header: `BoxTable.columns` are ESPN's stat keys ("completions/passingAttempts",
+ * "passingYards", "QBRating"), the one representation from `:core`; the sheet's words (C/ATT, YDS, TD, INT, RTG, CAR, AVG,
+ * LONG, REC) are these resources. A key the mapper never emits is shown as given.
+ */
+internal fun boxColumnLabel(res: Resources, key: String): String = when (key.trim().lowercase(Locale.ROOT)) {
+    "completions/passingattempts" -> res.getString(R.string.sports_hub_box_c_att)
+    "passingyards", "rushingyards", "receivingyards" -> res.getString(R.string.sports_hub_box_yds)
+    "passingtouchdowns", "rushingtouchdowns", "receivingtouchdowns" -> res.getString(R.string.sports_hub_box_td)
+    "interceptions" -> res.getString(R.string.sports_hub_box_int)
+    "qbrating" -> res.getString(R.string.sports_hub_box_rtg)
+    "rushingattempts" -> res.getString(R.string.sports_hub_box_car)
+    "yardsperrushattempt", "yardsperreception" -> res.getString(R.string.sports_hub_box_avg)
+    "longrushing", "longreception" -> res.getString(R.string.sports_hub_box_long)
+    "receptions" -> res.getString(R.string.sports_hub_box_rec)
+    else -> key
+}
+
+/** The C/ATT column holds "21/32"; every other NFL column a number of up to 5 characters at 22 px (× Largest). */
+private fun nflColWidth(key: String): Int = if (key.contains('/')) 104 else 88
 
 internal fun skaterValues(s: SkaterLine): List<String> = listOf(
     s.g.toString(), s.a.toString(), s.p.toString(),
@@ -235,6 +298,31 @@ private val GOALIE_COLS = listOf(
 )
 
 // ------------------------------------------------------------------ parts
+
+internal const val BOX_LINE_SCORE_TAG = "hub_box_line_score"
+
+/**
+ * (NFL hub §3.5) The line score (not focusable), 22/500 tabular: the teams' abbreviations by Q1 Q2 Q3 Q4 (OT) T, from the
+ * board's quarters and score. Nothing without quarters.
+ */
+@Composable
+private fun LineScore(res: Resources, game: GameSnapshot) {
+    val periods = game.extras?.periods.orEmpty()
+    if (periods.isEmpty()) return
+    val heads = periods.map { p ->
+        if (p.label.kind == app.thebox.core.sports.PeriodKind.REG) res.getString(R.string.sports_hub_row_quarter_n, p.label.number) else SportsText.periodWord(res, p.label)
+    } + res.getString(R.string.sports_hub_row_total)
+    val away = periods.map { it.away.toString() } + (game.away.score ?: periods.sumOf { it.away }).toString()
+    val home = periods.map { it.home.toString() } + (game.home.score ?: periods.sumOf { it.home }).toString()
+    androidx.compose.foundation.layout.Column(Modifier.padding(bottom = 12.dp).testTag(BOX_LINE_SCORE_TAG)) {
+        for ((name, cells, ink) in listOf(Triple("", heads, GuideUi.Fg70), Triple(game.away.abbrev, away, GuideUi.Fg), Triple(game.home.abbrev, home, GuideUi.Fg))) {
+            Row(Modifier.height(36.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(name, Modifier.width(96.dp), style = GuideUi.sans(22, FontWeight.SemiBold, ink), maxLines = 1)
+                cells.forEach { Text(it, Modifier.width(64.dp), style = GuideUi.mono(22, FontWeight.Medium, ink), maxLines = 1, textAlign = TextAlign.End) }
+            }
+        }
+    }
+}
 
 /** A table cell: 22/500 tabular, right-aligned in [width] design px; null width = the flexible name column. */
 @Composable

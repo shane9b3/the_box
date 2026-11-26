@@ -1,0 +1,270 @@
+{
+ "events": [
+  {
+   "id": "401873079",
+   "date": "2026-11-26T01:00Z",
+   "name": "Green Bay Packers at Los Angeles Rams",
+   "shortName": "GB @ LAR",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "week": {
+    "number": 12
+   },
+   "competitions": [
+    {
+     "id": "401873079",
+     "date": "2026-11-26T01:00Z",
+     "attendance": 0,
+     "neutralSite": false,
+     "competitors": [
+      {
+       "id": "14",
+       "homeAway": "home",
+       "score": "13",
+       "linescores": [
+        {
+         "value": 6.0,
+         "displayValue": "6",
+         "period": 1
+        },
+        {
+         "value": 7.0,
+         "displayValue": "7",
+         "period": 2
+        }
+       ],
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Any",
+         "type": "total",
+         "summary": "6-4"
+        },
+        {
+         "name": "Home",
+         "type": "home",
+         "summary": "2-3"
+        },
+        {
+         "name": "Road",
+         "type": "road",
+         "summary": "4-1"
+        }
+       ],
+       "team": {
+        "id": "14",
+        "location": "Los Angeles",
+        "name": "Rams",
+        "abbreviation": "LAR",
+        "displayName": "Los Angeles Rams",
+        "shortDisplayName": "Rams"
+       }
+      },
+      {
+       "id": "9",
+       "homeAway": "away",
+       "score": "13",
+       "linescores": [
+        {
+         "value": 3.0,
+         "displayValue": "3",
+         "period": 1
+        },
+        {
+         "value": 10.0,
+         "displayValue": "10",
+         "period": 2
+        }
+       ],
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Any",
+         "type": "total",
+         "summary": "6-4"
+        },
+        {
+         "name": "Home",
+         "type": "home",
+         "summary": "3-2"
+        },
+        {
+         "name": "Road",
+         "type": "road",
+         "summary": "3-2"
+        }
+       ],
+       "team": {
+        "id": "9",
+        "location": "Green Bay",
+        "name": "Packers",
+        "abbreviation": "GB",
+        "displayName": "Green Bay Packers",
+        "shortDisplayName": "Packers"
+       }
+      }
+     ],
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 2,
+      "type": {
+       "id": "23",
+       "name": "STATUS_HALFTIME",
+       "state": "in",
+       "completed": false,
+       "description": "Halftime",
+       "detail": "Halftime",
+       "shortDetail": "Halftime"
+      },
+      "isTBDFlex": false
+     },
+     "situation": {
+      "lastPlay": {
+       "id": "4018730792071",
+       "type": {
+        "id": "65",
+        "text": "End of Half",
+        "abbreviation": "EH"
+       },
+       "text": "END QUARTER 2",
+       "scoreValue": 0,
+       "team": {
+        "id": "14"
+       },
+       "probability": {
+        "tiePercentage": 0.0,
+        "homeWinPercentage": 0.624,
+        "awayWinPercentage": 0.376,
+        "secondsLeft": 0
+       },
+       "statYardage": 0,
+       "drive": {
+        "description": "3 plays, 8 yards, 1:50",
+        "start": {
+         "yardLine": 30,
+         "text": "LAR 30"
+        },
+        "end": {
+         "yardLine": 33,
+         "text": "LAR 33"
+        },
+        "timeElapsed": {
+         "displayValue": "1:50"
+        },
+        "result": "END OF HALF"
+       },
+       "start": {
+        "yardLine": 38,
+        "team": {
+         "id": "14"
+        }
+       },
+       "end": {
+        "yardLine": 38,
+        "team": {
+         "id": "14"
+        }
+       }
+      },
+      "down": 1,
+      "yardLine": 38,
+      "distance": 2,
+      "isRedZone": false,
+      "homeTimeouts": 3,
+      "awayTimeouts": 3
+     },
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "Netflix"
+       ]
+      }
+     ],
+     "leaders": [
+      {
+       "name": "passingYards",
+       "displayName": "Passing Leader",
+       "leaders": [
+        {
+         "displayValue": "12/18, 154 YDS, 1 TD",
+         "value": 154.0,
+         "athlete": {
+          "id": "4036378",
+          "displayName": "Jordan Love",
+          "shortName": "J. Love",
+          "jersey": "10",
+          "position": {
+           "abbreviation": "QB"
+          },
+          "headshot": {
+           "href": "https://img.invalid/h/4036378.png"
+          }
+         },
+         "team": {
+          "id": "9"
+         }
+        }
+       ]
+      },
+      {
+       "name": "rushingYards",
+       "displayName": "Rushing Leader",
+       "leaders": [
+        {
+         "displayValue": "7 CAR, 23 YDS",
+         "value": 23.0,
+         "athlete": {
+          "id": "4429096",
+          "displayName": "Blake Corum",
+          "shortName": "B. Corum",
+          "jersey": "24",
+          "position": {
+           "abbreviation": "RB"
+          },
+          "headshot": {
+           "href": "https://img.invalid/h/4429096.png"
+          }
+         },
+         "team": {
+          "id": "14"
+         }
+        }
+       ]
+      },
+      {
+       "name": "receivingYards",
+       "displayName": "Receiving Leader",
+       "leaders": [
+        {
+         "displayValue": "4 REC, 65 YDS, 1 TD",
+         "value": 65.0,
+         "athlete": {
+          "id": "4248528",
+          "displayName": "Christian Watson",
+          "shortName": "C. Watson",
+          "jersey": "9",
+          "position": {
+           "abbreviation": "WR"
+          },
+          "headshot": {
+           "href": "https://img.invalid/h/4248528.png"
+          }
+         },
+         "team": {
+          "id": "9"
+         }
+        }
+       ]
+      }
+     ],
+     "highlights": []
+    }
+   ]
+  }
+ ]
+}

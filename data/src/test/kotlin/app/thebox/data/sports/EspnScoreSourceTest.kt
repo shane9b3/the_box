@@ -294,7 +294,8 @@ class EspnScoreSourceTest {
         assertEquals(FailKind.HTTP_5XX, (runBlocking { s.day("2026-11-09") } as Fetch.Failed).kind)
         answers["dates=20261109"] = { json("{}", 403, "Retry-After" to "99999") }
         val o = runBlocking { s.day("2026-11-09") } as Fetch.Failed
-        assertEquals(FailKind.HTTP_OTHER, o.kind)
+        // (NFL hub P2, arch M6) ESPN's WAF rule: a 403 on any ESPN call, the day board included, is a slow-down.
+        assertEquals(FailKind.HTTP_429, o.kind)
         assertEquals(300, o.retryAfterS)
     }
 
@@ -434,6 +435,8 @@ class EspnScoreSourceTest {
                 "http://10.0.2.2:8080/apis/site/v2/sports/football/nfl/",
                 "http://10.0.2.2:8080/",
                 "http://10.0.2.2:8080/v2/sports/football/leagues/nfl/", // (NFL YDS §1.7) the statistics base
+                "http://10.0.2.2:8080/espn-core/v1/video/clips/", // (NFL hub commit 0) the clip record base
+                debugOverride = true, // (NFL hub code review 2026-11-26, data #4)
             ),
             EspnEndpoints.fromOverride(" http://10.0.2.2:8080/\n"),
         )

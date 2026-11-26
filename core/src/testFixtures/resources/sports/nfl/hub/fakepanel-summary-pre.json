@@ -1,0 +1,642 @@
+{
+ "boxscore": {
+  "teams": [
+   {
+    "team": {
+     "id": "25",
+     "abbreviation": "SF"
+    },
+    "statistics": [
+     {
+      "name": "totalPointsPerGame",
+      "displayValue": "29.1",
+      "value": "29.1",
+      "label": "totalPointsPerGame"
+     },
+     {
+      "name": "totalPointsPerGameAllowed",
+      "displayValue": "25.7",
+      "value": "25.7",
+      "label": "totalPointsPerGameAllowed"
+     },
+     {
+      "name": "yardsPerGame",
+      "displayValue": "340.2",
+      "value": "340.2",
+      "label": "yardsPerGame"
+     },
+     {
+      "name": "yardsPerGameAllowed",
+      "displayValue": "318.6",
+      "value": "318.6",
+      "label": "yardsPerGameAllowed"
+     },
+     {
+      "name": "passingYardsPerGame",
+      "displayValue": "221.4",
+      "value": "221.4",
+      "label": "passingYardsPerGame"
+     },
+     {
+      "name": "passingYardsPerGameAllowed",
+      "displayValue": "207.9",
+      "value": "207.9",
+      "label": "passingYardsPerGameAllowed"
+     },
+     {
+      "name": "rushingYardsPerGame",
+      "displayValue": "118.8",
+      "value": "118.8",
+      "label": "rushingYardsPerGame"
+     },
+     {
+      "name": "rushingYardsPerGameAllowed",
+      "displayValue": "110.7",
+      "value": "110.7",
+      "label": "rushingYardsPerGameAllowed"
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "26",
+     "abbreviation": "SEA"
+    },
+    "statistics": [
+     {
+      "name": "totalPointsPerGame",
+      "displayValue": "29.1",
+      "value": "29.1",
+      "label": "totalPointsPerGame"
+     },
+     {
+      "name": "totalPointsPerGameAllowed",
+      "displayValue": "25.7",
+      "value": "25.7",
+      "label": "totalPointsPerGameAllowed"
+     },
+     {
+      "name": "yardsPerGame",
+      "displayValue": "340.2",
+      "value": "340.2",
+      "label": "yardsPerGame"
+     },
+     {
+      "name": "yardsPerGameAllowed",
+      "displayValue": "318.6",
+      "value": "318.6",
+      "label": "yardsPerGameAllowed"
+     },
+     {
+      "name": "passingYardsPerGame",
+      "displayValue": "221.4",
+      "value": "221.4",
+      "label": "passingYardsPerGame"
+     },
+     {
+      "name": "passingYardsPerGameAllowed",
+      "displayValue": "207.9",
+      "value": "207.9",
+      "label": "passingYardsPerGameAllowed"
+     },
+     {
+      "name": "rushingYardsPerGame",
+      "displayValue": "118.8",
+      "value": "118.8",
+      "label": "rushingYardsPerGame"
+     },
+     {
+      "name": "rushingYardsPerGameAllowed",
+      "displayValue": "110.7",
+      "value": "110.7",
+      "label": "rushingYardsPerGameAllowed"
+     }
+    ]
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "fullName": "Lumen Field"
+  },
+  "weather": {
+   "temperature": 41
+  }
+ },
+ "leaders": [
+  {
+   "team": {
+    "id": "26",
+    "abbreviation": "SEA"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "passingYards",
+     "leaders": [
+      {
+       "displayValue": "180/280, 2,100 YDS, 14 TD, 3 INT",
+       "value": 2100.0,
+       "athlete": {
+        "id": "8260",
+        "displayName": "Sam Darnold",
+        "shortName": "S. Darnold",
+        "headshot": {
+         "href": "https://img.invalid/h/8260.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "rushingYards",
+     "leaders": [
+      {
+       "displayValue": "121 CAR, 612 YDS, 4 TD",
+       "value": 612.0,
+       "athlete": {
+        "id": "8261",
+        "displayName": "Kenneth Walker",
+        "shortName": "K. Walker",
+        "headshot": {
+         "href": "https://img.invalid/h/8261.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "receivingYards",
+     "leaders": [
+      {
+       "displayValue": "52 REC, 701 YDS, 5 TD",
+       "value": 701.0,
+       "athlete": {
+        "id": "8262",
+        "displayName": "Jaxon Smith-Njigba",
+        "shortName": "J. Smith-Njigba",
+        "headshot": {
+         "href": "https://img.invalid/h/8262.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "sacks",
+     "leaders": [
+      {
+       "displayValue": "5.5",
+       "value": 5.5,
+       "athlete": {
+        "id": "8263",
+        "displayName": "Seahawk Edge",
+        "shortName": "S. Edge",
+        "headshot": {
+         "href": "https://img.invalid/h/8263.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "totalTackles",
+     "leaders": [
+      {
+       "displayValue": "67",
+       "value": 67.0,
+       "athlete": {
+        "id": "8264",
+        "displayName": "Seahawk Linebacker",
+        "shortName": "S. Linebacker",
+        "headshot": {
+         "href": "https://img.invalid/h/8264.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "25",
+    "abbreviation": "SF"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "passingYards",
+     "leaders": [
+      {
+       "displayValue": "180/280, 2,100 YDS, 14 TD, 3 INT",
+       "value": 2100.0,
+       "athlete": {
+        "id": "8250",
+        "displayName": "Brock Purdy",
+        "shortName": "B. Purdy",
+        "headshot": {
+         "href": "https://img.invalid/h/8250.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "rushingYards",
+     "leaders": [
+      {
+       "displayValue": "121 CAR, 612 YDS, 4 TD",
+       "value": 612.0,
+       "athlete": {
+        "id": "8251",
+        "displayName": "Christian McCaffrey",
+        "shortName": "C. McCaffrey",
+        "headshot": {
+         "href": "https://img.invalid/h/8251.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "receivingYards",
+     "leaders": [
+      {
+       "displayValue": "52 REC, 701 YDS, 5 TD",
+       "value": 701.0,
+       "athlete": {
+        "id": "8252",
+        "displayName": "George Kittle",
+        "shortName": "G. Kittle",
+        "headshot": {
+         "href": "https://img.invalid/h/8252.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "sacks",
+     "leaders": [
+      {
+       "displayValue": "5.5",
+       "value": 5.5,
+       "athlete": {
+        "id": "8253",
+        "displayName": "49er Edge",
+        "shortName": "4. Edge",
+        "headshot": {
+         "href": "https://img.invalid/h/8253.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "totalTackles",
+     "leaders": [
+      {
+       "displayValue": "67",
+       "value": 67.0,
+       "athlete": {
+        "id": "8254",
+        "displayName": "49er Linebacker",
+        "shortName": "4. Linebacker",
+        "headshot": {
+         "href": "https://img.invalid/h/8254.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "lastFiveGames": [
+  {
+   "team": {
+    "id": "26",
+    "abbreviation": "SEA"
+   },
+   "events": [
+    {
+     "gameDate": "2026-10-04T17:00:00Z",
+     "atVs": "vs",
+     "opponent": {
+      "id": "20",
+      "abbreviation": "NYJ"
+     },
+     "gameResult": "W",
+     "score": "23-13"
+    },
+    {
+     "gameDate": "2026-10-11T17:00:00Z",
+     "atVs": "@",
+     "opponent": {
+      "id": "17",
+      "abbreviation": "NE"
+     },
+     "gameResult": "L",
+     "score": "20-17"
+    },
+    {
+     "gameDate": "2026-10-18T17:00:00Z",
+     "atVs": "vs",
+     "opponent": {
+      "id": "13",
+      "abbreviation": "LV"
+     },
+     "gameResult": "W",
+     "score": "23-13"
+    },
+    {
+     "gameDate": "2026-10-25T17:00:00Z",
+     "atVs": "@",
+     "opponent": {
+      "id": "7",
+      "abbreviation": "DEN"
+     },
+     "gameResult": "W",
+     "score": "23-13"
+    },
+    {
+     "gameDate": "2026-10-32T17:00:00Z",
+     "atVs": "vs",
+     "opponent": {
+      "id": "12",
+      "abbreviation": "KC"
+     },
+     "gameResult": "T",
+     "score": "20-20"
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "25",
+    "abbreviation": "SF"
+   },
+   "events": [
+    {
+     "gameDate": "2026-10-04T17:00:00Z",
+     "atVs": "vs",
+     "opponent": {
+      "id": "20",
+      "abbreviation": "NYJ"
+     },
+     "gameResult": "L",
+     "score": "20-17"
+    },
+    {
+     "gameDate": "2026-10-11T17:00:00Z",
+     "atVs": "@",
+     "opponent": {
+      "id": "17",
+      "abbreviation": "NE"
+     },
+     "gameResult": "W",
+     "score": "23-13"
+    },
+    {
+     "gameDate": "2026-10-18T17:00:00Z",
+     "atVs": "vs",
+     "opponent": {
+      "id": "13",
+      "abbreviation": "LV"
+     },
+     "gameResult": "W",
+     "score": "23-13"
+    },
+    {
+     "gameDate": "2026-10-25T17:00:00Z",
+     "atVs": "@",
+     "opponent": {
+      "id": "7",
+      "abbreviation": "DEN"
+     },
+     "gameResult": "L",
+     "score": "20-17"
+    },
+    {
+     "gameDate": "2026-10-32T17:00:00Z",
+     "atVs": "vs",
+     "opponent": {
+      "id": "12",
+      "abbreviation": "KC"
+     },
+     "gameResult": "W",
+     "score": "23-13"
+    }
+   ]
+  }
+ ],
+ "injuries": [
+  {
+   "team": {
+    "id": "26",
+    "abbreviation": "SEA"
+   },
+   "injuries": [
+    {
+     "status": "Questionable",
+     "athlete": {
+      "displayName": "Seahawks Player 1",
+      "position": {
+       "abbreviation": "G"
+      }
+     },
+     "details": {
+      "type": "Triceps"
+     }
+    },
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Seahawks Player 2",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Hamstring"
+     }
+    },
+    {
+     "status": "Injured Reserve",
+     "athlete": {
+      "displayName": "Seahawks Player 3",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Knee"
+     }
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "25",
+    "abbreviation": "SF"
+   },
+   "injuries": [
+    {
+     "status": "Questionable",
+     "athlete": {
+      "displayName": "49ers Player 1",
+      "position": {
+       "abbreviation": "G"
+      }
+     },
+     "details": {
+      "type": "Triceps"
+     }
+    },
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "49ers Player 2",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Hamstring"
+     }
+    },
+    {
+     "status": "Injured Reserve",
+     "athlete": {
+      "displayName": "49ers Player 3",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Knee"
+     }
+    }
+   ]
+  }
+ ],
+ "pickcenter": [
+  {
+   "provider": {
+    "name": "fake"
+   },
+   "details": "none"
+  }
+ ],
+ "news": {
+  "header": "News",
+  "articles": [
+   {
+    "headline": "A fake news item"
+   }
+  ]
+ },
+ "winprobability": [
+  {
+   "homeWinPercentage": 0.5,
+   "playId": "1"
+  }
+ ],
+ "article": {
+  "type": "Preview",
+  "headline": "49ers at Seahawks: what to watch"
+ },
+ "videos": [],
+ "header": {
+  "id": "401899002",
+  "competitions": [
+   {
+    "id": "401899002",
+    "date": "2026-11-26T04:09Z",
+    "status": {
+     "clock": 0.0,
+     "displayClock": "0:00",
+     "period": 0,
+     "type": {
+      "id": "1",
+      "name": "STATUS_SCHEDULED",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "detail": "Wed, November 25 at 11:09 PM ET",
+      "shortDetail": "11/25 - 11:09 PM ET"
+     }
+    },
+    "competitors": [
+     {
+      "id": "26",
+      "homeAway": "home",
+      "order": 0,
+      "winner": null,
+      "record": [
+       {
+        "type": "total",
+        "summary": "5-6"
+       },
+       {
+        "type": "home",
+        "summary": "3-1"
+       },
+       {
+        "type": "road",
+        "summary": "2-2"
+       }
+      ],
+      "team": {
+       "id": "26",
+       "abbreviation": "SEA",
+       "displayName": "Seattle Seahawks"
+      }
+     },
+     {
+      "id": "25",
+      "homeAway": "away",
+      "order": 1,
+      "winner": null,
+      "record": [
+       {
+        "type": "total",
+        "summary": "9-2"
+       },
+       {
+        "type": "home",
+        "summary": "3-1"
+       },
+       {
+        "type": "road",
+        "summary": "2-2"
+       }
+      ],
+      "team": {
+       "id": "25",
+       "abbreviation": "SF",
+       "displayName": "San Francisco 49ers"
+      }
+     }
+    ],
+    "broadcasts": [
+     {
+      "market": "national",
+      "names": [
+       "Fox"
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -1227,6 +1227,14 @@ internal class PlaybackControllerImpl @Inject constructor(
         }
         params.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, c.audioDropped)
         params.setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, videoShouldBeDisabled(c))
+        // (NFL hub §4.5) The clip rendition cap on low-RAM devices; every other cycle clears it (it would persist).
+        if (c.isClip && engine.isLowRam) {
+            params.setMaxVideoSize(ClipRendition.LOW_RAM_MAX_WIDTH, ClipRendition.LOW_RAM_MAX_HEIGHT)
+            params.setMaxVideoFrameRate(ClipRendition.LOW_RAM_MAX_FPS)
+        } else {
+            params.clearVideoSizeConstraints()
+            params.setMaxVideoFrameRate(Int.MAX_VALUE)
+        }
         p.trackSelectionParameters = params.build()
         _video.update { it.copy(posterMode = posterMode(c), decoderOverride = channelDecoderOverride(c)) }
     }

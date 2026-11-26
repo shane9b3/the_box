@@ -1,0 +1,1627 @@
+{
+ "boxscore": {
+  "teams": [
+   {
+    "team": {
+     "id": "9",
+     "location": "Green Bay",
+     "name": "Packers",
+     "abbreviation": "GB",
+     "displayName": "Green Bay Packers",
+     "shortDisplayName": "Packers"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "9"
+     },
+     {
+      "name": "firstDownsPassing",
+      "displayValue": "5"
+     },
+     {
+      "name": "firstDownsRushing",
+      "displayValue": "3"
+     },
+     {
+      "name": "firstDownsPenalty",
+      "displayValue": "1"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "2-5"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "0-0"
+     },
+     {
+      "name": "totalOffensivePlays",
+      "displayValue": "28"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "189"
+     },
+     {
+      "name": "yardsPerPlay",
+      "displayValue": "6.8"
+     },
+     {
+      "name": "totalDrives",
+      "displayValue": "5"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "154"
+     },
+     {
+      "name": "completionAttempts",
+      "displayValue": "12/18"
+     },
+     {
+      "name": "yardsPerPass",
+      "displayValue": "8.6"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0"
+     },
+     {
+      "name": "sacksYardsLost",
+      "displayValue": "0-0"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "35"
+     },
+     {
+      "name": "rushingAttempts",
+      "displayValue": "10"
+     },
+     {
+      "name": "yardsPerRushAttempt",
+      "displayValue": "3.5"
+     },
+     {
+      "name": "redZoneAttempts",
+      "displayValue": "1-1"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "3-57"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "1"
+     },
+     {
+      "name": "fumblesLost",
+      "displayValue": "1"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0"
+     },
+     {
+      "name": "defensiveTouchdowns",
+      "displayValue": "0"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "13:05"
+     }
+    ],
+    "homeAway": "away"
+   },
+   {
+    "team": {
+     "id": "14",
+     "location": "Los Angeles",
+     "name": "Rams",
+     "abbreviation": "LAR",
+     "displayName": "Los Angeles Rams",
+     "shortDisplayName": "Rams"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "9"
+     },
+     {
+      "name": "firstDownsPassing",
+      "displayValue": "5"
+     },
+     {
+      "name": "firstDownsRushing",
+      "displayValue": "2"
+     },
+     {
+      "name": "firstDownsPenalty",
+      "displayValue": "2"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "2-6"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "0-0"
+     },
+     {
+      "name": "totalOffensivePlays",
+      "displayValue": "28"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "136"
+     },
+     {
+      "name": "yardsPerPlay",
+      "displayValue": "4.9"
+     },
+     {
+      "name": "totalDrives",
+      "displayValue": "5"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "90"
+     },
+     {
+      "name": "completionAttempts",
+      "displayValue": "12/15"
+     },
+     {
+      "name": "yardsPerPass",
+      "displayValue": "5.6"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0"
+     },
+     {
+      "name": "sacksYardsLost",
+      "displayValue": "1-8"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "46"
+     },
+     {
+      "name": "rushingAttempts",
+      "displayValue": "12"
+     },
+     {
+      "name": "yardsPerRushAttempt",
+      "displayValue": "3.8"
+     },
+     {
+      "name": "redZoneAttempts",
+      "displayValue": "1-1"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "2-15"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "0"
+     },
+     {
+      "name": "fumblesLost",
+      "displayValue": "0"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0"
+     },
+     {
+      "name": "defensiveTouchdowns",
+      "displayValue": "0"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "16:55"
+     }
+    ],
+    "homeAway": "home"
+   }
+  ],
+  "players": [
+   {
+    "team": {
+     "id": "9",
+     "location": "Green Bay",
+     "name": "Packers",
+     "abbreviation": "GB",
+     "displayName": "Green Bay Packers",
+     "shortDisplayName": "Packers"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4036378",
+         "displayName": "Jordan Love"
+        },
+        "stats": [
+         "12/18",
+         "154",
+         "8.6",
+         "1",
+         "0",
+         "0-0",
+         "111.8"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4431487",
+         "displayName": "Savion Williams"
+        },
+        "stats": [
+         "1",
+         "13",
+         "13.0",
+         "0",
+         "13"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4429023",
+         "displayName": "MarShawn Lloyd"
+        },
+        "stats": [
+         "1",
+         "10",
+         "10.0",
+         "0",
+         "10"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4248528",
+         "displayName": "Christian Watson"
+        },
+        "stats": [
+         "4",
+         "65",
+         "16.3",
+         "1",
+         "32",
+         "4"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4701936",
+         "displayName": "Matthew Golden"
+        },
+        "stats": [
+         "1",
+         "39",
+         "39.0",
+         "0",
+         "39",
+         "3"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "14",
+     "location": "Los Angeles",
+     "name": "Rams",
+     "abbreviation": "LAR",
+     "displayName": "Los Angeles Rams",
+     "shortDisplayName": "Rams"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "12483",
+         "displayName": "Matthew Stafford"
+        },
+        "stats": [
+         "12/15",
+         "98",
+         "6.5",
+         "0",
+         "0",
+         "1-8",
+         "93.9"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4429096",
+         "displayName": "Blake Corum"
+        },
+        "stats": [
+         "7",
+         "23",
+         "3.3",
+         "0",
+         "6"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4430737",
+         "displayName": "Kyren Williams"
+        },
+        "stats": [
+         "2",
+         "12",
+         "6.0",
+         "1",
+         "7"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4710855",
+         "displayName": "Konata Mumpfield"
+        },
+        "stats": [
+         "2",
+         "39",
+         "19.5",
+         "0",
+         "24",
+         "2"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4430737",
+         "displayName": "Kyren Williams"
+        },
+        "stats": [
+         "4",
+         "19",
+         "4.8",
+         "0",
+         "9",
+         "5"
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "id": "7065",
+   "fullName": "SoFi Stadium"
+  }
+ },
+ "drives": {
+  "previous": [
+   {
+    "id": "4018730791",
+    "description": "3 plays, 6 yards, 1:01",
+    "yards": 6,
+    "isScore": false,
+    "result": "PUNT",
+    "displayResult": "Punt",
+    "plays": [
+     {
+      "id": "40187307940",
+      "sequenceNumber": "4000",
+      "type": {
+       "id": "53",
+       "text": "Kickoff",
+       "abbreviation": "K"
+      },
+      "text": "J.Karty kicks 54 yards from LA 35 to GB 11. B.Melton to GB 23 for 12 yards (G.Stuard).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "15:00"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "40187307963",
+      "sequenceNumber": "6300",
+      "type": {
+       "id": "24",
+       "text": "Pass Reception",
+       "abbreviation": "REC"
+      },
+      "text": "(Shotgun) J.Love pass short left to C.Watson to GB 29 for 6 yards (J.Wallace).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "14:53"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "40187307988",
+      "sequenceNumber": "8800",
+      "type": {
+       "id": "3",
+       "text": "Pass Incompletion"
+      },
+      "text": "J.Love pass incomplete short left to S.Williams.",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "14:14"
+      },
+      "scoringPlay": false
+     }
+    ]
+   }
+  ]
+ },
+ "leaders": [
+  {
+   "team": {
+    "id": "14",
+    "displayName": "Los Angeles Rams",
+    "abbreviation": "LAR"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "Passing Yards",
+     "leaders": [
+      {
+       "displayValue": "12/15, 98 YDS",
+       "value": 98.0,
+       "athlete": {
+        "id": "12483",
+        "lastName": "Stafford",
+        "displayName": "Matthew Stafford",
+        "shortName": "M. Stafford",
+        "jersey": "9",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/12483.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "Rushing Yards",
+     "leaders": [
+      {
+       "displayValue": "7 CAR, 23 YDS",
+       "value": 23.0,
+       "athlete": {
+        "id": "4429096",
+        "lastName": "Corum",
+        "displayName": "Blake Corum",
+        "shortName": "B. Corum",
+        "jersey": "24",
+        "position": {
+         "abbreviation": "RB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4429096.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "Receiving Yards",
+     "leaders": [
+      {
+       "displayValue": "2 REC, 39 YDS",
+       "value": 39.0,
+       "athlete": {
+        "id": "4710855",
+        "lastName": "Mumpfield",
+        "displayName": "Konata Mumpfield",
+        "shortName": "K. Mumpfield",
+        "jersey": "4",
+        "position": {
+         "abbreviation": "WR"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4710855.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "Sacks"
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "Tackles",
+     "leaders": [
+      {
+       "displayValue": "3",
+       "value": 3.0,
+       "athlete": {
+        "id": "4243181",
+        "lastName": "Landman",
+        "displayName": "Nate Landman",
+        "shortName": "N. Landman",
+        "jersey": "53",
+        "position": {
+         "abbreviation": "LB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4243181.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "9",
+    "displayName": "Green Bay Packers",
+    "abbreviation": "GB"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "Passing Yards",
+     "leaders": [
+      {
+       "displayValue": "12/18, 154 YDS, 1 TD",
+       "value": 154.0,
+       "athlete": {
+        "id": "4036378",
+        "lastName": "Love",
+        "displayName": "Jordan Love",
+        "shortName": "J. Love",
+        "jersey": "10",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4036378.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "Rushing Yards",
+     "leaders": [
+      {
+       "displayValue": "1 CAR, 13 YDS",
+       "value": 13.0,
+       "athlete": {
+        "id": "4431487",
+        "lastName": "Williams",
+        "displayName": "Savion Williams",
+        "shortName": "S. Williams",
+        "jersey": "83",
+        "position": {
+         "abbreviation": "WR"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4431487.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "Receiving Yards",
+     "leaders": [
+      {
+       "displayValue": "4 REC, 65 YDS, 1 TD",
+       "value": 65.0,
+       "athlete": {
+        "id": "4248528",
+        "lastName": "Watson",
+        "displayName": "Christian Watson",
+        "shortName": "C. Watson",
+        "jersey": "9",
+        "position": {
+         "abbreviation": "WR"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4248528.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "Sacks",
+     "leaders": [
+      {
+       "displayValue": "1",
+       "value": 1.0,
+       "athlete": {
+        "id": "4361423",
+        "lastName": "Parsons",
+        "displayName": "Micah Parsons",
+        "shortName": "M. Parsons",
+        "jersey": "1",
+        "position": {
+         "abbreviation": "DE"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4361423.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "Tackles",
+     "leaders": [
+      {
+       "displayValue": "4",
+       "value": 4.0,
+       "athlete": {
+        "id": "4239947",
+        "lastName": "McDuffie",
+        "displayName": "Isaiah McDuffie",
+        "shortName": "I. McDuffie",
+        "jersey": "58",
+        "position": {
+         "abbreviation": "LB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4239947.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "injuries": [
+  {
+   "team": {
+    "id": "14",
+    "displayName": "Los Angeles Rams",
+    "abbreviation": "LAR"
+   },
+   "injuries": [
+    {
+     "status": "Questionable",
+     "date": "2026-11-26T02:24Z",
+     "athlete": {
+      "id": "4426553",
+      "lastName": "Allen",
+      "displayName": "Davis Allen",
+      "shortName": "D. Allen",
+      "jersey": "87",
+      "position": {
+       "abbreviation": "TE"
+      }
+     },
+     "details": {
+      "type": "Ankle",
+      "location": "Leg",
+      "returnDate": "2026-11-25"
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-11-26T00:04Z",
+     "athlete": {
+      "id": "4685522",
+      "lastName": "Simpson",
+      "displayName": "Ty Simpson",
+      "shortName": "T. Simpson",
+      "jersey": "15",
+      "position": {
+       "abbreviation": "QB"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision",
+      "location": "Other",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-12-03"
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-11-26T00:01Z",
+     "athlete": {
+      "id": "4598574",
+      "lastName": "Peterson III",
+      "displayName": "Darryl Peterson III",
+      "shortName": "D. Peterson III",
+      "jersey": "59",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision",
+      "location": "Other",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-12-03"
+     }
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "9",
+    "displayName": "Green Bay Packers",
+    "abbreviation": "GB"
+   },
+   "injuries": [
+    {
+     "status": "Questionable",
+     "date": "2026-11-26T02:36Z",
+     "athlete": {
+      "id": "4248528",
+      "lastName": "Watson",
+      "displayName": "Christian Watson",
+      "shortName": "C. Watson",
+      "jersey": "9",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Undisclosed",
+      "location": "Other",
+      "returnDate": "2026-11-25"
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-11-26T00:10Z",
+     "athlete": {
+      "id": "3124005",
+      "lastName": "Franklin",
+      "displayName": "Zaire Franklin",
+      "shortName": "Z. Franklin",
+      "jersey": "44",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Shin",
+      "location": "Leg",
+      "detail": "Fracture",
+      "side": "Not Specified",
+      "returnDate": "2026-12-06"
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-11-25T23:56Z",
+     "athlete": {
+      "id": "4360887",
+      "lastName": "Jennings",
+      "displayName": "Donovan Jennings",
+      "shortName": "D. Jennings",
+      "jersey": "67",
+      "position": {
+       "abbreviation": "G"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision",
+      "location": "Other",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-12-06"
+     }
+    }
+   ]
+  }
+ ],
+ "pickcenter": [
+  {
+   "provider": {
+    "id": "x",
+    "name": "x",
+    "priority": 0
+   },
+   "details": "x",
+   "overUnder": 0,
+   "spread": 0,
+   "overOdds": 0,
+   "underOdds": 0,
+   "awayTeamOdds": {
+    "favorite": false,
+    "underdog": false,
+    "moneyLine": 0,
+    "spreadOdds": 0,
+    "team": {},
+    "teamId": "x",
+    "favoriteAtOpen": false
+   },
+   "homeTeamOdds": {
+    "favorite": false,
+    "underdog": false,
+    "moneyLine": 0,
+    "spreadOdds": 0,
+    "team": {},
+    "teamId": "x",
+    "favoriteAtOpen": false
+   },
+   "moneyline": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "home": {
+     "close": {
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x"
+        }
+       }
+      }
+     },
+     "open": {
+      "odds": "x"
+     },
+     "live": {
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x"
+        }
+       }
+      }
+     }
+    },
+    "away": {
+     "close": {
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x"
+        }
+       }
+      }
+     },
+     "open": {
+      "odds": "x"
+     },
+     "live": {
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x"
+        }
+       }
+      }
+     }
+    }
+   },
+   "pointSpread": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "home": {
+     "close": {
+      "line": "x",
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x",
+         "betDetails": "x"
+        }
+       }
+      }
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     },
+     "live": {
+      "line": "x",
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x",
+         "betDetails": "x"
+        }
+       }
+      }
+     }
+    },
+    "away": {
+     "close": {
+      "line": "x",
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x",
+         "betDetails": "x"
+        }
+       }
+      }
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     },
+     "live": {
+      "line": "x",
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x",
+         "betDetails": "x"
+        }
+       }
+      }
+     }
+    }
+   },
+   "total": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "over": {
+     "close": {
+      "line": "x",
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x",
+         "betDetails": "x"
+        }
+       }
+      }
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     },
+     "live": {
+      "line": "x",
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x",
+         "betDetails": "x"
+        }
+       }
+      }
+     }
+    },
+    "under": {
+     "close": {
+      "line": "x",
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x",
+         "betDetails": "x"
+        }
+       }
+      }
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     },
+     "live": {
+      "line": "x",
+      "odds": "x",
+      "link": {
+       "language": "x",
+       "rel": [
+        "x"
+       ],
+       "href": "x",
+       "text": "x",
+       "shortText": "x",
+       "isExternal": false,
+       "isPremium": false,
+       "tracking": {
+        "campaign": "x",
+        "tags": {
+         "league": "x",
+         "sport": "x",
+         "gameId": 0,
+         "betSide": "x",
+         "betType": "x",
+         "betDetails": "x"
+        }
+       }
+      }
+     }
+    }
+   },
+   "link": {
+    "language": "x",
+    "rel": [
+     "x"
+    ],
+    "href": "x",
+    "text": "x",
+    "shortText": "x",
+    "isExternal": false,
+    "isPremium": false
+   },
+   "header": {
+    "text": "x"
+   },
+   "footer": {
+    "disclaimer": "x"
+   }
+  }
+ ],
+ "videos": [],
+ "scoringPlays": [
+  {
+   "id": "401873079344",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Brandon McManus 43 Yd Field Goal",
+   "awayScore": 0,
+   "homeScore": 3,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 595.0,
+    "displayValue": "9:55"
+   },
+   "team": {
+    "id": "14",
+    "displayName": "Los Angeles Rams",
+    "abbreviation": "LAR"
+   }
+  },
+  {
+   "id": "401873079764",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Brandon McManus 41 Yd Field Goal",
+   "awayScore": 0,
+   "homeScore": 6,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 192.0,
+    "displayValue": "3:12"
+   },
+   "team": {
+    "id": "14",
+    "displayName": "Los Angeles Rams",
+    "abbreviation": "LAR"
+   }
+  },
+  {
+   "id": "401873079947",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Trey Smack 54 Yd Field Goal",
+   "awayScore": 3,
+   "homeScore": 6,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 88.0,
+    "displayValue": "1:28"
+   },
+   "team": {
+    "id": "9",
+    "displayName": "Green Bay Packers",
+    "abbreviation": "GB"
+   }
+  },
+  {
+   "id": "4018730791209",
+   "type": {
+    "id": "68",
+    "text": "Rushing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Kyren Williams 7 Yd Rush (Brandon McManus Kick)",
+   "awayScore": 3,
+   "homeScore": 13,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 689.0,
+    "displayValue": "11:29"
+   },
+   "team": {
+    "id": "14",
+    "displayName": "Los Angeles Rams",
+    "abbreviation": "LAR"
+   }
+  },
+  {
+   "id": "4018730791424",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Christian Watson 6 Yd pass from Jordan Love (Trey Smack Kick)",
+   "awayScore": 10,
+   "homeScore": 13,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 486.0,
+    "displayValue": "8:06"
+   },
+   "team": {
+    "id": "9",
+    "displayName": "Green Bay Packers",
+    "abbreviation": "GB"
+   }
+  },
+  {
+   "id": "4018730791916",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Trey Smack 48 Yd Field Goal",
+   "awayScore": 13,
+   "homeScore": 13,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 110.0,
+    "displayValue": "1:50"
+   },
+   "team": {
+    "id": "9",
+    "displayName": "Green Bay Packers",
+    "abbreviation": "GB"
+   }
+  }
+ ],
+ "news": {
+  "articles": [
+   {
+    "id": 50600479,
+    "type": "Preview",
+    "headline": "Buccaneers will need more from Baker Mayfield and struggling passing attack to beat the Panthers"
+   }
+  ]
+ },
+ "winprobability": [
+  {
+   "homeWinPercentage": 0.6728,
+   "tiePercentage": 0.0,
+   "playId": "4018730791"
+  }
+ ],
+ "header": {
+  "id": "401873079",
+  "season": {
+   "year": 2026,
+   "current": true,
+   "type": 2
+  },
+  "competitions": [
+   {
+    "id": "401873079",
+    "date": "2026-11-26T01:00Z",
+    "neutralSite": false,
+    "competitors": [
+     {
+      "id": "14",
+      "order": 0,
+      "homeAway": "home",
+      "score": "13",
+      "record": [
+       {
+        "type": "total",
+        "summary": "6-4",
+        "displayValue": "6-4"
+       },
+       {
+        "type": "home",
+        "summary": "2-3",
+        "displayValue": "2-3"
+       },
+       {
+        "type": "vsconf",
+        "summary": "4-2",
+        "displayValue": "4-2"
+       }
+      ],
+      "possession": false,
+      "team": {
+       "id": "14",
+       "location": "Los Angeles",
+       "name": "Rams",
+       "nickname": "Rams",
+       "abbreviation": "LAR",
+       "displayName": "Los Angeles Rams"
+      }
+     },
+     {
+      "id": "9",
+      "order": 1,
+      "homeAway": "away",
+      "score": "13",
+      "record": [
+       {
+        "type": "total",
+        "summary": "6-4",
+        "displayValue": "6-4"
+       },
+       {
+        "type": "road",
+        "summary": "3-2",
+        "displayValue": "3-2"
+       },
+       {
+        "type": "vsconf",
+        "summary": "4-4",
+        "displayValue": "4-4"
+       }
+      ],
+      "possession": false,
+      "team": {
+       "id": "9",
+       "location": "Green Bay",
+       "name": "Packers",
+       "nickname": "Packers",
+       "abbreviation": "GB",
+       "displayName": "Green Bay Packers"
+      }
+     }
+    ],
+    "status": {
+     "displayClock": "0:00",
+     "period": 2,
+     "type": {
+      "id": "23",
+      "name": "STATUS_HALFTIME",
+      "state": "in",
+      "completed": false,
+      "description": "Halftime",
+      "detail": "Halftime",
+      "shortDetail": "Halftime",
+      "statusPrimary": "Halftime"
+     },
+     "isTBDFlex": false,
+     "displayPeriod": "2nd"
+    }
+   }
+  ],
+  "week": 12
+ }
+}

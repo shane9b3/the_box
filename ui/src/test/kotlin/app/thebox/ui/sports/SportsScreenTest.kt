@@ -371,7 +371,7 @@ class SportsScreenTest {
     private var failLookups = false
     private val resolver = object : app.thebox.core.sports.hub.ClipResolver {
         override suspend fun info(ref: app.thebox.core.sports.hub.ClipRef) = app.thebox.core.sports.hub.ClipResult.NotFound
-        override suspend fun stream(ref: app.thebox.core.sports.hub.ClipRef): app.thebox.core.sports.hub.ClipResult<Pair<app.thebox.core.sports.hub.ClipInfo, app.thebox.core.sports.hub.ClipStream>> {
+        override suspend fun stream(ref: app.thebox.core.sports.hub.ClipRef, fresh: Boolean): app.thebox.core.sports.hub.ClipResult<Pair<app.thebox.core.sports.hub.ClipInfo, app.thebox.core.sports.hub.ClipStream>> {
             if (failLookups) return app.thebox.core.sports.hub.ClipResult.NotFound
             lookup.await()
             return app.thebox.core.sports.hub.ClipResult.NotFound

@@ -1,0 +1,1208 @@
+{
+ "header": {
+  "id": "401899003",
+  "competitions": [
+   {
+    "id": "401899003",
+    "date": "2026-11-23T02:09Z",
+    "status": {
+     "clock": 0.0,
+     "displayClock": "0:00",
+     "period": 4,
+     "type": {
+      "id": "3",
+      "name": "STATUS_FINAL",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "detail": "Final",
+      "shortDetail": "Final"
+     }
+    },
+    "competitors": [
+     {
+      "id": "17",
+      "homeAway": "home",
+      "order": 0,
+      "winner": true,
+      "record": [
+       {
+        "type": "total",
+        "summary": "6-5"
+       },
+       {
+        "type": "home",
+        "summary": "3-1"
+       },
+       {
+        "type": "road",
+        "summary": "2-2"
+       }
+      ],
+      "team": {
+       "id": "17",
+       "abbreviation": "NE",
+       "displayName": "New England Patriots"
+      }
+     },
+     {
+      "id": "20",
+      "homeAway": "away",
+      "order": 1,
+      "winner": false,
+      "record": [
+       {
+        "type": "total",
+        "summary": "2-9"
+       },
+       {
+        "type": "home",
+        "summary": "3-1"
+       },
+       {
+        "type": "road",
+        "summary": "2-2"
+       }
+      ],
+      "team": {
+       "id": "20",
+       "abbreviation": "NYJ",
+       "displayName": "New York Jets"
+      }
+     }
+    ],
+    "broadcasts": [
+     {
+      "market": "national",
+      "names": [
+       "Prime Video"
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "boxscore": {
+  "teams": [
+   {
+    "team": {
+     "id": "20",
+     "abbreviation": "NYJ"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "22",
+      "value": "22",
+      "label": "firstDowns"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "6-13",
+      "value": "6-13",
+      "label": "thirdDownEff"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "0-1",
+      "value": "0-1",
+      "label": "fourthDownEff"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "420",
+      "value": "420",
+      "label": "totalYards"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "280",
+      "value": "280",
+      "label": "netPassingYards"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "140",
+      "value": "140",
+      "label": "rushingYards"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "4-20",
+      "value": "4-20",
+      "label": "totalPenaltiesYards"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "2",
+      "value": "2",
+      "label": "turnovers"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1",
+      "value": "1",
+      "label": "interceptions"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "30:12",
+      "value": "30:12",
+      "label": "possessionTime"
+     },
+     {
+      "name": "totalPlays",
+      "displayValue": "68",
+      "value": "68",
+      "label": "totalPlays"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1",
+      "value": "1",
+      "label": "interceptions"
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "17",
+     "abbreviation": "NE"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "23",
+      "value": "23",
+      "label": "firstDowns"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "7-13",
+      "value": "7-13",
+      "label": "thirdDownEff"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "0-1",
+      "value": "0-1",
+      "label": "fourthDownEff"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "447",
+      "value": "447",
+      "label": "totalYards"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "298",
+      "value": "298",
+      "label": "netPassingYards"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "149",
+      "value": "149",
+      "label": "rushingYards"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "4-20",
+      "value": "4-20",
+      "label": "totalPenaltiesYards"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "2",
+      "value": "2",
+      "label": "turnovers"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1",
+      "value": "1",
+      "label": "interceptions"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "30:15",
+      "value": "30:15",
+      "label": "possessionTime"
+     },
+     {
+      "name": "totalPlays",
+      "displayValue": "71",
+      "value": "71",
+      "label": "totalPlays"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1",
+      "value": "1",
+      "label": "interceptions"
+     }
+    ]
+   }
+  ],
+  "players": [
+   {
+    "team": {
+     "id": "20",
+     "abbreviation": "NYJ"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "9200",
+         "displayName": "Justin Fields",
+         "headshot": {
+          "href": "https://img.invalid/h/9200.png"
+         }
+        },
+        "stats": [
+         "22/34",
+         "300",
+         "6.8",
+         "2",
+         "0",
+         "1-7",
+         "61.2",
+         "98.4"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "9200",
+         "displayName": "Breece Hall",
+         "headshot": {
+          "href": "https://img.invalid/h/9200.png"
+         }
+        },
+        "stats": [
+         "16",
+         "72",
+         "4.5",
+         "0",
+         "14"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "9201",
+         "displayName": "Justin Fields",
+         "headshot": {
+          "href": "https://img.invalid/h/9201.png"
+         }
+        },
+        "stats": [
+         "4",
+         "12",
+         "3.0",
+         "0",
+         "7"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "9200",
+         "displayName": "Garrett Wilson",
+         "headshot": {
+          "href": "https://img.invalid/h/9200.png"
+         }
+        },
+        "stats": [
+         "8",
+         "160",
+         "12.1",
+         "2",
+         "31",
+         "12"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "17",
+     "abbreviation": "NE"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "9170",
+         "displayName": "Drake Maye",
+         "headshot": {
+          "href": "https://img.invalid/h/9170.png"
+         }
+        },
+        "stats": [
+         "23/34",
+         "312",
+         "6.8",
+         "3",
+         "0",
+         "1-7",
+         "61.2",
+         "98.4"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "9170",
+         "displayName": "Rhamondre Stevenson",
+         "headshot": {
+          "href": "https://img.invalid/h/9170.png"
+         }
+        },
+        "stats": [
+         "16",
+         "72",
+         "4.5",
+         "0",
+         "14"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "9171",
+         "displayName": "Drake Maye",
+         "headshot": {
+          "href": "https://img.invalid/h/9171.png"
+         }
+        },
+        "stats": [
+         "4",
+         "12",
+         "3.0",
+         "0",
+         "7"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "9170",
+         "displayName": "Hunter Henry",
+         "headshot": {
+          "href": "https://img.invalid/h/9170.png"
+         }
+        },
+        "stats": [
+         "8",
+         "166",
+         "12.1",
+         "3",
+         "31",
+         "12"
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "fullName": "Gillette Stadium"
+  },
+  "weather": {
+   "temperature": 41
+  }
+ },
+ "drives": {
+  "previous": []
+ },
+ "leaders": [
+  {
+   "team": {
+    "id": "17",
+    "abbreviation": "NE"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "passingYards",
+     "leaders": [
+      {
+       "displayValue": "35/43, 297 YDS, 3 TD, 3 INT",
+       "value": 297.0,
+       "athlete": {
+        "id": "8170",
+        "displayName": "Drake Maye",
+        "shortName": "D. Maye",
+        "headshot": {
+         "href": "https://img.invalid/h/8170.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "rushingYards",
+     "leaders": [
+      {
+       "displayValue": "15 CAR, 76 YDS, 1 TD",
+       "value": 76.0,
+       "athlete": {
+        "id": "8171",
+        "displayName": "Rhamondre Stevenson",
+        "shortName": "R. Stevenson",
+        "headshot": {
+         "href": "https://img.invalid/h/8171.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "receivingYards",
+     "leaders": [
+      {
+       "displayValue": "6 REC, 109 YDS, 1 TD",
+       "value": 109.0,
+       "athlete": {
+        "id": "8172",
+        "displayName": "Hunter Henry",
+        "shortName": "H. Henry",
+        "headshot": {
+         "href": "https://img.invalid/h/8172.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "sacks"
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "totalTackles",
+     "leaders": [
+      {
+       "displayValue": "5",
+       "value": 5.0,
+       "athlete": {
+        "id": "8174",
+        "displayName": "Patriot Linebacker",
+        "shortName": "P. Linebacker",
+        "headshot": {
+         "href": "https://img.invalid/h/8174.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "20",
+    "abbreviation": "NYJ"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "passingYards",
+     "leaders": [
+      {
+       "displayValue": "32/40, 270 YDS, 2 TD, 3 INT",
+       "value": 270.0,
+       "athlete": {
+        "id": "8200",
+        "displayName": "Justin Fields",
+        "shortName": "J. Fields",
+        "headshot": {
+         "href": "https://img.invalid/h/8200.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "rushingYards",
+     "leaders": [
+      {
+       "displayValue": "14 CAR, 70 YDS, 1 TD",
+       "value": 70.0,
+       "athlete": {
+        "id": "8201",
+        "displayName": "Breece Hall",
+        "shortName": "B. Hall",
+        "headshot": {
+         "href": "https://img.invalid/h/8201.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "receivingYards",
+     "leaders": [
+      {
+       "displayValue": "5 REC, 100 YDS, 1 TD",
+       "value": 100.0,
+       "athlete": {
+        "id": "8202",
+        "displayName": "Garrett Wilson",
+        "shortName": "G. Wilson",
+        "headshot": {
+         "href": "https://img.invalid/h/8202.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "sacks"
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "totalTackles",
+     "leaders": [
+      {
+       "displayValue": "4",
+       "value": 4.0,
+       "athlete": {
+        "id": "8204",
+        "displayName": "Jet Linebacker",
+        "shortName": "J. Linebacker",
+        "headshot": {
+         "href": "https://img.invalid/h/8204.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "injuries": [
+  {
+   "team": {
+    "id": "17",
+    "abbreviation": "NE"
+   },
+   "injuries": [
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Patriots Player 1",
+      "position": {
+       "abbreviation": "QB"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision"
+     }
+    },
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Patriots Player 2",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Hamstring"
+     }
+    },
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Patriots Player 3",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision"
+     }
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "20",
+    "abbreviation": "NYJ"
+   },
+   "injuries": [
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Jets Player 1",
+      "position": {
+       "abbreviation": "QB"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision"
+     }
+    },
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Jets Player 2",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Hamstring"
+     }
+    },
+    {
+     "status": "Out",
+     "athlete": {
+      "displayName": "Jets Player 3",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Coach's Decision"
+     }
+    }
+   ]
+  }
+ ],
+ "pickcenter": [
+  {
+   "provider": {
+    "name": "fake"
+   },
+   "details": "none"
+  }
+ ],
+ "scoringPlays": [
+  {
+   "id": "4018990030100",
+   "type": {
+    "id": "67",
+    "abbreviation": "TD",
+    "text": "Passing Touchdown"
+   },
+   "text": "Hunter Henry 5 Yd pass from Drake Maye (Andres Borregales Kick)",
+   "awayScore": 0,
+   "homeScore": 7,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 540.0,
+    "displayValue": "9:00"
+   },
+   "team": {
+    "id": "17",
+    "abbreviation": "NE"
+   },
+   "scoringType": {
+    "name": "touchdown"
+   }
+  },
+  {
+   "id": "4018990030137",
+   "type": {
+    "id": "67",
+    "abbreviation": "TD",
+    "text": "Passing Touchdown"
+   },
+   "text": "Garrett Wilson 12 Yd pass from Justin Fields (Greg Zuerlein Kick)",
+   "awayScore": 7,
+   "homeScore": 7,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 300.0,
+    "displayValue": "5:00"
+   },
+   "team": {
+    "id": "20",
+    "abbreviation": "NYJ"
+   },
+   "scoringType": {
+    "name": "touchdown"
+   }
+  },
+  {
+   "id": "4018990030174",
+   "type": {
+    "id": "67",
+    "abbreviation": "TD",
+    "text": "Passing Touchdown"
+   },
+   "text": "Hunter Henry 19 Yd pass from Drake Maye (Andres Borregales Kick)",
+   "awayScore": 7,
+   "homeScore": 14,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 600.0,
+    "displayValue": "10:00"
+   },
+   "team": {
+    "id": "17",
+    "abbreviation": "NE"
+   },
+   "scoringType": {
+    "name": "touchdown"
+   }
+  },
+  {
+   "id": "4018990030211",
+   "type": {
+    "id": "67",
+    "abbreviation": "TD",
+    "text": "Passing Touchdown"
+   },
+   "text": "Garrett Wilson 26 Yd pass from Justin Fields (Greg Zuerlein Kick)",
+   "awayScore": 14,
+   "homeScore": 14,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 360.0,
+    "displayValue": "6:00"
+   },
+   "team": {
+    "id": "20",
+    "abbreviation": "NYJ"
+   },
+   "scoringType": {
+    "name": "touchdown"
+   }
+  },
+  {
+   "id": "4018990030248",
+   "type": {
+    "id": "67",
+    "abbreviation": "TD",
+    "text": "Passing Touchdown"
+   },
+   "text": "Hunter Henry 33 Yd pass from Drake Maye (Andres Borregales Kick)",
+   "awayScore": 14,
+   "homeScore": 21,
+   "period": {
+    "number": 3
+   },
+   "clock": {
+    "value": 660.0,
+    "displayValue": "11:00"
+   },
+   "team": {
+    "id": "17",
+    "abbreviation": "NE"
+   },
+   "scoringType": {
+    "name": "touchdown"
+   }
+  },
+  {
+   "id": "4018990030285",
+   "type": {
+    "id": "59",
+    "abbreviation": "FG",
+    "text": "Field Goal Good"
+   },
+   "text": "Greg Zuerlein 60 Yd Field Goal",
+   "awayScore": 17,
+   "homeScore": 21,
+   "period": {
+    "number": 3
+   },
+   "clock": {
+    "value": 420.0,
+    "displayValue": "7:00"
+   },
+   "team": {
+    "id": "20",
+    "abbreviation": "NYJ"
+   },
+   "scoringType": {
+    "name": "other"
+   }
+  },
+  {
+   "id": "4018990030322",
+   "type": {
+    "id": "20",
+    "abbreviation": "SF",
+    "text": "Safety"
+   },
+   "text": "Patriot Edge Safety",
+   "awayScore": 17,
+   "homeScore": 23,
+   "period": {
+    "number": 4
+   },
+   "clock": {
+    "value": 720.0,
+    "displayValue": "12:00"
+   },
+   "team": {
+    "id": "17",
+    "abbreviation": "NE"
+   },
+   "scoringType": {
+    "name": "other"
+   }
+  },
+  {
+   "id": "4018990030359",
+   "type": {
+    "id": "59",
+    "abbreviation": "FG",
+    "text": "Field Goal Good"
+   },
+   "text": "Greg Zuerlein 34 Yd Field Goal",
+   "awayScore": 20,
+   "homeScore": 23,
+   "period": {
+    "number": 4
+   },
+   "clock": {
+    "value": 480.0,
+    "displayValue": "8:00"
+   },
+   "team": {
+    "id": "20",
+    "abbreviation": "NYJ"
+   },
+   "scoringType": {
+    "name": "other"
+   }
+  }
+ ],
+ "news": {
+  "header": "News",
+  "articles": [
+   {
+    "headline": "A fake news item"
+   }
+  ]
+ },
+ "winprobability": [
+  {
+   "homeWinPercentage": 0.5,
+   "playId": "1"
+  }
+ ],
+ "article": {
+  "type": "Recap",
+  "headline": "Jets and Patriots trade blows in a game the fake panel made up for the hub",
+  "description": "not read",
+  "story": "<p>not read</p>"
+ },
+ "videos": [
+  {
+   "id": 50900300,
+   "headline": "Jets at Patriots: game highlights",
+   "description": "Jets at Patriots: game highlights",
+   "duration": 74,
+   "originalPublishDate": "2026-11-25T23:09:30Z",
+   "lastModified": "2026-11-25T23:10:30Z",
+   "timeRestrictions": {
+    "embargoDate": "2026-11-25T23:09:29Z",
+    "expirationDate": "2026-11-29T02:09:30Z"
+   },
+   "deviceRestrictions": {
+    "type": "whitelist",
+    "devices": [
+     "settop",
+     "tablet",
+     "handset",
+     "ipad",
+     "desktop"
+    ]
+   },
+   "gameId": 401899003,
+   "thumbnail": "http://fakepanel.invalid/espn-media/50900300/thumb.png",
+   "links": {
+    "source": {
+     "href": "http://fakepanel.invalid/espn-media/50900300/source.mp4",
+     "HLS": {
+      "href": "http://fakepanel.invalid/espn-media/50900300/master.m3u8",
+      "cmaf": {
+       "href": "http://fakepanel.invalid/espn-media/50900300/cmaf.m3u8"
+      }
+     }
+    },
+    "mobile": {
+     "href": "https://login.invalid/50900300"
+    }
+   },
+   "tracking": {
+    "coverageType": "Final Game Highlight",
+    "leagueName": "NFL",
+    "sportName": "football"
+   }
+  },
+  {
+   "id": 50900301,
+   "headline": "Tee Higgins hauls in a 31-yard touchdown",
+   "description": "Tee Higgins hauls in a 31-yard touchdown",
+   "duration": 23,
+   "originalPublishDate": "2026-11-25T22:09:30Z",
+   "lastModified": "2026-11-25T22:10:30Z",
+   "timeRestrictions": {
+    "embargoDate": "2026-11-25T22:09:29Z",
+    "expirationDate": "2026-11-29T02:09:30Z"
+   },
+   "deviceRestrictions": {
+    "type": "whitelist",
+    "devices": [
+     "settop",
+     "tablet",
+     "handset",
+     "ipad",
+     "desktop"
+    ]
+   },
+   "gameId": 401899003,
+   "thumbnail": "http://fakepanel.invalid/espn-media/50900301/thumb.png",
+   "links": {
+    "source": {
+     "href": "http://fakepanel.invalid/espn-media/50900301/source.mp4",
+     "HLS": {
+      "href": "http://fakepanel.invalid/espn-media/50900301/master.m3u8",
+      "cmaf": {
+       "href": "http://fakepanel.invalid/espn-media/50900301/cmaf.m3u8"
+      }
+     }
+    },
+    "mobile": {
+     "href": "https://login.invalid/50900301"
+    }
+   },
+   "tracking": {
+    "coverageType": "OnePlay",
+    "leagueName": "NFL",
+    "sportName": "football"
+   }
+  },
+  {
+   "id": 50900302,
+   "headline": "A 47-yard field goal splits the uprights",
+   "description": "A 47-yard field goal splits the uprights",
+   "duration": 27,
+   "originalPublishDate": "2026-11-25T22:24:30Z",
+   "lastModified": "2026-11-25T22:25:30Z",
+   "timeRestrictions": {
+    "embargoDate": "2026-11-25T22:24:29Z",
+    "expirationDate": "2026-11-29T02:09:30Z"
+   },
+   "deviceRestrictions": {
+    "type": "whitelist",
+    "devices": [
+     "settop",
+     "tablet",
+     "handset",
+     "ipad",
+     "desktop"
+    ]
+   },
+   "gameId": 401899003,
+   "thumbnail": "http://fakepanel.invalid/espn-media/50900302/thumb.png",
+   "links": {
+    "source": {
+     "href": "http://fakepanel.invalid/espn-media/50900302/source.mp4",
+     "HLS": {
+      "href": "http://fakepanel.invalid/espn-media/50900302/master.m3u8",
+      "cmaf": {
+       "href": "http://fakepanel.invalid/espn-media/50900302/cmaf.m3u8"
+      }
+     }
+    },
+    "mobile": {
+     "href": "https://login.invalid/50900302"
+    }
+   },
+   "tracking": {
+    "coverageType": "OnePlay",
+    "leagueName": "NFL",
+    "sportName": "football"
+   }
+  },
+  {
+   "id": 50900303,
+   "headline": "Pick-six seals it in the fourth quarter",
+   "description": "Pick-six seals it in the fourth quarter",
+   "duration": 31,
+   "originalPublishDate": "2026-11-25T22:39:30Z",
+   "lastModified": "2026-11-25T22:40:30Z",
+   "timeRestrictions": {
+    "embargoDate": "2026-11-25T22:39:29Z",
+    "expirationDate": "2026-11-29T02:09:30Z"
+   },
+   "deviceRestrictions": {
+    "type": "whitelist",
+    "devices": [
+     "settop",
+     "tablet",
+     "handset",
+     "ipad",
+     "desktop"
+    ]
+   },
+   "gameId": 401899003,
+   "thumbnail": "http://fakepanel.invalid/espn-media/50900303/thumb.png",
+   "links": {
+    "source": {
+     "href": "http://fakepanel.invalid/espn-media/50900303/source.mp4",
+     "HLS": {
+      "href": "http://fakepanel.invalid/espn-media/50900303/master.m3u8",
+      "cmaf": {
+       "href": "http://fakepanel.invalid/espn-media/50900303/cmaf.m3u8"
+      }
+     }
+    },
+    "mobile": {
+     "href": "https://login.invalid/50900303"
+    }
+   },
+   "tracking": {
+    "coverageType": "OnePlay",
+    "leagueName": "NFL",
+    "sportName": "football"
+   }
+  }
+ ]
+}
