@@ -30,6 +30,8 @@ import app.thebox.core.playback.PlaybackEventType
 import app.thebox.core.playback.StreamFormat
 import app.thebox.core.playback.errors.LoadRetryRulesImpl
 import app.thebox.player.datasource.BoxLoadErrorHandlingPolicy
+import app.thebox.player.datasource.HlsEdgeDataSourceFactory
+import app.thebox.player.datasource.HlsEdgeProbe
 import app.thebox.player.internal.MediaSourceBuilderApi
 import app.thebox.player.internal.MediaSourceWithTelemetry
 import app.thebox.player.internal.StreamSessionContext
@@ -111,6 +113,9 @@ internal class MediaSourceBuilder(
             }
             StreamFormat.HLS -> {
                 val (factory, telemetry) = transport.http(ctx)
+                // (HLS edge hand-over, stage 0) Debug builds only, live only: an observe-only wrapper that logs `HlsEdge`
+                // lines. Null in release (and for archive), and then the factory below is exactly the one always built.
+                val edgeProbe = if (!isArchive) HlsEdgeProbe.begin(ctx) else null
                 val item = MediaItem.Builder()
                     .setUri(ctx.resolved.url.toUri())
                     .setMediaId(ctx.tuneId.toString())
@@ -129,7 +134,8 @@ internal class MediaSourceBuilder(
                         }
                     }
                     .build()
-                val source: MediaSource = HlsMediaSource.Factory(factory)
+                val hlsFactory = if (edgeProbe != null) HlsMediaSource.Factory(HlsEdgeDataSourceFactory(factory, edgeProbe)) else HlsMediaSource.Factory(factory)
+                val source: MediaSource = hlsFactory
                     .setAllowChunklessPreparation(true)
                     .setLoadErrorHandlingPolicy(policyFor(if (isArchive) LoadOrigin.ARCHIVE else LoadOrigin.HLS_MANIFEST))
                     .setExtractorFactory(DefaultHlsExtractorFactory(HLS_TS_FLAGS, /* exposeCea608WhenMissingDeclarations = */ true))

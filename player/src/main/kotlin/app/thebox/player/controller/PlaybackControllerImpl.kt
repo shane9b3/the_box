@@ -1353,6 +1353,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         override fun onRenderedFirstFrame() {
             _video.update { it.copy(renderedFirstFrames = it.renderedFirstFrames + 1) }
             val s = session ?: return
+            if (app.thebox.player.datasource.HlsEdgeProbe.isTracked(s.tuneId)) app.thebox.player.datasource.HlsEdgeProbe.onFirstFrame(s.tuneId)
             if (s.milestoneVideo != false) onFirstMedia(s)
         }
 
@@ -1748,6 +1749,13 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     // ------------------------------------------------------------------ ladder (§4.3)
 
+    /** (HLS edge hand-over, stage 0) Read-only player facts for the `HlsEdge` failure/decision lines (main thread). */
+    private fun hlsEdgeFacts(): app.thebox.player.datasource.HlsEdgeProbe.PlayerFacts? = try {
+        player?.let { p -> app.thebox.player.datasource.HlsEdgeProbe.PlayerFacts(p.totalBufferedDuration, p.currentLiveOffset, p.playbackState, p.playWhenReady) }
+    } catch (_: RuntimeException) {
+        null
+    }
+
     private fun onFailure(c: Cycle, signal: FailureSignal, error: PlaybackException?, fromWriter: Boolean = false) {
         if (cycle !== c) return
         if (c.isClip) {
@@ -1766,6 +1774,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         c.compatPending = false
         eventLog.add(PlaybackEventType.ERROR, id, signal.name, error?.errorCodeName ?: "")
         BoxLog.i(TAG) { "failure ${signal.name} (tune $id, ${now - c.startedAtMs} ms)" }
+        // (HLS edge hand-over, stage 0) Logging only: tracked live HLS tunes in debug builds.
+        if (app.thebox.player.datasource.HlsEdgeProbe.isTracked(id)) app.thebox.player.datasource.HlsEdgeProbe.onPlayerFailure(id, signal.name, hlsEdgeFacts())
 
         // WP-A: peek the limiter for the context; consume a slot only when the ladder actually re-resolves (format flip
         // and UA fallback are not rate-limited). The second decision only runs if the slot vanished in between.
@@ -1877,6 +1887,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         val id = c.currentTuneId
         eventLog.add(PlaybackEventType.DECISION, id, decisionName(d), signal.name)
         BoxLog.i(TAG) { "decision ${decisionName(d)} for ${signal.name}" }
+        if (app.thebox.player.datasource.HlsEdgeProbe.isTracked(id)) app.thebox.player.datasource.HlsEdgeProbe.onDecision(id, decisionName(d), signal.name, hlsEdgeFacts())
         // (M6, §7.4) A buffered cycle routes writer-scoped, cycle-scoped and behind-live decisions first.
         if (c.ts != null && executeBuffered(c, d, signal)) return
         when (d) {

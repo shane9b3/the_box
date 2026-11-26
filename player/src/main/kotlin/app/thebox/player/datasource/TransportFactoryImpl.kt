@@ -68,6 +68,9 @@ internal class TransportFactoryImpl @Inject constructor(
     }
 
     override fun endSession(tuneId: Long) {
+        // (HLS edge hand-over, stage 0) Logging only, and a no-op for an untracked tune. First, so the cancels below
+        // are logged as the session's end rather than as request failures.
+        HlsEdgeProbe.end(tuneId)
         sessions.remove(tuneId)?.end()
     }
 

@@ -67,7 +67,11 @@ internal class BrokeredHttpDataSource(
     /** Records this source's own call so [close] can cancel it without touching the session's other loads. */
     private val recordingFactory = Call.Factory { request: Request ->
         val factory = calls ?: throw IOException("no lease")
-        factory.newCall(request).also { currentCall = it }
+        factory.newCall(request).also {
+            currentCall = it
+            // (HLS edge hand-over, stage 0) Observe-only listener for a live HLS open in a debug build; else a no-op.
+            HlsEdgeProbe.attach(it)
+        }
     }
 
     override fun open(dataSpec: DataSpec): Long {
