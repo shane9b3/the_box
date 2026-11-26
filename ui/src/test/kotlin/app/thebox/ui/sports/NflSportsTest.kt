@@ -124,9 +124,9 @@ class NflSportsTest {
         rule.onNodeWithText("This week · Wk 9").assertExists()
         rule.onNodeWithText("Next week · Wk 10").assertExists()
         rule.onNodeWithTag(SPORTS_WEEK_TAG).assertTextEquals("Week 9")
-        // the cards use the short names
-        rule.onNodeWithText("Chiefs").assertExists()
-        rule.onNodeWithText("Seahawks").assertExists()
+        // the cards use the short names ((NFL hub P3) the panel's stats header names the shown game's teams too)
+        rule.onAllNodesWithText("Chiefs").onFirst().assertExists()
+        rule.onAllNodesWithText("Seahawks").onFirst().assertExists()
         rule.onNodeWithTag(sportsDayTag(-1)).assertIsEnabled()
         rule.onNodeWithTag(sportsDayTag(1)).assertIsEnabled()
     }
@@ -157,7 +157,7 @@ class NflSportsTest {
         rule.waitForIdle()
         rule.onNodeWithTag(SPORTS_SKELETON_TAG).assertDoesNotExist()
         rule.onNodeWithTag(SPORTS_WEEK_TAG).assertTextEquals("Week 10")
-        rule.onNodeWithText("Seahawks").assertExists()
+        rule.onAllNodesWithText("Seahawks").onFirst().assertExists()
         m.onDay(1)
         assertEquals("w2026-2-11", repo.showDayCalls.last())
         m.onDay(0)

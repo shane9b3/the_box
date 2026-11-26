@@ -122,4 +122,158 @@ class HubPanelFitTest {
             }
         }
     }
+
+    // ================================================================== (NFL hub P3, §2.3, §2.6, §8.2)
+
+    private val regular = sansTypeface(context, R.font.instrument_sans_regular)
+    private val medium = sansTypeface(context, R.font.instrument_sans_medium)
+
+    /** The panel's fonts by weight (400 / 500 / 600), at design px × the factor: the method the design's tables use. */
+    private fun weighted(f: Float): Measure = { text, px, w ->
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = if (w >= 600) semi else if (w >= 500) medium else regular; textSize = px * f }.measureText(text)
+    }
+
+    /** A slot row's width as `Buttons` lays it out: label + 2 × padding (+ glyph + 8 when drawn) + 2 × gap. */
+    private fun slotRowWidth(slots: List<HubSlot>, f: Float): Float {
+        val m = measure(f)
+        val large = HubCardMetrics.large(f)
+        val pad = if (large) 20 else 28
+        val gap = if (large) 12 else 16
+        return slots.mapIndexed { i, sl ->
+            val glyph = slotGlyph(sl, i)
+            m(slotText(res, sl), 24, 600) + 2 * pad + (if (glyph != null) m(glyph, 24, 600) + 8 else 0f)
+        }.sum() + 2 * gap
+    }
+
+    @Test fun everyNflSlotSetFitsWithTwoDigitCountsAtEverySize() {
+        fun sl(a: SlotAction, l: SlotLabel, n: Int = 0, enabled: Boolean = true) = HubSlot(a, l, enabled, n)
+        val scoring = sl(SlotAction.GOALS, SlotLabel.SCORING_N, 12)
+        val box = sl(SlotAction.BOX_SCORE, SlotLabel.BOX_SCORE)
+        val sets = linkedMapOf(
+            "▶ Highlights · Scoring (12) · Box score" to listOf(sl(SlotAction.WATCH_RECAP, SlotLabel.HIGHLIGHTS), scoring, box),
+            "▶ From start · Scoring (12) · Box score" to listOf(sl(SlotAction.WATCH_FROM_START, SlotLabel.FROM_START), scoring, box),
+            "Highlights soon · Scoring (12) · Box score" to listOf(sl(SlotAction.WATCH_RECAP, SlotLabel.HIGHLIGHTS_SOON, enabled = false), scoring, box),
+            "No highlights · Scoring (12) · Box score" to listOf(sl(SlotAction.WATCH_RECAP, SlotLabel.NO_HIGHLIGHTS, enabled = false), scoring, box),
+            "↻ Retry · Scoring · Box score" to listOf(sl(SlotAction.RETRY, SlotLabel.RETRY), sl(SlotAction.GOALS, SlotLabel.SCORING), box),
+            "Following ✓ · Channels (36) · Scoring (12)" to listOf(sl(SlotAction.FOLLOW, SlotLabel.FOLLOWING), sl(SlotAction.CHANNEL, SlotLabel.CHANNELS_N, 36), scoring),
+            "+ Follow · Channels (36) · Scoring (12)" to listOf(sl(SlotAction.FOLLOW, SlotLabel.FOLLOW), sl(SlotAction.CHANNEL, SlotLabel.CHANNELS_N, 36), scoring),
+            "Following ✓ · Channels (36) · Matchup" to listOf(sl(SlotAction.FOLLOW, SlotLabel.FOLLOWING), sl(SlotAction.CHANNEL, SlotLabel.CHANNELS_N, 36), sl(SlotAction.MATCHUP, SlotLabel.MATCHUP)),
+        )
+        val report = StringBuilder("NFL slot sets (px of 664) at 0.9 / 1.0 / 1.1 / 1.2:\n")
+        for ((name, slots) in sets) {
+            val widths = factors.map { f -> slotRowWidth(slots, f) }
+            report.append("  $name: ").append(widths.joinToString(" / ") { Math.round(it).toString() }).append('\n')
+            widths.forEachIndexed { i, w -> assertTrue("$name at ${factors[i]}: $w px", w <= HubPanelPlan.INNER_W) }
+        }
+        println(report)
+        // UX B1: the rejected long labels did not fit at Largest; the disabled slots draw no glyph.
+        assertEquals(null, slotGlyph(sets.getValue("Highlights soon · Scoring (12) · Box score")[0], 0))
+    }
+
+    @Test fun theNflStatLabelsFitTheCentreColumnAtLargest() {
+        val labels = listOf(
+            R.string.sports_hub_stat_total_yards, R.string.sports_hub_stat_pass_yards, R.string.sports_hub_stat_rush_yards,
+            R.string.sports_hub_stat_first_downs, R.string.sports_hub_stat_third_down, R.string.sports_hub_stat_turnovers,
+            R.string.sports_hub_stat_possession_time, R.string.sports_hub_stat_last5, R.string.sports_hub_stat_points_pg,
+            R.string.sports_hub_stat_points_allowed_pg, R.string.sports_hub_stat_yards_pg, R.string.sports_hub_stat_yards_allowed_pg,
+            R.string.sports_hub_stat_timeouts,
+        )
+        val m = weighted(1.2f)
+        for (id in labels) {
+            val w = m(res.getString(id), 24, 500)
+            assertTrue("${res.getString(id)}: $w of 332", w <= 332f)
+        }
+        assertTrue("the widest side value", m("4-5-1", 24, 500) <= 166f)
+    }
+
+    private fun nflContent(m: HubPanelModel, f: Float): PanelContent {
+        return HubPanelContents.build(res, m, clock24 = false, factor = f, measure = weighted(f))!!
+    }
+
+    private val catchUp = app.thebox.core.sports.hub.ChannelCandidate(
+        app.thebox.core.guide.fakes.GuideFixtures.channel(1, name = "ESPN"), "Main", app.thebox.core.sports.hub.MatchConfidence.CONFIRMED,
+        emptyList(), emptyList(), app.thebox.core.guide.fakes.GuideFixtures.info(100, 280),
+    )
+
+    private fun nflModel(g: app.thebox.core.sports.GameSnapshot, d: app.thebox.core.sports.hub.GameDetail?, now: Long, match: MatchState): HubPanelModel {
+        val base = HubPanelModel(g, detail = d, detailKind = if (d != null) DetailKind.READY else DetailKind.LOADING, nowMs = now, match = match, imminent = true)
+        return base.copy(slots = HubSlots.default(HubSlots.Ctx(g, false, d, null, match, false, now)))
+    }
+
+    @Test fun theNflHeightPlanMatchesTheDesignsTable() {
+        val now = NflHubTestKit.AFTER_FINAL
+        val ch = MatchState.Done(listOf(catchUp))
+        val g = NflHubTestKit.mnfFinal()
+        // Final, highlight poster, a channel line: Possession dropped at Default (188 < 200), the Leaders line drawn.
+        val poster = nflContent(nflModel(g, NflHubTestKit.mnfFinalDetail(g), now, ch), 1.0f)
+        assertTrue(poster.media is MediaSpec.Poster)
+        assertEquals(226, poster.plan.mediaH)
+        assertEquals("Possession gave way", 6, poster.rows.size)
+        assertEquals(2, poster.plan.summaryLines)
+        assertEquals("Leaders · Burrow 300 pass · Daniels 55 rush · Williams 122 rec", poster.summary[0].text)
+        // Without a channel line: 234 with Possession (≥ 200, the disc stays).
+        val posterNoLine = nflContent(nflModel(g, NflHubTestKit.mnfFinalDetail(g), now, MatchState.Done(emptyList())), 1.0f)
+        assertEquals(7, posterNoLine.rows.size)
+        assertEquals(234, posterNoLine.plan.mediaH)
+        // Largest: Possession and the Recap line go; 172 (< 200: no disc, U-N11).
+        val posterL = nflContent(nflModel(g, NflHubTestKit.mnfFinalDetail(g), now, ch), 1.2f)
+        assertEquals(172, posterL.plan.mediaH)
+        assertEquals(1, posterL.plan.summaryLines)
+        assertEquals("Leaders · Burrow 300 pass · Daniels 55 rush", posterL.summary[0].text)
+        assertEquals(6, posterL.rows.size)
+        // Final, art: 188 with Possession at Default; 133 at Largest with both lines.
+        val art = nflContent(nflModel(g, NflHubTestKit.mnfFinalDetail(g, clips = emptyList()), now, ch), 1.0f)
+        assertTrue(art.media is MediaSpec.Art)
+        assertEquals(188, art.plan.mediaH)
+        assertEquals(7, art.rows.size)
+        val artL = nflContent(nflModel(g, NflHubTestKit.mnfFinalDetail(g, clips = emptyList()), now, ch), 1.2f)
+        assertEquals(133, artL.plan.mediaH)
+        assertEquals(2, artL.plan.summaryLines)
+        assertEquals(6, artL.rows.size)
+        // Pre-game: 226 / 133 (a channel line from the one candidate).
+        val pre = NflHubTestKit.pre()
+        val preM = nflModel(pre, NflHubTestKit.preDetail(pre), NflHubTestKit.PRE_START - 7_200_000L, MatchState.Done(listOf(catchUp.copy(airing = null))))
+        assertEquals(226, nflContent(preM, 1.0f).plan.mediaH)
+        assertEquals(133, nflContent(preM, 1.2f).plan.mediaH)
+        assertEquals(2, nflContent(preM, 1.2f).plan.summaryLines)
+        // Live: 264 at Default with the whole situation; at Largest Timeouts leave the line for the extra row (133).
+        val live = NflHubTestKit.mnfLive()
+        val liveM = nflModel(live, NflHubTestKit.mnfLiveDetail(live), now, MatchState.Done(listOf(catchUp.copy(airing = null))))
+        val ld = nflContent(liveM, 1.0f)
+        assertEquals(264, ld.plan.mediaH)
+        assertEquals("CIN ball · 2nd & 7 at WSH 35 · Red zone · Timeouts 2–3", ld.summary[0].text)
+        assertEquals(5, ld.rows.size)
+        val ll = nflContent(liveM, 1.2f)
+        assertEquals("CIN ball · 2nd & 7 at WSH 35 · Red zone", ll.summary[0].text)
+        assertEquals("the Timeouts row", 6, ll.rows.size)
+        assertEquals(res.getString(R.string.sports_hub_stat_timeouts), ll.rows.last().label)
+        assertEquals(133, ll.plan.mediaH)
+        assertEquals(2, ll.plan.summaryLines)
+        // Every case keeps its floor at every size.
+        for (f in factors) for (m in listOf(preM, liveM, nflModel(g, NflHubTestKit.mnfFinalDetail(g), now, ch), nflModel(g, NflHubTestKit.mnfFinalDetail(g, clips = emptyList()), now, ch))) {
+            val c = nflContent(m, f)
+            assertTrue("${m.game?.phase} at $f: ${c.plan}", c.plan.ok)
+        }
+    }
+
+    @Test fun theFittedLinesNeverExceedTheLine() {
+        val now = NflHubTestKit.AFTER_FINAL
+        val g = NflHubTestKit.mnfFinal()
+        for (f in factors) {
+            val m = weighted(f)
+            val c = nflContent(nflModel(g, NflHubTestKit.mnfFinalDetail(g), now, MatchState.Done(emptyList())), f)
+            val leaders = c.summary[0]
+            val w = m(leaders.label, 24, 600) + m(leaders.text.removePrefix(leaders.label), 24, 400)
+            assertTrue("Leaders at $f: $w", w <= HubPanelPlan.INNER_W)
+            // The 99-character recap is one line, ellipsized (it is always wider than the line).
+            if (c.summary.size > 1) {
+                assertTrue(c.summary[1].oneLine)
+                assertTrue(m(c.summary[1].text, 24, 400) > HubPanelPlan.INNER_W)
+            }
+            // The goal-to-go situation fits after its drop, at every size.
+            val gtg = NflHubTestKit.mnfLive(play = app.thebox.core.sports.NflPlay.Down(1, 4, true, app.thebox.core.sports.FieldPos(app.thebox.core.sports.Side.HOME, 4)))
+            val (line, _) = NflHubUi.situation(res, gtg, gtg.detail as app.thebox.core.sports.LeagueDetail.Nfl, HubNames.of(gtg.id.league, gtg.away), HubNames.of(gtg.id.league, gtg.home), m)!!
+            assertTrue("situation at $f: ${line.text}", m(line.label, 24, 600) + m(line.text.removePrefix(line.label), 24, 400) <= HubPanelPlan.INNER_W)
+        }
+    }
 }

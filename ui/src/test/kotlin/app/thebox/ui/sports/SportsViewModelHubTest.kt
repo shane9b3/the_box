@@ -150,16 +150,18 @@ class SportsViewModelHubTest {
         assertEquals(listOf(SlotAction.WATCH_RECAP, SlotAction.GOALS, SlotAction.BOX_SCORE), m.actions())
         assertEquals("recap not posted yet: disabled", SlotLabel.RECAP_SOON, m.panel.value.slots[0].label)
         assertFalse(m.panel.value.slots[0].enabled)
-        // NFL: Follow · Channel · (empty); final: nothing without a catch-up airing.
+        // (NFL hub §2.3, P3) NFL: Follow · Channel · Scoring; final: the grey Highlights soon (no catch-up airing), Scoring,
+        // Box score; OK on the card lands on Scoring.
         val nflLive = SportsFixtures.nflGame(id = "N1")
         repo.prefs.value = SportsPrefs(league = League.NFL)
         repo.day.value = DayState.Board(DayBoard("w2026-2-9", "w2026-2-8", "w2026-2-10", listOf(nflLive, nflFinal)), 0L, false)
         val n = vm()
         n.onCardFocused("N1")
-        assertEquals(listOf(SlotAction.FOLLOW, SlotAction.CHANNEL, null), n.actions())
+        assertEquals(listOf(SlotAction.FOLLOW, SlotAction.CHANNEL, SlotAction.GOALS), n.actions())
         n.onCardFocused("NF")
-        assertEquals(listOf<SlotAction?>(null, null, null), n.actions())
-        assertNull("the footer shows no OK", n.panel.value.firstEnabled)
+        assertEquals(listOf(SlotAction.WATCH_RECAP, SlotAction.GOALS, SlotAction.BOX_SCORE), n.actions())
+        assertEquals(SlotLabel.HIGHLIGHTS_SOON, n.panel.value.slots[0].label)
+        assertEquals("OK lands on Scoring", 1, n.panel.value.firstEnabled)
     }
 
     @Test fun aFinalNflOrChlGameOffersWatchFromStartOnlyWithACatchUpAiring() {
@@ -170,7 +172,8 @@ class SportsViewModelHubTest {
         val m = vm()
         m.onCardFocused("NF")
         assertEquals(0, m.enterPanel("NF"))
-        assertEquals(listOf(SlotAction.WATCH_FROM_START, null, null), m.actions())
+        // (NFL hub §2.3, P3) ▶ From start, then Scoring and Box score.
+        assertEquals(listOf(SlotAction.WATCH_FROM_START, SlotAction.GOALS, SlotAction.BOX_SCORE), m.actions())
         val effects = collect(m)
         m.onSlot(0)
         assertTrue(effects.single() is SportsEffect.PlayArchive)

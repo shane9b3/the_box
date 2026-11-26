@@ -39,8 +39,8 @@ internal object ChlHubUi : HubLeagueUi {
             )
         }
         val rows: List<PanelRow> = r
-        // P3: sports_hub_more_soon_chl ("Game stats for this league aren't available yet.", §6.7).
-        if (rows.isEmpty()) moreSoon = res.getString(R.string.sports_hub_more_soon)
+        // (NFL hub §6.7) The CHL's own words: the NHL-first line is gone with the NFL detail.
+        if (rows.isEmpty()) moreSoon = res.getString(R.string.sports_hub_more_soon_chl)
         return RowsSpec(header = header, rows = rows, moreSoon = moreSoon)
     }
 

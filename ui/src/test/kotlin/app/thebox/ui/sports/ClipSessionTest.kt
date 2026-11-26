@@ -87,11 +87,14 @@ class ClipSessionTest {
     /** Answers `stream()` after [delayMs] (the resolve's network time), or waits for [gate]. */
     private class SlowResolver(val delayMs: Long = 0L) : ClipResolver {
         val calls = ArrayList<ClipRef>()
+        /** (NFL hub P3) The `fresh` flag of each call, in the order of [calls]. */
+        val fresh = ArrayList<Boolean>()
         var gate: CompletableDeferred<Unit>? = null
         val answers = HashMap<Long, ClipResult<Pair<ClipInfo, ClipStream>>>()
         override suspend fun info(ref: ClipRef): ClipResult<ClipInfo> = ClipResult.Ok(ClipInfo(ref, "Title ${ref.videoId}", null, 46_000, null, null))
         override suspend fun stream(ref: ClipRef, fresh: Boolean): ClipResult<Pair<ClipInfo, ClipStream>> {
             calls += ref
+            this.fresh += fresh
             gate?.await()
             if (delayMs > 0) delay(delayMs)
             return answers[ref.videoId] ?: FakeClipResolver.okStream(ref)
@@ -490,6 +493,127 @@ class ClipSessionTest {
         runCurrent()
         assertEquals(listOf(ClipSession.Failure.UNAVAILABLE), failures)
         assertNull(s.position())
+    }
+
+    // ================================================================== (NFL hub P3, §4.2, §4.6; arch m12)
+
+    private val nflGame = GameId(League.NFL, "401873078")
+    private fun play(id: Long) = ClipRef(id, ClipKind.PLAY, nflGame)
+    private fun highlight(id: Long) = ClipRef(id, ClipKind.RECAP, nflGame)
+
+    @Test
+    fun theExpiredLinkReResolveAndTryAgainAreFresh() = runTest {
+        val resolver = SlowResolver()
+        val rig = Rig(this, resolver)
+        rig.live(x)
+        rig.session.play(listOf(highlight(50579688)), 0)
+        runCurrent()
+        assertEquals("the first lookup uses the catalog", listOf(false), resolver.fresh)
+        assertEquals(highlight(50579688), rig.session.lastRequested)
+        rig.controller.base.state.value = PlaybackState.Error(rig.controller.clipNp(100), PlaybackError(PlaybackErrorCode.CLIP_EXPIRED))
+        runCurrent()
+        assertEquals("one fresh re-resolve", listOf(false, true), resolver.fresh)
+        rig.controller.base.state.value = PlaybackState.Error(rig.controller.clipNp(110), PlaybackError(PlaybackErrorCode.CLIP_EXPIRED))
+        runCurrent()
+        assertEquals("never twice for one clip", 2, resolver.calls.size)
+        assertTrue(rig.session.state.value is ClipSession.State.Failed)
+        rig.session.retry()
+        runCurrent()
+        assertEquals("Try again is fresh too", listOf(false, true, true), resolver.fresh)
+    }
+
+    @Test
+    fun anExpiredFirstClipIsTheExpiredToastAndPlaysNothing() = runTest {
+        val resolver = SlowResolver().apply { answers[50578630] = ClipResult.Expired }
+        val rig = Rig(this, resolver)
+        rig.live(x)
+        rig.session.play(listOf(play(50578630), play(50578740)), 0)
+        runCurrent()
+        assertEquals(listOf(ClipSession.Failure.EXPIRED), rig.failures)
+        assertTrue(rig.controller.clips.isEmpty())
+        assertTrue("nothing took the player: no resume", rig.effects.isEmpty())
+        assertEquals(ClipSession.State.Idle, rig.session.state.value)
+    }
+
+    @Test
+    fun morePlaysAutoAdvanceWithUpNext() = runTest {
+        val rig = Rig(this)
+        rig.live(x)
+        rig.session.play(listOf(play(1), play(2)), 0)
+        runCurrent()
+        rig.controller.base.state.value = PlaybackState.Playing(rig.controller.clipNp(100), paused = true, ended = true)
+        runCurrent()
+        assertEquals("Up next applies to PLAY clips", "Title 2", (rig.session.state.value as ClipSession.State.Playing).upNext)
+        advanceTimeBy(SportsConstants.HUB_UP_NEXT_MS + 1)
+        runCurrent()
+        assertEquals(play(2), rig.session.lastPlayed.value)
+    }
+
+    @Test
+    fun anAutoAdvanceSkipsAnEntryAnsweredExpired() = runTest {
+        val resolver = SlowResolver().apply { answers[2] = ClipResult.Expired }
+        val rig = Rig(this, resolver)
+        rig.live(x)
+        rig.session.play(listOf(play(1), play(2), play(3)), 0)
+        runCurrent()
+        rig.controller.base.state.value = PlaybackState.Playing(rig.controller.clipNp(100), paused = true, ended = true)
+        runCurrent()
+        advanceTimeBy(SportsConstants.HUB_UP_NEXT_MS + 1)
+        runCurrent()
+        assertEquals("2 was skipped, 3 plays", listOf(1L, 2L, 3L), resolver.calls.map { it.videoId })
+        assertEquals(2, rig.controller.clips.size)
+        assertEquals(play(3), rig.session.lastPlayed.value)
+        assertTrue("no toast for a skipped entry", rig.failures.isEmpty())
+        assertTrue(rig.effects.isEmpty())
+    }
+
+    @Test
+    fun anAutoAdvanceSkipsEntriesNoLongerOfferedAndEndsWhenNoneRemain() = runTest {
+        val resolver = SlowResolver()
+        val rig = Rig(this, resolver)
+        rig.live(x)
+        val offered = HashSet(listOf(1L, 3L))
+        rig.session.play(listOf(play(1), play(2), play(3), play(4)), 0) { it.videoId in offered }
+        runCurrent()
+        rig.controller.base.state.value = PlaybackState.Playing(rig.controller.clipNp(100), paused = true, ended = true)
+        runCurrent()
+        assertEquals("Up next names the next offered clip", "Title 3", (rig.session.state.value as ClipSession.State.Playing).upNext)
+        advanceTimeBy(SportsConstants.HUB_UP_NEXT_MS + 1)
+        runCurrent()
+        assertEquals(listOf(1L, 3L), resolver.calls.map { it.videoId })
+        // 4 expires while 3 plays: the queue ends and the snapshot resumes.
+        rig.controller.base.state.value = PlaybackState.Playing(rig.controller.clipNp(110), paused = true, ended = true)
+        runCurrent()
+        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x), ownerTuneId = 110)), rig.effects)
+        assertEquals(ClipSession.State.Idle, rig.session.state.value)
+    }
+
+    @Test
+    fun aQueueWhoseRemainingEntriesAllAnswerExpiredEndsWithTheResume() = runTest {
+        val resolver = SlowResolver().apply { answers[2] = ClipResult.Expired; answers[3] = ClipResult.Expired }
+        val rig = Rig(this, resolver)
+        rig.live(x)
+        rig.session.play(listOf(play(1), play(2), play(3)), 0)
+        runCurrent()
+        rig.controller.base.state.value = PlaybackState.Playing(rig.controller.clipNp(100), paused = true, ended = true)
+        runCurrent()
+        advanceTimeBy(SportsConstants.HUB_UP_NEXT_MS + 1)
+        runCurrent()
+        assertEquals(listOf(1L, 2L, 3L), resolver.calls.map { it.videoId })
+        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x), ownerTuneId = 100)), rig.effects)
+        assertEquals(ClipSession.State.Idle, rig.session.state.value)
+    }
+
+    @Test
+    fun theNflHighlightIsAQueueOfOne() = runTest {
+        val rig = Rig(this)
+        rig.live(x)
+        rig.session.play(listOf(highlight(9), play(2)), 0)
+        runCurrent()
+        rig.controller.base.state.value = PlaybackState.Playing(rig.controller.clipNp(100), ended = true)
+        runCurrent()
+        assertEquals(1, rig.controller.clips.size)
+        assertEquals(1, rig.effects.size)
     }
 }
 

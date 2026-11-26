@@ -327,7 +327,9 @@ object SportsText {
                 else -> {
                     val secs = g.clock?.secondsRemaining?.coerceAtLeast(0)
                     val detail = if (secs == null) hubPeriod(res, p, league) else "${hubPeriod(res, p, league)} ${clock(secs)}"
-                    HubPill(res.getString(R.string.sports_hub_pill_live, detail), true)
+                    // (NFL hub §2.5, UX m12) A weather or other delay: "DELAYED · Q3 5:32", so a still clock is explained.
+                    if ((g.detail as? LeagueDetail.Nfl)?.delayed == true) HubPill(res.getString(R.string.sports_hub_pill_delayed, detail), true)
+                    else HubPill(res.getString(R.string.sports_hub_pill_live, detail), true)
                 }
             }
         }
@@ -337,6 +339,8 @@ object SportsText {
         val kind = (g.detail as? LeagueDetail.Nfl)?.breakKind
         return when {
             kind == NflBreak.HALFTIME -> res.getString(R.string.sports_hub_halftime)
+            // (NFL hub §2.1, UX m4) Football's end of a quarter: "END Q1", "END OT"; hockey keeps "1ST INT".
+            p != null && league.sport == Sport.FOOTBALL -> res.getString(R.string.sports_hub_pill_end_quarter, hubPeriod(res, p, league))
             p != null -> res.getString(R.string.sports_hub_pill_intermission, hubPeriod(res, p, league))
             else -> res.getString(R.string.sports_live)
         }
