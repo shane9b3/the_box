@@ -206,5 +206,114 @@ class VideoCase(unittest.TestCase):
         self.assertIsNone(re.search(r"BCpk[A-Za-z0-9_\-]{10,}", src))
 
 
+
+class EspnVideoCase(unittest.TestCase):
+    """(NFL hub section 8.4) The ESPN clip records and HLS media (`handle_espn`), with `--sports --sports-nfl`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cfg = copy.deepcopy(fakepanel.DEFAULTS)
+        cfg.update({"pace": False, "sports": True, "sports_nfl": True})
+        cls.panel = fakepanel.Panel(cfg, use_ffmpeg=False, quiet=True)
+        cls.main, cls.lb = fakepanel.start_servers(cls.panel, "127.0.0.1", 0)
+        cls.port = cls.panel.main_port
+
+    @classmethod
+    def tearDownClass(cls):
+        fakepanel.stop_servers(cls.panel, cls.main, cls.lb)
+
+    def setUp(self):
+        self.panel.reset()
+        self.panel.cfg["sports_nfl_clips"] = "espn"
+
+    raw = VideoCase.raw
+    path_of = VideoCase.path_of
+
+    def summary_videos(self, eid="401899003"):
+        st, _, body = self.raw("/apis/site/v2/sports/football/nfl/summary?event=" + eid)
+        self.assertEqual(200, st)
+        return json.loads(body)["videos"]
+
+    def record(self, cid):
+        st, _, body = self.raw("/espn-core/v1/video/clips/%d" % cid)
+        return st, json.loads(body)
+
+    def test_the_record_is_the_one_item_wrapper_with_the_summary_object(self):
+        v = self.summary_videos()[1]
+        st, rec = self.record(v["id"])
+        self.assertEqual(200, st)
+        self.assertEqual(1, rec["resultsCount"])
+        self.assertEqual([v["id"]], [x["id"] for x in rec["videos"]])
+        self.assertEqual(v["links"]["source"]["HLS"]["href"], rec["videos"][0]["links"]["source"]["HLS"]["href"])
+        self.assertEqual("OnePlay", rec["videos"][0]["tracking"]["coverageType"])
+        self.assertEqual(404, self.record(12345)[0])
+        self.assertEqual(404, self.raw("/espn-core/v1/video/clips/abc")[0])
+
+    def test_the_master_has_espns_shape_and_the_media_plays_out(self):
+        hls = self.summary_videos()[0]["links"]["source"]["HLS"]["href"]
+        st, h, master = self.raw(self.path_of(hls))
+        self.assertEqual(200, st)
+        text = master.decode()
+        media = next(l for l in text.splitlines() if l.startswith("#EXT-X-MEDIA:TYPE=SUBTITLES"))
+        self.assertIn("DEFAULT=YES", media)
+        self.assertIn('LANGUAGE="en"', media)
+        infs = [l for l in text.splitlines() if l.startswith("#EXT-X-STREAM-INF")]
+        self.assertEqual(4, len(infs))
+        self.assertEqual(1, sum("FRAME-RATE=59.940" in l for l in infs))
+        self.assertIn("RESOLUTION=640x360", infs[0])
+        self.assertNotIn("token", text, "ESPN media is unsigned")
+        base = hls.rsplit("/", 1)[0] + "/"
+        for var in ("v720", "v720p60"):
+            st, _, pl = self.raw(self.path_of(base + var + ".m3u8"))
+            lines = pl.decode().splitlines()
+            self.assertEqual("#EXT-X-ENDLIST", lines[-1])
+            seg = next(l for l in lines if "/seg_" in l)
+            st, _, data = self.raw(self.path_of(base + seg))
+            self.assertEqual(200, st)
+            self.assertEqual(0x47, data[0])
+        st, _, spl = self.raw(self.path_of(base + "subs.m3u8"))
+        self.assertIn("text.vtt", spl.decode())
+        st, _, vtt = self.raw(self.path_of(base + "text.vtt"))
+        self.assertTrue(vtt.decode().startswith("WEBVTT"))
+        st, h, png = self.raw(self.path_of(self.summary_videos()[0]["thumbnail"]))
+        self.assertEqual((200, "image/png"), (st, h["content-type"]))
+        self.assertEqual(b"\x89PNG", png[:4])
+
+    def test_gone_lists_the_clips_but_the_master_and_record_404(self):
+        self.panel.cfg["sports_nfl_clips"] = "gone"
+        v = self.summary_videos()[0]
+        self.assertEqual(404, self.raw(self.path_of(v["links"]["source"]["HLS"]["href"]))[0])
+        self.assertEqual(404, self.record(v["id"])[0])
+
+    def test_slow_records_answer_late(self):
+        self.panel.cfg["sports_nfl_clips"] = "slow_records"
+        cid = self.summary_videos()[0]["id"]
+        old = sports_video.ESPN_SLOW_RECORD_S
+        sports_video.ESPN_SLOW_RECORD_S = 0.3
+        try:
+            t = time.time()
+            self.assertEqual(200, self.record(cid)[0])
+            self.assertGreaterEqual(time.time() - t, 0.3)
+        finally:
+            sports_video.ESPN_SLOW_RECORD_S = old
+
+    def test_the_expired_game_and_the_modes(self):
+        v = self.summary_videos("401898001")
+        self.assertEqual(1, len(v))
+        st, rec = self.record(v[0]["id"])
+        self.assertEqual(200, st, "the record still answers; the app does not offer it")
+        self.panel.cfg["sports_nfl_clips"] = "none"
+        self.assertEqual([], self.summary_videos())
+        self.assertEqual(404, self.record(sports_video.espn_clip_id("401899003", 0))[0])
+
+    def test_routes_are_off_without_the_nfl(self):
+        self.panel.cfg["sports_nfl"] = False
+        try:
+            self.assertEqual(404, self.raw("/espn-core/v1/video/clips/50990300")[0])
+            self.assertEqual(404, self.raw("/espn-media/50990300/master.m3u8")[0])
+        finally:
+            self.panel.cfg["sports_nfl"] = True
+
+
 if __name__ == "__main__":
     unittest.main()

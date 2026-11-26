@@ -116,11 +116,9 @@ class GameDetailRepositoryImplTest {
 
     // ---------------------------------------------------------------- the rest and the moves
 
-    @Test fun nflAndChlAreBoardOnlyWithoutARequest() = runTest {
+    /** (NFL hub P2) The NFL now has a detail (GameDetailRepositoryNflTest); the CHL stays board-only. */
+    @Test fun chlIsBoardOnlyWithoutARequest() = runTest {
         val h = harness()
-        h.repo.show(game(id = "401873049", league = League.NFL))
-        settle(5_000)
-        assertEquals(DetailState.BoardOnly(GameId(League.NFL, "401873049")), h.state)
         h.repo.show(game(id = "29187", league = League.OHL))
         settle(5_000)
         assertEquals(DetailState.BoardOnly(GameId(League.OHL, "29187")), h.state)

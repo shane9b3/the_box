@@ -25,13 +25,36 @@ Modes (`sports_video_mode`, also `POST /admin/sports_video {"mode": ...}`):
 - expire:  the manifest is served, then segments, the MP4 and the captions 403 `sports_video_expire_s` seconds after the
            video's first manifest (or MP4) request: the app's CLIP_EXPIRED path.
 A video id whose last three digits are 404 is a 404 VIDEO_NOT_FOUND in every mode.
+
+ESPN clips (NFL hub, docs/design/m6-nfl-hub.md section 8.4; with `--sports --sports-nfl`; served through fakepanel.py's
+`nfl_hub` route to `handle_espn`). ESPN's clip media needs no key or token, so nothing here is signed:
+
+    GET /espn-core/v1/video/clips/{id}                      the per-clip record, ESPN's `{resultsCount, ..., videos: [ {...} ]}`
+                                                            wrapper (`EspnEndpoints.fromOverride`'s clipBase)
+    GET /espn-media/{id}/master.m3u8                        an HLS master of ESPN's shape: four variants (360p, 480p and 720p
+                                                            at 29.97 fps from the panel's 25 fps clip, 720p at 59.94 fps
+                                                            from its 50 fps clip; the declared rates are ESPN's, the media
+                                                            the panel's own) and a WebVTT SUBTITLES rendition, DEFAULT=YES
+    GET /espn-media/{id}/v{360,480,720,720p60}.m3u8 | {variant}/seg_NNN.ts | subs.m3u8 | text.vtt | thumb.png
+
+Which games list clips (the summary's `videos[]`, the board's `highlights[]`, these records):
+- 401899003 (NYJ @ NE, final): by `sports_nfl_clips` (also `POST /admin/config`): `espn` a Final Game Highlight plus three
+  OnePlay clips; `single` the highlight only; `none`; `expired` the highlight with `expirationDate` 1 h ago; `expiring` 2 min
+  from now (inside the app's 5 min margin: never offered); `gone` all four listed, but the master and the record answer
+  404 (the app's CLIP_EXPIRED -> fresh lookup path); `slow_records` all four, records answering after 8 s.
+- 401898001 (DEN @ SEA, week 8, final): always one highlight that expired 1 h ago.
+- every other game (the featured live game included, also after its end): none.
+Valid clips are posted 3 h before the NFL slate's anchor and expire 72 h after it.
 """
 
+import datetime as dt
 import json
 import re
+import struct
 import threading
 import time
 import urllib.parse
+import zlib
 
 PREFIX = "/bc/"
 MODES = ("ok", "refuse", "rotate", "geo", "missing", "slow", "expire")
@@ -319,3 +342,154 @@ def admin(h, path, data):
             p.sports_video.manifest_at = {}
     return h.json({"enabled": bool(p.cfg.get("sports") and p.cfg.get("sports_video")),
                    "mode": p.cfg.get("sports_video_mode"), "counts": p.sports_video.stats()})
+
+
+# ------------------------------------------------------------------ ESPN clips (NFL hub section 8.4)
+
+ESPN_CORE_PREFIX = "/espn-core/v1/video/clips/"
+ESPN_MEDIA_PREFIX = "/espn-media/"
+# The game whose clips follow `sports_nfl_clips`, and the week-8 final with an expired highlight.
+ESPN_CLIP_GAME = "401899003"
+ESPN_EXPIRED_GAME = "401898001"
+ESPN_GONE_MODE = "gone"
+ESPN_SLOW_RECORD_S = 8.0
+ESPN_DEVICES = ["settop", "tablet", "handset", "ipad", "desktop"]
+# (variant, width, height, frame rate, bandwidth, panel clip)
+ESPN_VARIANTS = (("v360", 640, 360, "29.970", 900000, "std"), ("v480", 854, 480, "29.970", 1600000, "std"),
+                 ("v720", 1280, 720, "29.970", 3200000, "std"), ("v720p60", 1280, 720, "59.940", 5400000, "50fps"))
+ESPN_CORE_RE = re.compile(r"^/espn-core/v1/video/clips/(\d+)$")
+ESPN_MEDIA_RE = re.compile(r"^/espn-media/(\d+)/(master\.m3u8|subs\.m3u8|text\.vtt|thumb\.png|(v360|v480|v720|v720p60)\.m3u8|"
+                           r"(v360|v480|v720|v720p60)/seg_(\d{3})\.ts)$")
+ONE_PLAYS = ("Tee Higgins hauls in a 31-yard touchdown", "A 47-yard field goal splits the uprights",
+             "Pick-six seals it in the fourth quarter")
+
+
+def espn_clip_id(eid, i):
+    """A numeric clip id for game [eid], clip [i] (0 = the highlight): 50 000 000 + last four digits x 100 + i."""
+    return 50_000_000 + (int(eid) % 10000) * 100 + i
+
+
+def iso_z(unix):
+    return dt.datetime.fromtimestamp(unix, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def espn_clip_specs(panel, eid, now=None):
+    """[(clip id, coverage type, headline, duration s, published unix, expires unix)] the fake lists for game [eid]."""
+    now = time.time() if now is None else now
+    mode = panel.cfg.get("sports_nfl_clips", "espn")
+    anchor = panel.sports_nfl.anchor
+    posted, life = anchor - 3 * 3600, anchor + 72 * 3600
+    if eid == ESPN_EXPIRED_GAME:
+        return [(espn_clip_id(eid, 0), "Final Game Highlight", "Broncos at Seahawks: game highlights", 68, now - 49 * 3600, now - 3600)]
+    if eid != ESPN_CLIP_GAME or mode == "none":
+        return []
+    hl = "Jets at Patriots: game highlights"
+    if mode == "expired":
+        return [(espn_clip_id(eid, 0), "Final Game Highlight", hl, 74, now - 49 * 3600, now - 3600)]
+    if mode == "expiring":
+        return [(espn_clip_id(eid, 0), "Final Game Highlight", hl, 74, now - 47 * 3600, now + 120)]
+    out = [(espn_clip_id(eid, 0), "Final Game Highlight", hl, 74, posted, life)]
+    if mode != "single":
+        out += [(espn_clip_id(eid, i + 1), "OnePlay", t, 23 + 4 * i, posted - 3600 + 900 * i, life) for i, t in enumerate(ONE_PLAYS)]
+    return out
+
+
+def espn_video(base, eid, spec):
+    """One ESPN video object (the summary's `videos[]`, the board's `highlights[]`, the record's `videos[]`)."""
+    cid, coverage, headline, dur, posted, expires = spec
+    media = "%s%s%d/" % (base, ESPN_MEDIA_PREFIX, cid)
+    return {
+        "id": cid, "headline": headline, "description": headline, "duration": dur,
+        "originalPublishDate": iso_z(posted), "lastModified": iso_z(posted + 60),
+        "timeRestrictions": {"embargoDate": iso_z(posted - 1), "expirationDate": iso_z(expires)},
+        "deviceRestrictions": {"type": "whitelist", "devices": list(ESPN_DEVICES)},
+        "gameId": int(eid), "thumbnail": media + "thumb.png",
+        "links": {"source": {"href": media + "source.mp4", "HLS": {"href": media + "master.m3u8", "cmaf": {"href": media + "cmaf.m3u8"}}},
+                  "mobile": {"href": "https://login.invalid/%d" % cid}},
+        "tracking": {"coverageType": coverage, "leagueName": "NFL", "sportName": "football"},
+    }
+
+
+def espn_videos(h, eid):
+    """The summary's `videos[]` of game [eid] (empty for most games)."""
+    return [espn_video(h.base(), eid, sp) for sp in espn_clip_specs(h.panel, eid)]
+
+
+def espn_highlights(panel, eid, base):
+    """The board's `highlights[]` of game [eid]: the Final Game Highlight only, as ESPN's board."""
+    return [espn_video(base, eid, sp) for sp in espn_clip_specs(panel, eid) if sp[1] == "Final Game Highlight"]
+
+
+def espn_spec_of(panel, cid):
+    for eid in (ESPN_CLIP_GAME, ESPN_EXPIRED_GAME):
+        for sp in espn_clip_specs(panel, eid):
+            if sp[0] == cid:
+                return eid, sp
+    return None, None
+
+
+def solid_png(w, h, rgb):
+    """A valid w x h solid-colour PNG (a stand-in thumbnail)."""
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+    raw = b"".join(b"\x00" + bytes(rgb) * w for _ in range(h))
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + \
+        chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+def handle_espn(h, path):
+    """(NFL hub) The ESPN clip records and HLS media; fakepanel.py's `nfl_hub` has already checked the NFL switches."""
+    p = h.panel
+    v = p.sports_video
+    mode = p.cfg.get("sports_nfl_clips", "espn")
+    m = ESPN_CORE_RE.match(path)
+    if m:
+        v.bump("espn_record")
+        eid, sp = espn_spec_of(p, int(m.group(1)))
+        if mode == "slow_records" and p.stopping.wait(ESPN_SLOW_RECORD_S):
+            return None
+        if sp is None or (mode == ESPN_GONE_MODE and eid == ESPN_CLIP_GAME):
+            return h.send(404, json.dumps({"resultsCount": 0, "videos": [], "status": "not found"}), "application/json")
+        body = {"resultsCount": 1, "resultsLimit": 10, "resultsOffset": 0, "videos": [espn_video(h.base(), eid, sp)],
+                "timestamp": iso_z(time.time()), "status": "success"}
+        return h.send(200, json.dumps(body), "application/json", {"Cache-Control": "max-age=60"})
+    m = ESPN_MEDIA_RE.match(path)
+    if not m:
+        return h.send(404, b"no such ESPN path", "text/plain")
+    v.bump("espn_media")
+    eid, sp = espn_spec_of(p, int(m.group(1)))
+    if sp is None or (mode == ESPN_GONE_MODE and eid == ESPN_CLIP_GAME):
+        return h.send(404, b"<html><body>404</body></html>", "text/html")
+    name = m.group(2)
+    segs_of = {k: [s[0] for s in p.clips[k].segments] if p.clips.get(k) is not None else [] for k in ("std", "50fps")}
+    if name == "master.m3u8":
+        lines = ["#EXTM3U", "#EXT-X-VERSION:4", "#EXT-X-INDEPENDENT-SEGMENTS",
+                 '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,'
+                 'LANGUAGE="en",URI="subs.m3u8"']
+        for var, w, ht, fps, bw, _clip in ESPN_VARIANTS:
+            lines += ['#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d,RESOLUTION=%dx%d,FRAME-RATE=%s,'
+                      'CODECS="avc1.64001f,mp4a.40.2",SUBTITLES="subs"' % (bw, bw * 9 // 10, w, ht, fps), var + ".m3u8"]
+        return h.send(200, "\n".join(lines) + "\n", "application/vnd.apple.mpegurl")
+    if m.group(3):
+        clip = dict((x[0], x[5]) for x in ESPN_VARIANTS)[m.group(3)]
+        lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:%d" % int(SEG_S + 0.5), "#EXT-X-PLAYLIST-TYPE:VOD",
+                 "#EXT-X-MEDIA-SEQUENCE:0"]
+        for i in range(len(segs_of[clip])):
+            lines += ["#EXTINF:%.3f," % SEG_S, "%s/seg_%03d.ts" % (m.group(3), i)]
+        lines.append("#EXT-X-ENDLIST")
+        return h.send(200, "\n".join(lines) + "\n", "application/vnd.apple.mpegurl")
+    if m.group(4):
+        segs = segs_of[dict((x[0], x[5]) for x in ESPN_VARIANTS)[m.group(4)]]
+        i = int(m.group(5))
+        if i >= len(segs):
+            return h.send(404, b"no such segment", "text/plain")
+        return h.send(200, segs[i], "video/mp2t")
+    n = len(segs_of["std"])
+    if name == "subs.m3u8":
+        total = SEG_S * max(1, n)
+        lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:%d" % int(total + 0.5), "#EXT-X-PLAYLIST-TYPE:VOD",
+                 "#EXT-X-MEDIA-SEQUENCE:0", "#EXTINF:%.3f," % total, "text.vtt", "#EXT-X-ENDLIST"]
+        return h.send(200, "\n".join(lines) + "\n", "application/vnd.apple.mpegurl")
+    if name == "text.vtt":
+        return h.send(200, vtt_text(n), "text/vtt")
+    return h.send(200, solid_png(64, 36, (0x1f, 0x3a, 0x5f)), "image/png", {"Cache-Control": "max-age=3600"})

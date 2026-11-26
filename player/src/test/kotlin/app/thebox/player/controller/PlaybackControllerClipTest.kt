@@ -535,4 +535,40 @@ class PlaybackControllerClipTest {
         assertEquals(PlaybackErrorCode.CHANNEL_OFFLINE, (f.state as PlaybackState.Error).error.code)
         assertNotNull(f.ladder.channels.lastOrNull())
     }
+
+    // ------------------------------------------------------------------ (NFL hub §4.5) the clip rendition cap
+
+    private fun params() = f.playerFactory.bundle!!.player.trackSelectionParameters
+
+    private fun assertNoCap(label: String) {
+        val p = params()
+        assertEquals(label, Int.MAX_VALUE, p.maxVideoWidth)
+        assertEquals(label, Int.MAX_VALUE, p.maxVideoHeight)
+        assertEquals(label, Int.MAX_VALUE, p.maxVideoFrameRate)
+    }
+
+    @Test
+    fun aLowRamClipCycleIsCappedAt720p30AndTheNextLiveCycleClearsIt() {
+        f.engine.isLowRam = true
+        clip()
+        val p = params()
+        assertEquals(ClipRendition.LOW_RAM_MAX_WIDTH, p.maxVideoWidth)
+        assertEquals(720, p.maxVideoHeight)
+        assertEquals(30, p.maxVideoFrameRate)
+        c.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        assertFalse(target().isClip)
+        assertNoCap("a live cycle after a clip has no cap, even on low RAM")
+        clip()
+        assertEquals("the next clip is capped again", 720, params().maxVideoHeight)
+    }
+
+    @Test
+    fun aNormalDeviceSetsNoCapOnAClipOrALiveCycle() {
+        clip()
+        assertNoCap("clip")
+        c.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        assertNoCap("live")
+    }
 }

@@ -445,6 +445,37 @@ debug origin (`files/debug/sports_base`) serves both leagues:
 - `sample_espn.py --event {id} --out {dir}` records the real ESPN board for one event (§1.6): a JSONL log plus the raw body of
   every state change.
 
+## Sports: the NFL hub's ESPN summary and clips (docs/design/m6-nfl-hub.md §8.4)
+
+With `--sports --sports-nfl` (no extra flag) the panel also serves what the NFL hub reads, under the same debug origin
+(`files/debug/sports_base`; `EspnEndpoints.fromOverride` maps the clip records to `{origin}/espn-core/…`):
+
+- `GET /apis/site/v2/sports/football/nfl/summary?event={id}` (`sports_nfl.handle_summary`) for every board game, in the
+  shapes `EspnSummaryDto` reads: `header` (home first), `boxscore.teams` / `players` (away first; season averages
+  pre-game, totals that grow with the timeline's yards live), `scoringPlays` (live and final; the featured game replays
+  its timeline: TD with the kick folded in, FG, safety, the interception-return TD with its two-point try), `leaders`,
+  `injuries` (home first, IR included), `lastFiveGames` (pre-game only), `gameInfo.venue`, `article` (Preview / Recap),
+  `videos`, plus a padded `drives` of `sports_nfl_summary_pad_kb` KB (default 400; live and final only, as ESPN's) and
+  one-item `news` / `winprobability` / `pickcenter` stubs for the app to skip. The key order differs by event (`header`
+  first for odd ids, last for even). gzip-encoded when the client asks (OkHttp does). Pre-game: SF @ SEA, LV @ DEN;
+  live: the featured KC @ BUF (no clips ever: the no-clip game, also after its end); final with clips: NYJ @ NE; final
+  with an expired highlight: week 8's DEN @ SEA (`401898001`).
+- `sports_nfl_clips` (config / `POST /admin/config`): NYJ @ NE's clips. `espn` a Final Game Highlight + 3 OnePlay clips;
+  `single` the highlight; `none`; `expired` (expired 1 h ago: never offered); `expiring` (2 min from now: inside the
+  5 min margin, never offered); `gone` (listed, but master and record answer 404: play from the catalog → master 404 →
+  one fresh record lookup → the "removed" toast); `slow_records` (records answer after 8 s). The board's `highlights[]`
+  carries each final's highlight (the card chip and slot 1 before the summary loads).
+- `GET /espn-core/v1/video/clips/{id}` (`sports_video.handle_espn`): ESPN's one-item `{resultsCount, …, videos: [ … ]}`
+  wrapper. `GET /espn-media/{id}/master.m3u8`: 4 variants (360p / 480p / 720p declared 29.97 fps from the 25 fps `std`
+  clip, 720p declared 59.94 fps from the `50fps` clip), an English WebVTT `SUBTITLES` rendition `DEFAULT=YES`; then the
+  variant playlists, TS segments, `subs.m3u8`, `text.vtt` and a `thumb.png`. Unsigned, as ESPN's (http here only because
+  the debug origin is http; the app accepts http media only from the override).
+- Summary faults in `sports_nfl_faults`: `summary_status` (`503`, `429` with `retry_after`, `403` an HTML block, `202`
+  ESPN's WAF challenge with `x-amzn-waf-action: challenge`: the app treats 403 and the 202 as rate-limited),
+  `summary_pad_kb` (e.g. `2100`: over the app's 2 MiB decoded cap → "ESPN changed how it sends game stats"),
+  `summary_stall_ms`; `no_date` and `max_age` apply too.
+- `GET /admin/sports_video` counts `espn_record` and `espn_media` requests beside the NHL ones.
+
 ## Sports: the fake HockeyTech CHL feeds (docs/design/m6-chl-leagues.md §7.3)
 
 `--sports --sports-chl` (config `sports_chl: true`; needs `sports`) adds `sports_chl.py`'s routes under the same debug origin
