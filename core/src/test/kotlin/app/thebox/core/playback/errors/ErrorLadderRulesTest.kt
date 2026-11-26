@@ -219,6 +219,36 @@ class ErrorLadderRulesTest {
         assertEquals("L10", afterFallBack.row)
     }
 
+    /**
+     * (Code review 2026-11-26) An HLS playlist URL that could not be renewed re-resolves with no delay (L19p), shares
+     * L19's attempt count, ends at L20 like any reconnect, and never fails the stream-switch window by itself after
+     * first media. The delay is 0 on every attempt (no jitter), so the restart time is the same on every hand-over.
+     */
+    @Test
+    fun anExpiredPlaylistReResolvesAtOnceAndCountsLikeL19() {
+        var c = LadderCounters()
+        val rows = mutableListOf<String>()
+        val playing = ctx(mapOf("firstFrame" to "true", "ms" to "60000", "format" to "HLS", "attempts" to "3"))
+        repeat(3) {
+            val t = ladder.trace(FailureSignal.PlaylistExpired, playing.with(c))
+            rows += t.row
+            assertEquals(LadderDecision.ReResolve(0), t.decision)
+            c = t.counters
+        }
+        assertEquals(listOf("L19p", "L19p", "L19p"), rows)
+        assertEquals(3, c.transientRetries)
+        val end = ladder.trace(FailureSignal.PlaylistExpired, playing.with(c))
+        assertEquals("L20", end.row)
+        assertEquals(PlaybackErrorCode.STREAM_INTERRUPTED, assertIs<LadderDecision.Fail>(end.decision).error.code)
+        // A network reconnect after it continues the same count (one series), with L19's delay for that step.
+        val net = ladder.trace(FailureSignal.Network(app.thebox.core.playback.NetworkFailureKind.RESET, beforeFirstByte = false), playing.with(LadderCounters(transientRetries = 1)))
+        assertEquals("L19", net.row)
+        assertEquals(2, net.counters.transientRetries)
+        // An account that turned bad after a refresh still ends at the gate, as for a network failure.
+        val gated = ladder.trace(FailureSignal.PlaylistExpired, playing.copy(accountStatus = AccountGate.EXPIRED, counters = LadderCounters(forbiddenSteps = 1)))
+        assertEquals("G1", gated.row)
+    }
+
     @Test
     fun audioFallbacksWalkPassthroughSoftwareDrop() {
         val stall = FailureSignal.Stall(StallKind.AUDIO_NOT_STARTED)

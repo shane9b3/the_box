@@ -300,3 +300,31 @@ None.
   settings-machine reselect change beyond its one condition.
 - The rewritten design doc's §9 reconciliation table line by line, and the earlier design review.
 - Lint and the full gate (not run, by instruction).
+
+---
+
+## Resolution (fix pass, 2026-11-26)
+
+Branch `playback` (`hls-fix` + `ts-retry` merged). Design changes: `docs/design/m6-hls-edge-handover.md` §10. Decision
+notes updated: `docs/decisions/2026-11-25-auto-format-retries-ts.md` and `2026-11-25-tunneling-off-per-visit.md`
+("Code review changes" sections).
+
+| Finding | Status | What changed | Tests |
+|---|---|---|---|
+| **A1** blip before the headers restarts playback | **Fixed** | An `io:*` trigger is "soft": one renewal attempt per route per 30 s (`IO_COOLDOWN_MS`), budget counted but never disabled by it (`tryTakeSoft`), adopted only when `Renewed`; otherwise the original error is rethrown (translated as before), no fallback stored, no signal: Media3's retries run as on `main`. | `aBlipBeforeTheHeadersKeepsMedia3sRetriesAndNoFallback`, `aBlipThatARenewalRoutesAroundIsAdopted` |
+| **A2** a 3xx to a working address now restarts | **Fixed** | A 3xx whose renewal is not `Renewed` re-sends the reload once with redirects followed (route's current URL); a media playlist that passes the continuity rule is served rebased under Media3's URI; same host → adopted as current; other host → served rebased and the route follows redirects from then on. Only a failed follow (`follow_failed:<why>`) ends in the typed fallback. | `aRedirectToAWorkingPlaylistOnAnotherHostIsStillFollowed`, `aRedirectToAWorkingPlaylistOnTheSameHostIsAdopted`; every existing fallback test now also runs the failed follow |
+| **A3** raw string comparison of O | **Fixed** | `HlsPlaylistRenewal.sameUrl` (`HttpUrl` equality) for "not redirected", the ACTIVE-state check and Media3's request for O. | `anOriginWrittenInAnotherFormIsNotARedirect` |
+| **A4** "off" forgets the current URL | **Fixed** | `turnOff` (loop, too_large) and the budget's disable mean "no more renewals": a renewed route is still requested at its current URL with redirects followed (`Plan.Pinned(follow = true)`, mode FOLLOW); `too_large` and an un-rebasable 200 on a renewed route re-request the same way. | `aDisabledBudgetAfterARenewalKeepsTheCurrentUrl`, `aRedirectOnTheFirstReloadMeansThisProviderRedirectsEveryReload` (updated) |
+| **A5** a timed-out waiter fails the route for good | **Fixed** | `busy` is not a fallback and is never stored; a 3xx waiter gets today's followed request; a successful renewal clears any stored fallback; a waiter takes the finished flight's outcome. | `aWaiterThatTimesOutDoesNotFailTheRoute` |
+| **A6** td rule too tight | **Fixed** | max(2 s, 25 %) (`TD_TOLERANCE_S`, `TD_TOLERANCE_PERCENT`); reasoning from the capture in design §10.4. | `continuityRuleOnTheMeasuredNumbers` |
+| **A7** continuity can accept another stream | **Fixed (narrowed)** | Overlapping MSNs must also agree on `#EXTINF` (± 500 ms, `misaligned:dur`) and, when both carry one, PDT (± 1 s, `misaligned:pdt`). File name kept as the last path segment (the measured token is in the directory). Residual risk stated in design §10.4. | `continuityRuleOnTheMeasuredNumbers` |
+| **A8** silent restarts not counted; quiet rule unbounded | **Fixed** | Renewals (via a `DECISION`/`HLS_PLAYLIST_RENEWED` event) and restarts after first media (with the quiet ones) counted per tune and per visit; overlay HTTP `n renewals (visit m)` and a new Restarts row. Cap: after 2 quiet series in 10 min of one visit the next announces at once (`QUIET_RECONNECT_MAX`, `QUIET_RECONNECT_WINDOW_MS`). The deferred notice fires for any waiting state at 3 s. | `LadderExecutionTest.theThirdQuietReconnectWithinTenMinutesIsAnnounced`, `StatsFormatterTest.renewalsAndRestartsCountPerTuneAndVisit`, `StatsLineFitTest` (Default and Largest) |
+| **A9** offline at the 302 stalls | **Fixed** | Online re-checked 3 × 500 ms before declining offline; a declined-offline 3xx takes today's followed request (transient connect error, Media3 retries) instead of the fatal unfollowed 302. | `offlineNeverRenewsAndKeepsTodaysError` (updated), `aMomentaryOfflineReadingAtTheExpiryStillRenews` |
+| **B1** TS plays then keeps failing | **Fixed** | Second failure after first media (or one that would end at the card) falls back to HLS for the tune, once; refusal only on 405/406. | `AutoTsRetryControllerTest` (3 new) |
+| **B2** stall on every visit | **Fixed (needs the owner's confirmation)** | In-memory damping: 2 consecutive stalled visits (`TUNNELING_STALLED_VISITS`) → the channel's next visits start untunneled for the process, no toast, stats `off for now (stalled before)`; a good tunneled visit resets; nothing persisted. Wording for the owner in the decision note. | `TunnelingVisitTest` (2 new) |
+| **B3** "off (setting)" when no setting | **Fixed** | `TunnelingOff` reason: setting / stalled / stalled before / not used for replays / not supported for this stream/device; plain "off" before first media. | `StatsFormatterTest.theTunnelingLineHasThreeStates`, `TunnelingVisitTest` (stats asserts, clip), `StatsLineFitTest` |
+| **B4** user bits lost / not backed up | **Documented** | Decision note (tunneling): known backup gap for the two user bits; no change here. | – |
+| **B5** double back-off step | **Fixed** | A refusal within 60 s of the previous (re)learn keeps the step (`REFUSAL_DEDUP_MS`). | `AutoTsRetryTest.twoRefusalsWithinAMinuteStepTheBackOffOnce` |
+| **B6** wrong clock at boot | **Documented** | Decision note (TS retry): bounded cost, no "clock trusted" signal to gate on. | – |
+| Merge: fallback flips quiet/noisy around 3 s | **Fixed** | `FailureSignal.PlaylistExpired` + ladder row **L19p** (`ReResolve(0)`, limiter fallback `RetrySame(0)`, counted like L19, exhausted at L20) in `:core`; the controller sends it for `HLS_RENEWAL_FALLBACK`. | `ladder.csv` L19p rows, `ErrorLadderRulesTest.anExpiredPlaylistReResolvesAtOnceAndCountsLikeL19`, `LadderExecutionTest.anHlsRenewalFallbackReachesTheLadderAtOnceAsTodaysNetworkRow` (updated) |
+| Merge: owner's playlist moves to TS | **Recorded** | Release gate in `docs/00-master-plan.md` §6 and design §8.3/§10.7: "to validate HLS renewal on a playlist that the TS retry would move to TS, force Stream format to HLS". | – |

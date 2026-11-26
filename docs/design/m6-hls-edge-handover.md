@@ -5,7 +5,8 @@ and the stage-0 instrumentation run it asked for (B1). The first version of this
 server dies at a wall-clock boundary; the measurement shows it does not (§1.2). This version replaces the edge
 re-entry design with **playlist-URL renewal**, drops stage 2 (the wall-clock learner) and stage 3 (the probe), and folds
 in every review finding (§9). Implemented on branch `hls-fix` (on top of the debug-only `HlsEdge*` probe); the lead
-commits. Not yet verified on the owner's provider (§10).
+commits. **Revised again 2026-11-26** after the code review (`docs/review/2026-11-26-playback-fixes-code-review.md`):
+§10 lists every change; where §6 and §10 disagree, §10 wins. Not yet verified on the owner's provider (§11).
 
 Owner report (2026-11-25): "approx every 30 minutes my channels disconnect and then reconnect about 2-3 seconds later …
 it has happened on multiple channels … the reconnected toast keeps showing up".
@@ -31,12 +32,15 @@ OkHttp 5.5.0 sources from the Gradle cache. Media3 paths are relative to `androi
   same lease and thread, checks that the fresh playlist **continues** the last good one (§6.4), adopts its URL as the
   new current URL and returns the fresh body as the answer to Media3's reload, under Media3's own URI. The tracker sees
   an ordinary reload. Segments come from the fresh body (absolute paths on the unchanged host). No toast, no stall.
+  (§10: a failure before the response headers adopts a renewal only when it succeeds; a redirect whose renewal does not
+  succeed is followed as today before anything falls back.)
 - **Defensive fallback.** Any other shape (the edge host really changes, the sequence jumps or restarts, td changes,
   ENDLIST, multivariant at start, O refuses or times out, budget spent) is detected, never guessed around: the reload
-  fails with a typed, URL-free exception that Media3 does not retry, and the controller is told **at once**, so today's
-  re-resolve (L19) starts within ≈ 1 s instead of after ≈ 14–20 s of drained buffer.
+  fails with a typed, URL-free exception that Media3 does not retry, and the controller is told **at once**, so a
+  re-resolve (L19p, no initial delay, §10.5) starts at once instead of after ≈ 14–20 s of drained buffer.
 - **Quiet reconnect (lead's decision pending the owner, one constant).** A re-resolve that is back to rendering within
-  3 s shows neither "Reconnecting" nor "Reconnected" (all providers). Past 3 s the notices show as today.
+  3 s shows neither "Reconnecting" nor "Reconnected" (all providers). Past 3 s the notices show as today; the third quiet
+  series within 10 minutes of one visit is announced at once (§10.6).
 - **Not a regression.** Provider behaviour that our HLS path has always surfaced visibly (§3.2).
 
 ---
@@ -249,7 +253,7 @@ headers and user agent, no `Range`), read the body (≤ 1 MiB). Then, in order:
 3. Not a playlist → `failed:not_playlist`; a multivariant → `declined:multivariant`.
 4. **Continuity** against the route's last good playlist (review M4), else `misaligned:<rule>`:
    - `media`: still a media playlist; `endlist`: no `#EXT-X-ENDLIST`;
-   - `td`: target duration equal within ± 1 s (measured: 11 → 12);
+   - `td`: target duration within max(2 s, 25 %) (measured: 11 → 12; was ± 1 s, §10.4);
    - `msn_back`: new media sequence ≥ the last good one;
    - `msn_ahead`: new media sequence ≤ last + its segment count + ⌈elapsed since the last good load / td⌉ + 2
      (measured: 3280 ≤ 3277 + 6 + 2 + 2);
@@ -281,8 +285,8 @@ Every `declined:*` (except offline), `misaligned:*` and `failed:*` outcome:
   `FailureSignal.Network(OTHER, beforeFirstByte = false)` → today's L19 re-resolve **now**, instead of after Media3's
   retries drained the buffer (M13). The re-resolve restarts the tracker from O (`HlsMediaSource` re-prepare).
 
-Not done: an immediate `ReResolve(0)` row. L19's first delay (1 s ± 20 %) still applies; a 0 ms row needs a new
-`FailureSignal` and ladder row in `:core` (deferred, §9).
+Done in the code review pass (§10.5): the signal is `FailureSignal.PlaylistExpired`, ladder row **L19p** =
+`ReResolve(0)` (limiter fallback `RetrySame(0)`), counted in `transientRetries` like L19, exhausted at L20.
 
 ### 6.7 Segments: what the brief asked, what Media3 allows
 
@@ -320,7 +324,7 @@ Media3's retries (packager lag, review minor 2). 3xx on segments is followed as 
 
 ### 6.10 What the viewer sees
 
-- A successful renewal: nothing. The stats overlay's HTTP row gains "n playlist renewals" (`StreamStats.playlistRenewals`,
+- A successful renewal: nothing. The stats overlay's HTTP row gains "n renewals" (§10.6: per tune and visit; `StreamStats.playlistRenewals`,
   `StatsFormatter`).
 - **Quiet reconnect** (`PlaybackControllerImpl.QUIET_FAST_RECONNECT = true`, `QUIET_RECONNECT_MS = 3_000`; lead's decision,
   pending the owner, review question Q2): a transient re-resolve defers "Reconnecting" by 3 s from the first restart of a
@@ -423,6 +427,9 @@ logs `misaligned:msn_back`, the controller's `asking the ladder` follows at once
 
 ### 8.3 Owner's provider (lead's run, ≥ 31 minutes; better overnight)
 
+**Release gate note (§10.7):** to validate HLS renewal on a playlist that the Auto TS retry would move to TS, force
+Stream format to HLS first.
+
 Start a channel and play across at least two half-hour marks. Success, per mark: one
 `HlsRenewal: renewed t=… trigger=redirect:302 in=<≈1000>ms edge=<edge host> msn=<a>><a+1…3> td=11>11|12`, and absent:
 `failure Network`, `ErrorLadder: row=`, `state Buffering` with `REBUFFER`, `Reconnecting`/`Reconnected`, a second
@@ -452,11 +459,98 @@ Start a channel and play across at least two half-hour marks. Success, per mark:
 | Minor 9 tests (alignment classes, Robolectric tracker test, fake panel modes) | **Fixed**: one test per rule, the real-tracker test, fake panel `continue`/`restart` and expiry modes. "Same MSN different PTS" is not testable from playlists (R6). |
 | Minor 10 acceptance run | **Partly**: §8.3 names the lines; the run itself is the lead's (≥ 2 marks; an overnight summary line is deferred). |
 | Review "not a no-op for every redirecting provider" | **Addressed**: with renewal, a redirecting provider that does not expire tokens sees only unfollowed pinned reloads that answer 200 (no change), or the loop guard on its first reload. The 403-on-reload case now renews before the ladder's L7. |
-| Deferred | a `ReResolve(0)` row for the fallback (needs a `:core` signal and row); exact-sequence segment remap (needs evidence that segments expire); an overnight summary line. |
+| Deferred | ~~a `ReResolve(0)` row for the fallback~~ (done, §10.5: L19p); exact-sequence segment remap (needs evidence that segments expire); an overnight summary line. |
 
 ---
 
-## 10. Not verified / open
+## 10. Code review changes (2026-11-26)
+
+Review: `docs/review/2026-11-26-playback-fixes-code-review.md` (findings A1–A9, the merge notes). Code in
+`HlsPlaylistRenewal.kt` (router + `RenewingHlsDataSource`), `HlsPlaylistScanner.kt`, `ErrorLadderImpl.kt`,
+`PlaybackControllerImpl.kt`, `StatsFormatter.kt`. Where this section and §6 disagree, this section wins.
+
+### 10.1 Which failures may end in the typed fallback (A1, A2, A5, A9)
+
+| Pinned reload ended with | Renewal | If the renewal does not succeed |
+|---|---|---|
+| a failure **before the response headers** (connect, DNS, TLS, timeout, reset): `trigger=io:*` | at most one attempt per route per 30 s (`IO_COOLDOWN_MS`); counted in the budget but never disables it (`tryTakeSoft`); no online re-check | the **original error**, translated as before: Media3's own retries run exactly as on `main`. No fallback stored, no signal. |
+| a **3xx** (the measured expiry) | as before | the same reload is **re-sent once with redirects followed** (today's request, at the route's current URL). A media playlist that passes the continuity rule against the last good one is served under Media3's URI, rebased (`PlaylistRebase`) against the URL it really came from. Same host as the logical URL: that URL becomes the current one (`followed … adopted`). Another host: the body is served rebased (absolute references on the other host) and the route **follows redirects from now on**, today's path (`followed … other_host`). Only when the followed request fails too (`follow_failed:<why>`) is the renewal's outcome the typed fallback. |
+| a 3xx, but the renewal was declined **offline** (after 3 × 500 ms re-checks, A9), **busy** (a waiter that timed out, A5) or by the I/O cool-down | not attempted | exactly today's request: followed, its errors translated; a connect failure is a transient error Media3 retries (not the unfollowed 302, which the policy treats as fatal). |
+| 401, 403, 404, 410, or a 2xx that is not a media playlist | as before | the typed fallback (unchanged). |
+
+So only the unambiguous expiry signals can end in `HlsRenewalException` + `HLS_RENEWAL_FALLBACK`. A fallback is stored
+on the route only when it is signalled (`HlsPlaylistRenewal.fallBack`); a successful renewal clears any stored fallback
+and the follow mode.
+
+### 10.2 "Off" keeps the current URL (A4)
+
+`turnOff` (`declined:loop`, `declined:too_large`) now means "never renew again in this session"; the routes stay. The
+budget's time-boxed disable means the same. A route that was renewed keeps being requested at its **current** URL with
+redirects followed (`Plan.Pinned(follow = true)`, data source mode FOLLOW, errors translated); a route that was never
+renewed is planned `None` (Media3's own request, exactly today's). An oversized body on a renewed route, or a 200 whose
+references cannot be rebased byte-safely, is re-requested the same way instead of being served unrebased. In FOLLOW
+mode `getUri()` is the post-redirect URL, as on `main` (Media3 then resolves segments against it); its errors are
+still rebuilt against Media3's own `DataSpec` (§6.9), and nothing in the app logs load URIs.
+
+### 10.3 "Redirected at start" from parsed URLs (A3)
+
+O's first load and later loads are compared with `HttpUrl` equality (`HlsPlaylistRenewal.sameUrl`), and Media3's
+request for O is recognised the same way, so an M3U entry or Xtream base written as `HTTP://Host:80/…` (OkHttp's normal
+form differs from the text) is `off:not_redirected`, a strict no-op. Test `anOriginWrittenInAnotherFormIsNotARedirect`.
+
+### 10.4 Continuity rule (A6, A7)
+
+- **Target duration:** a change up to **max(2 s, 25 %)** of the last value is the same stream. Why: the tag is the longest
+  segment rounded up, and the capture shows the same segmenter and the same files reporting 11 then 12 (§1.2); with
+  segments cut at ≈ 11–12 s the rounding can move by 2 (11 ↔ 13), which 25 % of 11 s (2.75 s) allows, and the ±2 s floor
+  keeps short targets (2 s ↔ 4 s) from tripping on the same rounding. A different stream is still caught by
+  `msn_back`/`msn_ahead`/`names`. 11 → 14 and 11 → 8 are `misaligned:td`.
+- **Same segmenter:** for every MSN present on both sides the rule now also requires the same `#EXTINF` duration (± 500 ms,
+  `misaligned:dur`) and, when **both** entries carry `#EXT-X-PROGRAM-DATE-TIME`, the same PDT (± 1 s, `misaligned:pdt`).
+  The file name stays the last path segment (the measured token sits in the directory, so a whole-path hash would reject
+  the measured hand-over).
+- **Residual false-accept risk (R6, narrowed):** a different rendition or stream on the **same host** whose segmenter
+  uses the same file names, the same sequence numbers and the same durations for the overlapping segments, and either
+  carries no PDT or the same PDTs, is still accepted: in practice another rendition of the same channel cut by the same
+  packager (aligned segments). Its picture would be the same programme at another quality, or, for a different channel
+  sharing one packager clock, the wrong channel until the next tune; the frozen-video/stall detectors do not catch the
+  latter. No such provider is known; the host must also be the same (`declined:host` otherwise).
+
+### 10.5 The immediate ladder row (merge note)
+
+`FailureSignal.PlaylistExpired` (`:core`), sent by the controller for `HLS_RENEWAL_FALLBACK`. Row **L19p** (before L19):
+`ReResolve(0)` while attempts are left (limiter fallback `RetrySame(0)`), `transientRetries + 1`, exempt from the switch
+window when attempts are unlimited; exhausted → L20 `STREAM_INTERRUPTED`. The account gate applies as for a network
+failure. Transient for the controller (quiet rule, reconnect pill). Why: L19's first delay is 1 s ± 20 %, which put
+the restart's first media around the 3 s quiet line at random; with no delay the restart takes the resolve plus the HLS
+start every time. Tests: `ladder.csv` (L19p rows, `G-limiter`, L20), `ErrorLadderRulesTest.anExpiredPlaylistReResolvesAtOnceAndCountsLikeL19`.
+
+### 10.6 Stats and the quiet-reconnect cap (A8)
+
+- Renewals are counted by the controller from a `PlaybackEventType.DECISION` / `HLS_PLAYLIST_RENEWED` event per renewal,
+  **per tune** (the cycle, across its sessions) and **per visit** (the cycles of one channel since the last user tune).
+  Ladder restarts after first media are counted the same way, with the quiet ones (a series that ended without any
+  notice). Overlay: HTTP `n renewals (visit m)`; a new **Restarts** row `n (q quiet) · visit m (r quiet)` (label
+  `player_stat_restarts`). Values may wrap to a second line instead of being cut (`StatsLineFitTest`, Default and Largest).
+- **Cap:** the quiet rule hides at most `QUIET_RECONNECT_MAX = 2` reconnect series per visit within
+  `QUIET_RECONNECT_WINDOW_MS = 10 min`; the next one shows "Reconnecting" at once (and "Reconnected" after it). A new
+  visit starts with no history. The deferred notice now fires for any waiting state at 3 s (not only
+  `Buffering(RECONNECTING)`), except an error card, a stop or playback again.
+
+### 10.7 Release gate note
+
+To validate HLS renewal on a playlist that the Auto TS retry would move to TS, **force Stream format to HLS** (recorded in
+`docs/00-master-plan.md` §6). The owner's Auto playlist goes to TS once the retry confirms, and renewal never runs on TS.
+
+### 10.8 Fake panel
+
+New `token_expire_mode: redirect_moved` (A2: the expired playlist redirects to a working token on another port, and the
+provider URL hands out that port from then on) and `edge_blip_every` / `edge_blip_s` (A1: a short blip on the token
+paths, connections closed before the status line). Commands in `tools/fakepanel/README.md`.
+
+---
+
+## 11. Not verified / open
 
 - **The owner's provider** with renewal: one captured hand-over only. The next captured marks confirm it when each shows
   `renewed … trigger=redirect:302 … msn=a>b` with b − a ≤ 3 and no ladder line. Any `misaligned:`/`declined:host` line

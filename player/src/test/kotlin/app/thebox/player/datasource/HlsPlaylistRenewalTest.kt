@@ -65,13 +65,18 @@ class HlsPlaylistRenewalTest {
         clock: app.thebox.core.playback.MonoClock = REAL_CLOCK,
         val budget: HlsRenewalBudget = HlsRenewalBudget(),
         val client: OkHttpClient = OkHttpClient.Builder().readTimeout(1, TimeUnit.SECONDS).build(),
+        /** O as the playlist wrote it (code review A3: maybe not OkHttp's normal form). */
+        val origin: String = fake.originUrl,
+        /** The online re-check waits (code review A9); none by default. */
+        val pauses: MutableList<Long> = CopyOnWriteArrayList(),
+        waitMs: Long = HlsPlaylistRenewal.WAIT_MS,
     ) {
         val broker = FakeBroker()
         val events = EventRecorder()
-        val ctx = sessionCtx(fake.originUrl, broker = broker, events = events)
+        val ctx = sessionCtx(origin, broker = broker, events = events)
         val telemetry = SessionTelemetry(REAL_CLOCK)
         val session = TransportSession(ctx, telemetry)
-        val renewal = session.renewal { HlsPlaylistRenewal(ctx, budget, online, clock, telemetry) }
+        val renewal = session.renewal { HlsPlaylistRenewal(ctx, budget, online, clock, telemetry, waitMs) { pauses += it } }
         val factory = RenewingHlsDataSourceFactory(ctx, client, telemetry, session, REAL_CLOCK, renewal)
         val initial: DataSource = factory.createDataSource(C.DATA_TYPE_MANIFEST)
         val bundle: DataSource = factory.createDataSource(C.DATA_TYPE_MANIFEST)
@@ -80,7 +85,7 @@ class HlsPlaylistRenewalTest {
 
         /** The tracker's first load of O; [logical] becomes what `getUri()` reported. */
         fun start(): String {
-            initial.open(manifest(fake.originUrl))
+            initial.open(manifest(origin))
             logical = initial.uri.toString()
             val body = String(readAll(initial))
             initial.close()
@@ -112,6 +117,8 @@ class HlsPlaylistRenewalTest {
         fun calls(): BrokeredCallFactory = session.httpCalls(ctx, client, telemetry)
 
         fun fallbackEvents() = events.events.filter { it.first == PlaybackEventType.STALL && it.second.startsWith(HlsPlaylistRenewal.FALLBACK_CODE) }
+
+        fun renewedEvents() = events.events.filter { it.first == PlaybackEventType.DECISION && it.second.startsWith(HlsPlaylistRenewal.RENEWED_CODE) }
     }
 
     private fun expectFailure(block: () -> Unit): IOException {
@@ -189,6 +196,7 @@ class HlsPlaylistRenewalTest {
         assertNull(o.headers["Range"])
         assertTrue(rig.fallbackEvents().isEmpty())
         assertEquals(1, rig.telemetry.playlistRenewals)
+        assertEquals("the controller counts it (code review A8)", 1, rig.renewedEvents().size)
         val line = lines.single { it.startsWith("renewed") }
         assertTrue(line, line.contains("trigger=redirect:302") && line.contains(":${fake.edge.port} ") && line.contains("td=11>12"))
         assertFalse(line.contains("tok") || line.contains("/live/"))
@@ -231,10 +239,17 @@ class HlsPlaylistRenewalTest {
 
     @Test
     fun continuityRuleOnTheMeasuredNumbers() {
-        fun pl(msn: Long, td: Long = 11, n: Int = 6, prefix: String = "seg_", end: Boolean = false, dseq: Long? = null): HlsPlaylistScanner.Summary {
+        fun pl(
+            msn: Long, td: Long = 11, n: Int = 6, prefix: String = "seg_", end: Boolean = false, dseq: Long? = null,
+            pdt0: Long? = null, dur: (Long) -> String = { "11" },
+        ): HlsPlaylistScanner.Summary {
             val sb = StringBuilder("#EXTM3U\n#EXT-X-TARGETDURATION:$td\n#EXT-X-MEDIA-SEQUENCE:$msn\n")
             dseq?.let { sb.append("#EXT-X-DISCONTINUITY-SEQUENCE:$it\n") }
-            for (i in 0 until n) sb.append("#EXTINF:$td,\n/x/$prefix${msn + i}.ts\n")
+            for (i in 0 until n) {
+                // A PDT on every segment, 11 s apart from [pdt0] at MSN 0 (so the same MSN has the same PDT on both sides).
+                pdt0?.let { sb.append("#EXT-X-PROGRAM-DATE-TIME:").append(java.time.Instant.ofEpochMilli(it + (msn + i) * 11_000)).append("\n") }
+                sb.append("#EXTINF:${dur(msn + i)},\n/x/$prefix${msn + i}.ts\n")
+            }
             if (end) sb.append("#EXT-X-ENDLIST\n")
             return HlsPlaylistRenewal.mediaSummary(sb.toString().toByteArray())!!
         }
@@ -242,7 +257,15 @@ class HlsPlaylistRenewalTest {
         // Measured: msn 3277 → 3280, 16 s later, td 11 → 12.
         assertNull(HlsPlaylistRenewal.continuityViolation(last, 0, pl(3280, td = 12), 16_000))
         assertNull(HlsPlaylistRenewal.continuityViolation(last, 0, pl(3277), 0))
-        assertEquals("td", HlsPlaylistRenewal.continuityViolation(last, 0, pl(3280, td = 13), 16_000))
+        // (Code review A6) The target duration may move by max(2 s, 25 %): 11 → 13 is the same stream, 11 → 14 is not;
+        // a 2 s target may become 4 s but not 5 s.
+        assertNull(HlsPlaylistRenewal.continuityViolation(last, 0, pl(3280, td = 13), 16_000))
+        assertNull(HlsPlaylistRenewal.continuityViolation(last, 0, pl(3280, td = 9), 16_000))
+        assertEquals("td", HlsPlaylistRenewal.continuityViolation(last, 0, pl(3280, td = 14), 16_000))
+        assertEquals("td", HlsPlaylistRenewal.continuityViolation(last, 0, pl(3280, td = 8), 16_000))
+        assertNull(HlsPlaylistRenewal.continuityViolation(pl(100, td = 2), 0, pl(101, td = 4), 2_000))
+        assertEquals("td", HlsPlaylistRenewal.continuityViolation(pl(100, td = 2), 0, pl(101, td = 5), 2_000))
+        assertTrue(HlsPlaylistRenewal.targetDurationAgrees(40, 50) && !HlsPlaylistRenewal.targetDurationAgrees(40, 51))
         assertEquals("msn_back", HlsPlaylistRenewal.continuityViolation(last, 0, pl(3276), 16_000))
         // Bound: last + window (6) + ceil(16 s / 11 s) (2) + 2 = 3287.
         assertNull(HlsPlaylistRenewal.continuityViolation(last, 0, pl(3287), 16_000))
@@ -252,6 +275,16 @@ class HlsPlaylistRenewalTest {
         assertEquals("names", HlsPlaylistRenewal.continuityViolation(last, 0, pl(3280, prefix = "other_"), 16_000))
         // No overlap: names cannot be compared, the sequence bound decides.
         assertNull(HlsPlaylistRenewal.continuityViolation(last, 0, pl(3284, prefix = "other_"), 16_000))
+        // (Code review A7) The same MSN and name but another length is another stream; so is another PDT, when both
+        // carry one (a PDT on one side only cannot be compared).
+        assertEquals("dur", HlsPlaylistRenewal.continuityViolation(last, 0, pl(3280, dur = { if (it == 3281L) "6.000" else "11" }), 16_000))
+        assertNull(HlsPlaylistRenewal.continuityViolation(last, 0, pl(3280, dur = { "11.400" }), 16_000))
+        val t0 = 1_790_000_000_000L
+        val withPdt = pl(3277, pdt0 = t0)
+        assertNull(HlsPlaylistRenewal.continuityViolation(withPdt, 0, pl(3280, pdt0 = t0), 16_000))
+        assertNull(HlsPlaylistRenewal.continuityViolation(withPdt, 0, pl(3280, pdt0 = t0 + 900), 16_000))
+        assertEquals("pdt", HlsPlaylistRenewal.continuityViolation(withPdt, 0, pl(3280, pdt0 = t0 + 3_600_000), 16_000))
+        assertNull(HlsPlaylistRenewal.continuityViolation(withPdt, 0, pl(3280), 16_000))
     }
 
     // ---------------------------------------------------------------- fallbacks: detected, typed, immediate
@@ -405,12 +438,207 @@ class HlsPlaylistRenewalTest {
     fun offlineNeverRenewsAndKeepsTodaysError() {
         val rig = Rig(online = { false })
         val e = renewWith(rig) {}
-        assertTrue("$e", e is HttpDataSource.InvalidResponseCodeException)
-        assertEquals(302, (e as HttpDataSource.InvalidResponseCodeException).responseCode)
+        // (Code review A9) Today's request: the redirect followed, its connect failure a transient error Media3 retries
+        // (not the unfollowed 302, which the policy would treat as fatal and leave to a drained buffer).
+        assertTrue("$e", e is HttpDataSource.HttpDataSourceException && e !is HlsRenewalException && e !is HttpDataSource.InvalidResponseCodeException)
+        assertTrue("retried by Media3", policyDelay(e) != C.TIME_UNSET)
         assertLeaksNothing(e, rig) // no Location header, no body
         assertEquals(1, fake.originHits.get())
         assertTrue(rig.fallbackEvents().isEmpty())
         assertTrue(lines.any { it.startsWith("declined:offline") })
+        assertEquals("re-checked 3 × 500 ms before declining", listOf(500L, 500L, 500L), rig.pauses.toList())
+    }
+
+    /** (Code review A9) A transient "no network" right at the expiry: the re-check sees it back and renews. */
+    @Test
+    fun aMomentaryOfflineReadingAtTheExpiryStillRenews() {
+        val readings = java.util.concurrent.atomic.AtomicInteger()
+        val rig = Rig(online = { readings.incrementAndGet() > 1 })
+        rig.start()
+        fake.msn++
+        rig.reload()
+        fake.expireAll()
+        fake.msn++
+        val (body, uri, _) = rig.reload()
+        assertEquals(rig.logical, uri.toString())
+        assertTrue(body.contains("/hls/tok2/"))
+        assertEquals(listOf(HlsPlaylistRenewal.OFFLINE_RECHECK_MS), rig.pauses.toList())
+        assertTrue(rig.fallbackEvents().isEmpty())
+    }
+
+    // ---------------------------------------------------------------- code review 2026-11-26
+
+    /**
+     * (A1) A pinned reload that fails before the response headers (a blip) tries one renewal, adopts nothing that did
+     * not succeed, and rethrows the original error: Media3 retries it as before, no fallback is stored, the ladder hears
+     * nothing; the next blipped reload inside the cool-down does not ask O again; after the blip the route plays on.
+     */
+    @Test
+    fun aBlipBeforeTheHeadersKeepsMedia3sRetriesAndNoFallback() {
+        val rig = Rig()
+        rig.start()
+        fake.msn++
+        rig.reload()
+        fake.blipAll = true
+        val e = expectFailure { rig.reload() }
+        assertTrue("$e", e is HttpDataSource.HttpDataSourceException && e !is HlsRenewalException)
+        assertEquals(HttpDataSource.HttpDataSourceException.TYPE_OPEN, (e as HttpDataSource.HttpDataSourceException).type)
+        assertTrue("retried by Media3 as on main", policyDelay(e) != C.TIME_UNSET)
+        assertLeaksNothing(e, rig)
+        assertEquals("one renewal attempt", 2, fake.originHits.get())
+        assertTrue(lines.any { it.startsWith("failed:") && it.contains("trigger=io:") })
+        expectFailure { rig.reload() }
+        assertEquals("cool-down: no second request to O", 2, fake.originHits.get())
+        assertTrue(rig.fallbackEvents().isEmpty())
+        assertNull(rig.renewal.fallbackOf((rig.renewal.plan(Uri.parse(rig.logical)) as HlsPlaylistRenewal.Plan.Pinned).route))
+        fake.blipAll = false
+        fake.msn++
+        val (body, uri, _) = rig.reload()
+        assertEquals(rig.logical, uri.toString())
+        assertTrue(body.contains("#EXT-X-MEDIA-SEQUENCE:${fake.msn}"))
+        assertEquals(0, rig.telemetry.playlistRenewals)
+        // The budget was not disabled by the blip: a real expiry later still renews.
+        fake.expireAll()
+        fake.msn++
+        assertTrue(rig.reload().first.contains("/hls/tok3/"))
+        assertEquals(1, rig.telemetry.playlistRenewals)
+    }
+
+    /** (A1) A failure before the headers that a renewal can route around is adopted (seamless, like an expiry). */
+    @Test
+    fun aBlipThatARenewalRoutesAroundIsAdopted() {
+        val rig = Rig()
+        rig.start()
+        fake.msn++
+        rig.reload()
+        fake.blipTokens += "tok1"
+        fake.msn++
+        val (body, uri, _) = rig.reload()
+        assertEquals(rig.logical, uri.toString())
+        assertTrue(body.contains("/hls/tok2/"))
+        assertTrue(lines.single { it.startsWith("renewed") }.contains("trigger=io:"))
+        assertTrue(rig.fallbackEvents().isEmpty())
+    }
+
+    /**
+     * (A2) A redirect that today's code follows to a working address still plays: the renewal is declined (O now hands
+     * out another host), the reload is re-sent with redirects followed, the continuation is served under Media3's URL
+     * with its references rebased onto the other host, and the route follows redirects from now on. No fallback.
+     */
+    @Test
+    fun aRedirectToAWorkingPlaylistOnAnotherHostIsStillFollowed() {
+        val rig = Rig()
+        rig.start()
+        fake.msn++
+        rig.reload()
+        fake.expireAll()
+        fake.originMode = OriginMode.REDIRECT_EDGE2
+        fake.expiredLocation = { fake.issue(fake.edge2) }
+        fake.msn++
+        val (body, uri, headers) = rig.reload()
+        assertEquals(rig.logical, uri.toString())
+        assertTrue(headers.isEmpty())
+        assertTrue(body.contains("#EXT-X-MEDIA-SEQUENCE:${fake.msn}"))
+        val seg = rig.lastSegment(body)
+        assertTrue(seg, seg.startsWith(fake.edge2.url("/hls/").toString()))
+        assertTrue(rig.fallbackEvents().isEmpty())
+        assertTrue(lines.any { it.startsWith("declined:host") })
+        assertTrue(lines.single { it.startsWith("followed") }.contains("other_host"))
+        assertFalse(lines.any { it.contains("tok") || it.contains("/live/") })
+        // From now on: today's request for this route (followed).
+        assertEquals(HlsPlaylistRenewal.Plan.None, rig.renewal.plan(Uri.parse(rig.logical)))
+        fake.msn++
+        assertTrue(rig.reload().first.contains("#EXT-X-MEDIA-SEQUENCE:${fake.msn}"))
+    }
+
+    /** (A2) The same on the same host (O briefly refusing): the followed address becomes the current URL. */
+    @Test
+    fun aRedirectToAWorkingPlaylistOnTheSameHostIsAdopted() {
+        val rig = Rig()
+        rig.start()
+        fake.msn++
+        rig.reload()
+        fake.expireAll()
+        fake.originMode = OriginMode.STATUS
+        fake.originStatus = 503
+        var target = ""
+        fake.expiredLocation = { fake.issue().also { target = it } }
+        fake.msn++
+        val (body, uri, _) = rig.reload()
+        assertEquals(rig.logical, uri.toString())
+        // (The unfollowed 302 minted one token too; the followed one is the last.)
+        assertTrue(body, body.contains(java.net.URI(target).path.substringBeforeLast('/') + "/seg_"))
+        assertTrue(lines.any { it.startsWith("failed:status:503") })
+        assertTrue(lines.single { it.startsWith("followed") }.contains("adopted"))
+        assertTrue(rig.fallbackEvents().isEmpty())
+        fake.expiredLocation = null
+        val mark = fake.edgeRequests.size
+        fake.msn++
+        rig.reload()
+        assertEquals("the adopted URL, no redirect", listOf(java.net.URI(target).path), fake.edgePaths().drop(mark))
+    }
+
+    /** (A3) O written in another form (upper-case scheme) that OkHttp normalises is not a redirect: strict no-op. */
+    @Test
+    fun anOriginWrittenInAnotherFormIsNotARedirect() {
+        fake.originMode = OriginMode.DIRECT
+        val rig = Rig(origin = fake.originUrl.replaceFirst("http://", "HTTP://"))
+        rig.start()
+        assertEquals(HlsPlaylistRenewal.State.OFF, rig.renewal.currentState)
+        assertTrue(debugLines.single(), debugLines.single().startsWith("off:not_redirected"))
+        assertTrue(HlsPlaylistRenewal.sameUrl("HTTP://Example.COM:80/a%7e/b", "http://example.com/a%7e/b"))
+        assertFalse(HlsPlaylistRenewal.sameUrl("http://example.com/a", "http://example.com/b"))
+    }
+
+    /** (A4) Renewal disabled after a renewal (the budget's time box): reloads keep going to the current URL. */
+    @Test
+    fun aDisabledBudgetAfterARenewalKeepsTheCurrentUrl() {
+        val clock = FakeClock()
+        val budget = HlsRenewalBudget()
+        val rig = Rig(clock = clock, budget = budget)
+        rig.start()
+        fake.msn++
+        rig.reload()
+        fake.expireAll()
+        fake.msn++
+        assertTrue(rig.reload().first.contains("/hls/tok2/"))
+        repeat(HlsPlaylistRenewal.BUDGET_MAX + 1) { budget.tryTake(clock.nowMs()) }
+        assertTrue(budget.disabled(clock.nowMs()))
+        val plan = rig.renewal.plan(Uri.parse(rig.logical))
+        assertTrue(plan is HlsPlaylistRenewal.Plan.Pinned && plan.follow)
+        val mark = fake.edgeRequests.size
+        fake.msn++
+        val (body, _, _) = rig.reload()
+        assertTrue(body.contains("#EXT-X-MEDIA-SEQUENCE:${fake.msn}"))
+        assertEquals("never the expired logical URL", listOf("/hls/tok2/index.m3u8"), fake.edgePaths().drop(mark))
+    }
+
+    /** (A5) A loader that gave up waiting does not mark the route failed; the renewal it waited on still succeeds. */
+    @Test
+    fun aWaiterThatTimesOutDoesNotFailTheRoute() {
+        val rig = Rig(waitMs = 200, client = OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).build())
+        rig.start()
+        fake.msn++
+        rig.reload()
+        fake.expireAll()
+        fake.originDelayMs = 1_500
+        val atOrigin = CountDownLatch(1)
+        fake.onOrigin = { atOrigin.countDown() }
+        val first = AtomicReference<Result<Triple<String, Uri?, Map<String, List<String>>>>>()
+        val t1 = Thread { first.set(runCatching { rig.reload() }) }
+        t1.start()
+        assertTrue(atOrigin.await(5, TimeUnit.SECONDS))
+        val second = rig.factory.createDataSource(C.DATA_TYPE_MANIFEST)
+        val waited = runCatching { rig.reload(source = second) }.exceptionOrNull()
+        t1.join(5_000)
+        assertTrue("busy is today's error, not the typed fallback: $waited", waited != null && waited !is HlsRenewalException)
+        assertTrue(lines.any { it.startsWith("declined:busy") })
+        assertTrue("${first.get()}", first.get().getOrThrow().first.contains("/hls/tok2/"))
+        val route = (rig.renewal.plan(Uri.parse(rig.logical)) as HlsPlaylistRenewal.Plan.Pinned).route
+        assertNull(rig.renewal.fallbackOf(route))
+        assertTrue(rig.fallbackEvents().isEmpty())
+        fake.msn++
+        assertTrue(rig.reload().first.contains("/hls/tok2/"))
     }
 
     @Test
@@ -423,7 +651,9 @@ class HlsPlaylistRenewalTest {
         assertFalse(e is HlsRenewalException)
         assertEquals(1, fake.originHits.get())
         assertTrue(lines.any { it.startsWith("declined:loop") })
-        assertEquals(HlsPlaylistRenewal.State.OFF, rig.renewal.currentState)
+        assertTrue(rig.renewal.renewalsOff)
+        // (Code review A4) The never-renewed route is today's request from now on: Media3's own URL, followed.
+        assertEquals(HlsPlaylistRenewal.Plan.None, rig.renewal.plan(Uri.parse(rig.logical)))
         assertTrue(rig.fallbackEvents().isEmpty())
     }
 

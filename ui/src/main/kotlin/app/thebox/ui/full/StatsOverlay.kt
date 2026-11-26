@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,13 +43,15 @@ fun StatsOverlay(
             .padding(horizontal = 20.dp, vertical = 14.dp),
     ) {
         for (l in lines) {
-            Row(Modifier.height(lineH.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // (Code review 2026-11-26, A8/B3) A value longer than its column wraps to a second line instead of being cut
+            // ("not supported for this stream/device" at Largest text); a one-line value keeps the row's height.
+            Row(Modifier.heightIn(min = lineH.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Line(stringResource(PlayerText.statLabelRes(l.label)), GuideUi.mono(22, color = GuideUi.Fg55), Modifier.width(LABEL_W.dp))
                 // U-S12 (code review 2026-10-16, B2): the audio line says "Always passthrough" and where Back to Auto is.
                 val value = if (audioOutputForced && l.label == app.thebox.core.full.StatLabel.AUDIO) {
                     l.value + " · " + stringResource(R.string.player_stat_audio_forced)
                 } else l.value
-                Line(value, GuideUi.mono(22), Modifier.weight(1f))
+                Line(value, GuideUi.mono(22), Modifier.weight(1f), maxLines = 2)
             }
         }
         // (M6 §13, U-N3) "Rewind: 18:20 saved of 30:00 · 1.1 GB" while the tuned channel is buffered; (WP-S4, U-N4) with its place.

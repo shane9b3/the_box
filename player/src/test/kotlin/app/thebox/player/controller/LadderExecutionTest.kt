@@ -320,10 +320,58 @@ class LadderExecutionTest {
         val seen = f.ladder.seen.size
         f.sources.last.ctx.onEvent(app.thebox.core.playback.PlaybackEventType.STALL, app.thebox.player.datasource.HlsPlaylistRenewal.FALLBACK_CODE, "misaligned:msn_back")
         f.idle()
-        assertEquals(
-            FailureSignal.Network(app.thebox.core.playback.NetworkFailureKind.OTHER, beforeFirstByte = false),
-            f.ladder.seen.drop(seen).single().signal,
-        )
+        // (Code review 2026-11-26) Its own signal, for the immediate row L19p (no initial delay).
+        assertEquals(FailureSignal.PlaylistExpired, f.ladder.seen.drop(seen).single().signal)
+    }
+
+    /**
+     * (Code review 2026-11-26, A8) The quiet rule hides a fast reconnect, not a channel that keeps dropping: two quiet
+     * series in a visit, then the third within 10 minutes says "Reconnecting" at once. The stats count the restarts and
+     * the quiet ones per tune and per visit, and the renewals across sessions.
+     */
+    @Test
+    fun theThirdQuietReconnectWithinTenMinutesIsAnnounced() {
+        f.controller.setStatsEnabled(true)
+        f.ladder.script = { _, _ -> LadderDecision.ReResolve(0) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        f.advance(1_000)
+        repeat(PlaybackControllerImpl.QUIET_RECONNECT_MAX) {
+            f.exo.emitError(resetError())
+            f.idle()
+            f.advance(500)
+            f.play()
+            f.advance(60_000)
+        }
+        assertTrue("quiet so far", f.notices.none { it is PlaybackNotice.Reconnecting || it == PlaybackNotice.Reconnected })
+        f.sources.last.ctx.onEvent(app.thebox.core.playback.PlaybackEventType.DECISION, app.thebox.player.datasource.HlsPlaylistRenewal.RENEWED_CODE, "")
+        f.idle()
+        f.exo.emitError(resetError())
+        f.idle()
+        assertEquals("announced at once", 1, f.notices.count { it is PlaybackNotice.Reconnecting })
+        f.advance(500)
+        f.play()
+        assertEquals(1, f.notices.count { it == PlaybackNotice.Reconnected })
+        f.advance(1_500)
+        val st = f.controller.stats.value
+        assertEquals(3, st.restarts)
+        assertEquals(2, st.quietRestarts)
+        assertEquals(3, st.visitRestarts)
+        assertEquals("a renewal of an earlier session still counts", 1, st.playlistRenewals)
+        assertEquals(1, st.visitPlaylistRenewals)
+        // Ten minutes later the quiet rule is back.
+        f.advance(PlaybackControllerImpl.QUIET_RECONNECT_WINDOW_MS)
+        f.exo.emitError(resetError())
+        f.idle()
+        assertEquals(1, f.notices.count { it is PlaybackNotice.Reconnecting })
+        // A new tune of the channel is a new visit: its counts start over.
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        f.advance(1_500)
+        assertEquals(0, f.controller.stats.value.visitRestarts)
+        assertEquals(0, f.controller.stats.value.playlistRenewals)
     }
 
     @Test

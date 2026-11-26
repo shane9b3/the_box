@@ -19,8 +19,11 @@ internal class HlsPlaylistScanner(private val baseHost: String?, private val has
     /** How a URI line or attribute refers to its target. */
     enum class Ref(val label: String) { REL("rel"), ABS_PATH("abspath"), ABS_SAME("abs-same"), ABS_OTHER("abs-other") }
 
-    /** One segment of a media playlist: its MSN, salted file-name hash and PDT (epoch ms, or null). */
-    data class Segment(val msn: Long, val nameHash: String, val pdtMs: Long?)
+    /**
+     * One segment of a media playlist: its MSN, salted file-name hash, PDT (epoch ms, or null) and `#EXTINF` duration
+     * (ms; 0 when absent or unparseable).
+     */
+    data class Segment(val msn: Long, val nameHash: String, val pdtMs: Long?, val durMs: Long = 0L)
 
     /** What one body said. Every field is a number, an enum, a salted hash or a sanitized PDT text. */
     data class Summary(
@@ -174,7 +177,7 @@ internal class HlsPlaylistScanner(private val baseHost: String?, private val has
         segRefs += refOf(uri)
         lastName = name
         val pdt = nextPdtMs
-        entries.addLast(Segment((msn ?: 0L) + index, hash(name), pdt))
+        entries.addLast(Segment((msn ?: 0L) + index, hash(name), pdt, pendingExtinfMs))
         if (entries.size > MAX_SEGMENTS) entries.removeFirst()
         nextPdtMs = pdt?.plus(pendingExtinfMs)
         pendingExtinfMs = 0L

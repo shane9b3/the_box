@@ -117,7 +117,8 @@ with N generated ones (VOD and series unchanged), for the guide's instrumented t
 | `token_kill` | on the redirect port, an open body is closed when its token expires (`token_ttl`): mid-play token expiry; counts `token_expired` |
 | `timeshift_reject_forms` | per stream (`stream_faults`), as the config key below; wins over it |
 | `playlist_token_ttl` | s (live `.m3u8` only): the measured HLS shape (docs/design/m6-hls-edge-handover.md §1.2). The main port answers each tune with a 302 to `http://host:<redirect-port>/hls/<token>/<id>.m3u8` (a new token per request); that media playlist lists absolute-path segments `/hls/<token>/<id>_<n>.ts` on the same host. After N s the token's **playlist** answers per `token_expire_mode`; its segments keep answering inside the window. A new request to the main port gets a new token. Counts `edge_tokens_issued`, `edge_token_expired` in `/admin/stats` |
-| `token_expire_mode` | with `playlist_token_ttl`: `redirect_dead` (default: 302 to `10.255.255.1`, a non-routable address, so following it times out on connect, as measured), `redirect_refused` (302 to a closed local port), `403`, `404` |
+| `token_expire_mode` | with `playlist_token_ttl`: `redirect_dead` (default: 302 to `10.255.255.1`, a non-routable address, so following it times out on connect, as measured), `redirect_refused` (302 to a closed local port), `redirect_moved` (302 to a **working** new token on the *main* port, and from then on the main port's tunes hand out main-port tokens: "the edge moved to another host:port", whose redirect today's code follows), `403`, `404` |
+| `edge_blip_every` / `edge_blip_s` | with `playlist_token_ttl`: every `edge_blip_every` s (wall clock), for `edge_blip_s` s (default 2), the stream's tune redirect and every `/hls/` request get no response at all (connection closed before the status line): a short network blip. Counts `edge_blips` |
 | `token_msn` | with `playlist_token_ttl`: `continue` (default: every token's playlist lists the same wall-clock media sequence and segment names, so a new token simply continues), `restart` (each token's sequence counts from 0 at its issue: a "restarted segmenter") |
 
 Time for `inline_jump_after`, `psi_every_s` and `pmt_change_after` is media time (clip bytes sent / clip rate): wall time when paced (`pace: true`, the default), deterministic when not.
@@ -202,8 +203,29 @@ and **absent**: `failure Network`, `ErrorLadder: row=`, `Reconnecting`/`Reconnec
 
 Fallback check (`--stream-fault 1:token_msn='"restart"'`, or `POST /admin/config
 {"stream_faults":{"1":{"playlist_token_ttl":90,"token_msn":"restart"}}}`): each expiry logs
-`HlsRenewal: misaligned:msn_back …` followed at once by `hls playlist renewal misaligned:msn_back: asking the ladder` and
-a quiet re-resolve (no notice when playback is back within 3 s). `token_expire_mode: "403"` exercises `trigger=status:403`.
+`HlsRenewal: misaligned:msn_back …`, then (the 302 is re-sent with redirects followed, into the dead address)
+`HlsRenewal: follow_failed:connect …`, then at once `hls playlist renewal misaligned:msn_back: asking the ladder`,
+`ErrorLadder: row=L19p signal=PlaylistExpired -> ReResolve(delayMs=0 …)` and a quiet re-resolve (no notice when playback
+is back within 3 s; the third such series within 10 minutes of one visit shows "Reconnecting" at once).
+`token_expire_mode: "403"` exercises `trigger=status:403`.
+
+Code review 2026-11-26 checks (all with `--set 'allowed_output_formats=["m3u8"]'`, or Stream format set to HLS):
+
+```
+# A redirect to a working address is still followed (no restart): renewal declines (other host:port), the followed
+# redirect plays. Expect per expiry `declined:host` then `followed … other_host`; later expiries: nothing (the route
+# follows redirects, today's request). Absent: `asking the ladder`, `ErrorLadder: row=`, notices.
+python3 tools/fakepanel/fakepanel.py --port 8080 --set 'allowed_output_formats=["m3u8"]' \
+    --stream-fault 1:playlist_token_ttl=90 --stream-fault 1:token_expire_mode='"redirect_moved"'
+
+# A 2-second network blip does not restart playback: every 60 s the token paths drop for 2 s. Expect at most one
+# `failed:… trigger=io:…` (or `renewed … trigger=io:…`) line per blip and Media3's own retries; absent: `asking the
+# ladder`, `ErrorLadder: row=`, a second `zap … ok`, notices. (With a short TTL too, expiries still renew.)
+python3 tools/fakepanel/fakepanel.py --port 8080 --set 'allowed_output_formats=["m3u8"]' \
+    --stream-fault 1:playlist_token_ttl=3600 --stream-fault 1:edge_blip_every=60 --stream-fault 1:edge_blip_s=2
+```
+
+The stats overlay's HTTP line counts `n renewals (visit m)` across restarts, and its Restarts line `n (q quiet) · visit m`.
 
 ## Admin API
 

@@ -77,6 +77,13 @@ object AutoTsRetry {
      */
     const val FIRST_MEDIA_BUDGET_MS = 8_000L
 
+    /**
+     * (Code review 2026-11-26, B5) A refusal stored less than this long after the previous (re)learn of HLS keeps the
+     * step: two tunes refused in quick succession (a fast zap that read the playlist before the first refusal was
+     * written) are one refusal, not two steps of the back-off.
+     */
+    const val REFUSAL_DEDUP_MS = 60_000L
+
     enum class Result { REFUSED, CONFIRMED, INCONCLUSIVE }
 
     /** The account allows TS, or its formats are unknown (no card, or an empty list). */
@@ -116,11 +123,15 @@ object AutoTsRetry {
     /** The stored value after a retry's [result]; null clears it (plain Auto again). */
     fun afterResult(previous: LearnedOutput?, result: Result, nowMs: Long): LearnedOutput? = when (result) {
         Result.CONFIRMED -> null
-        Result.REFUSED -> LearnedOutput(
-            XtreamOutput.HLS,
-            learnedAtMs = nowMs,
-            step = if (previous?.output == XtreamOutput.HLS) (previous.step + 1).coerceAtMost(BACKOFF_MS.size - 1) else 0,
-        )
+        Result.REFUSED -> if (previous?.output == XtreamOutput.HLS && previous.learnedAtMs?.let { nowMs - it in 0 until REFUSAL_DEDUP_MS } == true) {
+            previous.copy(holdUntilMs = null)
+        } else {
+            LearnedOutput(
+                XtreamOutput.HLS,
+                learnedAtMs = nowMs,
+                step = if (previous?.output == XtreamOutput.HLS) (previous.step + 1).coerceAtMost(BACKOFF_MS.size - 1) else 0,
+            )
+        }
         Result.INCONCLUSIVE -> (previous?.takeIf { it.output == XtreamOutput.HLS } ?: LearnedOutput(XtreamOutput.HLS, learnedAtMs = nowMs))
             .copy(holdUntilMs = nowMs + HOLD_OFF_MS)
     }

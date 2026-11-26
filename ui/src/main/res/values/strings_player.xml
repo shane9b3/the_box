@@ -97,6 +97,8 @@
     <string name="player_stat_dropped">Dropped frames</string>
     <string name="player_stat_format">Format</string>
     <string name="player_stat_http">HTTP</string>
+    <!-- (Code review 2026-11-26, A8) Ladder reconnect restarts this tune and this visit, with the quiet ones. -->
+    <string name="player_stat_restarts">Restarts</string>
     <string name="player_stat_server">Server</string>
     <string name="player_stat_connections">Connections</string>
     <string name="player_stat_buffer_profile">Buffer profile</string>

@@ -35,6 +35,28 @@ untouched, and so is an account whose `allowed_output_formats` is known and lack
   window and the flip counted like L9 (a 405 on HLS then ends at L10 instead of flipping back); the normal ladder then
   runs on HLS. After first media TS has played, so the ladder's own decision stands.
 
+## Code review changes (2026-11-26)
+
+Review: `docs/review/2026-11-26-playback-fixes-code-review.md` §B.
+
+- **B1, TS plays and then keeps failing (fixed).** After first media the first failure of the retry is still
+  inconclusive and the ladder's decision stands (a blip). The second failure in the same tune
+  (`PlaybackControllerImpl.TS_RETRY_FAILURES_BEFORE_HLS = 2`), or any failure whose decision would end at the error card,
+  falls back to HLS for the rest of that tune, once (the same flip as before first media, counted like L9, no format
+  notice). It is not a refusal: the step stays. Only a 405/406 (the ladder's L9 flip) after TS played is recorded as
+  refused. Decoder and audio repairs run as decided (HLS carries the same codecs). Tests
+  `AutoTsRetryControllerTest.tsThatPlaysAndThenKeepsFailing…`, `…WouldEndAtTheCard…`, `aLaterRefusalAfterTsPlayed…`.
+- **B5, two refusals in quick succession (fixed).** A refusal stored less than `AutoTsRetry.REFUSAL_DEDUP_MS` (60 s) after
+  the previous (re)learn of HLS keeps the step: a fast zap that read the playlist before the first refusal's write
+  landed is the same refusal, not a second step (24 h → 7 days in one sitting). Test `twoRefusalsWithinAMinuteStepTheBackOffOnce`.
+- **B6, a wrong device clock at boot (documented, not changed).** A stored time more than 7 days ahead of the clock is
+  ignored, so a retry is due; its result is then stored with the wrong time, and the next tune with the right clock may be
+  due again. Bounded: each extra retry costs one round trip (a refusal) and re-learns HLS; once the clock is right the
+  stored times are consistent again and the normal back-off applies. Skipping the record before network time would need a
+  "clock is trustworthy" signal the app does not have; not worth one for a few round trips.
+- **Release gate.** To validate the HLS playlist renewal (`docs/design/m6-hls-edge-handover.md`) on a playlist that this
+  retry would move to TS, force Stream format to HLS: once the retry confirms, the playlist plays TS and renewal never runs.
+
 ## The numbers
 
 | | |
@@ -43,6 +65,8 @@ untouched, and so is an account whose `allowed_output_formats` is known and lack
 | Confirmation | first media + 30 s without a failure (`CONFIRM_MS`) |
 | Hold-off after an inconclusive retry | 1 h (`HOLD_OFF_MS`) |
 | No-picture budget | 8 s, the TS data source's first-byte timeout (`FIRST_MEDIA_BUDGET_MS`) |
+| Failures after first media before HLS for the tune | 2 (`PlaybackControllerImpl.TS_RETRY_FAILURES_BEFORE_HLS`), or 1 that would end at the card |
+| Same refusal | within 60 s of the previous (re)learn (`REFUSAL_DEDUP_MS`) |
 
 **Cost to the viewer**, on the one tune that retries: one extra local resolve (database reads, no request) on every
 retry, and at most one extra upstream request. A refusal costs one round trip to the panel (typically well under half a

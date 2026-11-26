@@ -147,6 +147,7 @@ class ErrorLadderTableTest {
                 "LocalLimit" -> FailureSignal.LocalConnectionLimit(t[1].toInt(), t[2].toInt())
                 "ChannelMissing" -> FailureSignal.ChannelMissing
                 "Unknown" -> FailureSignal.Unknown(t[1].toInt())
+                "PlaylistExpired" -> FailureSignal.PlaylistExpired
                 else -> error("unknown signal '$s'")
             }
         }

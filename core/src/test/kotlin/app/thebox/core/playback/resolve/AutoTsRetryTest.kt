@@ -73,6 +73,19 @@ class AutoTsRetryTest {
         assertEquals(now + 3 * day, AutoTsRetry.nextRetryAtMs(l, now))
     }
 
+    /** (Code review 2026-11-26, B5) Two refusals in quick succession (a fast zap before the first write landed) step once. */
+    @Test
+    fun twoRefusalsWithinAMinuteStepTheBackOffOnce() {
+        val start = LearnedOutput(XtreamOutput.HLS, learnedAtMs = now - 2 * day, step = 0)
+        val first = restart(AutoTsRetry.afterResult(start, Result.REFUSED, now))!!
+        assertEquals(1, first.step)
+        val second = restart(AutoTsRetry.afterResult(first, Result.REFUSED, now + AutoTsRetry.REFUSAL_DEDUP_MS - 1))!!
+        assertEquals(1, second.step, "the same refusal, seen twice")
+        assertEquals(first.learnedAtMs, second.learnedAtMs)
+        val later = restart(AutoTsRetry.afterResult(first, Result.REFUSED, now + AutoTsRetry.REFUSAL_DEDUP_MS))!!
+        assertEquals(2, later.step, "a minute later it is a new refusal")
+    }
+
     @Test
     fun aConfirmedRetryClearsTheLearnedValue() {
         val l = AutoTsRetry.afterResult(LearnedOutput(XtreamOutput.HLS, now - 9 * day, step = 2), Result.CONFIRMED, now)

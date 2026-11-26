@@ -79,7 +79,7 @@ internal class HlsRenewalBudget(
     /** True (and counted) when one more attempt fits; false, and disabled for [disableMs], when it does not. */
     @Synchronized fun tryTake(nowMs: Long): Boolean {
         if (nowMs < disabledUntil) return false
-        while (times.isNotEmpty() && nowMs - times.first() >= windowMs) times.removeFirst()
+        drop(nowMs)
         if (times.size >= max) {
             disabledUntil = nowMs + disableMs
             times.clear()
@@ -87,6 +87,22 @@ internal class HlsRenewalBudget(
         }
         times.addLast(nowMs)
         return true
+    }
+
+    /**
+     * (Code review A1) The same count for an attempt after an I/O failure, which may be a network blip: when it does not
+     * fit it is skipped, and renewal is **not** disabled (a blip must not switch off the next real expiry's renewal).
+     */
+    @Synchronized fun tryTakeSoft(nowMs: Long): Boolean {
+        if (nowMs < disabledUntil) return false
+        drop(nowMs)
+        if (times.size >= max) return false
+        times.addLast(nowMs)
+        return true
+    }
+
+    private fun drop(nowMs: Long) {
+        while (times.isNotEmpty() && nowMs - times.first() >= windowMs) times.removeFirst()
     }
 }
 
@@ -98,6 +114,10 @@ internal class HlsRenewalBudget(
  * not a live media playlist: a strict no-op from then on) or ACTIVE with one [Route] per logical URL. Thread-safe: the
  * playlist and segment loaders call in from their own threads; all state is under [lock].
  *
+ * (Code review A4) Turning renewal off later in an ACTIVE session ([turnOff]: a redirect loop, an oversized body; or
+ * the budget's time-boxed disable) means "never renew again", not "forget the routes": a route that was renewed keeps
+ * being requested at its current URL (redirects followed, today's path), never at the expired logical one.
+ *
  * Holds O only as a reference to `ctx.resolved.url` (already the HLS `MediaItem` URI). Route URLs live in memory only
  * and die with the session; logs carry hosts and salted hashes only.
  */
@@ -108,6 +128,10 @@ internal class HlsPlaylistRenewal(
     private val online: OnlineCheck,
     private val clock: MonoClock,
     private val telemetry: SessionTelemetry,
+    /** How long a second loader waits for a running renewal ([WAIT_MS]). Test hook. */
+    private val waitMs: Long = WAIT_MS,
+    /** (Code review A9) Waits between online re-checks; interruptible. Test hook. */
+    private val pause: (Long) -> Unit = { Thread.sleep(it) },
 ) : Terminable {
     enum class State { UNKNOWN, ACTIVE, OFF }
 
@@ -121,13 +145,21 @@ internal class HlsPlaylistRenewal(
         internal var fresh = true
         /** Set once this route fell back: later reloads get the same answer without network or event. */
         internal var fallback: Outcome? = null
+        /**
+         * (Code review A2) This route's reloads follow redirects (today's path) from now on: a redirect led to a working
+         * playlist on another host, which cannot be adopted as the current URL (design §6.12).
+         */
+        @Volatile internal var follow = false
+        /** MonoClock ms of the last renewal attempt started by an I/O failure (code review A1 cool-down). */
+        internal var softAt: Long? = null
         internal val id: String = HlsEdgeProbe.hash(logical.toHttpUrlOrNull()?.encodedPath ?: "")
     }
 
     sealed class Plan {
         data object None : Plan()
         data object Origin : Plan()
-        class Pinned(val route: Route, val requestUrl: String) : Plan()
+        /** A reload of [route]: request [requestUrl]; with [follow], redirects followed and no renewal (today's path). */
+        class Pinned(val route: Route, val requestUrl: String, val follow: Boolean = false) : Plan()
     }
 
     /** What a renewal ended with. [label] is the log/event word: renewed, declined:x, misaligned:x, failed:x. */
@@ -141,9 +173,12 @@ internal class HlsPlaylistRenewal(
         class Misaligned(val rule: String) : Outcome("misaligned:$rule")
         class Failed(val phase: String) : Outcome("failed:$phase")
 
-        /** Outcomes that send the typed fast signal to the ladder (offline and cancel do not). */
+        /**
+         * Outcomes that may end in the typed fast signal to the ladder. Offline, busy (a waiter that timed out, code
+         * review A5) and cool-down never do: the reload gets today's error and Media3's own retries.
+         */
         val isFallback: Boolean
-            get() = this is Misaligned || this is Failed || (this is Declined && reason != OFFLINE)
+            get() = this is Misaligned || this is Failed || (this is Declined && reason !in QUIET_DECLINES)
     }
 
     /** What the data source got from O: the final URL and body, or the failure's phase (never the exception). */
@@ -162,6 +197,8 @@ internal class HlsPlaylistRenewal(
     private val lock = ReentrantLock()
     private val flightDone = lock.newCondition()
     private var state = State.UNKNOWN
+    /** (Code review A4) Renewal is off for the rest of the session; routes keep their current URL. */
+    private var renewOff = false
     private val routes = ArrayList<Route>(2)
     private var inflight: Flight? = null
     @Volatile private var ended = false
@@ -172,6 +209,9 @@ internal class HlsPlaylistRenewal(
     }
 
     val currentState: State get() = lock.withLock { state }
+
+    /** True once [turnOff] ran: no renewal for the rest of the session (the routes still map, code review A4). */
+    val renewalsOff: Boolean get() = lock.withLock { renewOff }
 
     override fun terminate() {
         ended = true
@@ -186,11 +226,15 @@ internal class HlsPlaylistRenewal(
         val s = uri.toString()
         lock.withLock {
             if (state == State.OFF) return Plan.None
-            if (s == ctx.resolved.url) return Plan.Origin
-            if (state != State.ACTIVE || budget.disabled(clock.nowMs())) return Plan.None
+            if (isOrigin(s)) return Plan.Origin
+            if (state != State.ACTIVE) return Plan.None
+            val follow = renewOff || budget.disabled(clock.nowMs())
             for (r in routes) {
-                val req = requestFor(r, s) ?: continue
-                return Plan.Pinned(r, req)
+                val req = requestUrl(r, s) ?: continue
+                val followed = follow || r.follow
+                // Never renewed: exactly today's request (Media3's own URL, redirects followed).
+                if (followed && r.current == r.logical) return Plan.None
+                return Plan.Pinned(r, req, followed)
             }
         }
         return Plan.None
@@ -208,7 +252,9 @@ internal class HlsPlaylistRenewal(
                 State.OFF -> return
                 State.UNKNOWN -> {
                     val off = when {
-                        finalUrl == ctx.resolved.url -> "not_redirected"
+                        // (Code review A3) Compared as parsed URLs: OkHttp's normal form of O (lower-case scheme and
+                        // host, no default port, %-encoding) is not a redirect.
+                        isOrigin(finalUrl) -> "not_redirected"
                         summary.master -> "multivariant"
                         !summary.isMedia -> "not_media"
                         summary.endList -> "endlist"
@@ -224,7 +270,7 @@ internal class HlsPlaylistRenewal(
                     line = "active t=${ctx.tuneId} pl=#${routes.last().id} edge=${hostOf(finalUrl)} td=${summary.targetDurationS ?: "-"}"
                 }
                 State.ACTIVE -> {
-                    if (summary.master || !summary.isMedia || finalUrl == ctx.resolved.url) return
+                    if (summary.master || !summary.isMedia || isOrigin(finalUrl)) return
                     if (routes.none { it.logical == finalUrl } && routes.size < MAX_ROUTES) routes += Route(finalUrl, summary, clock.nowMs())
                 }
             }
@@ -242,29 +288,46 @@ internal class HlsPlaylistRenewal(
     }
 
     /**
-     * A redirect answered the first reload of a URL we just adopted (or just learned): this provider redirects every
-     * reload, so a redirect does not mean "expired" here. Renewal turns off for the session (today's behaviour).
+     * No renewal for the rest of the session ([reason]: `loop`, a redirect answered the first reload of a URL we just
+     * adopted or learned, so this provider redirects every reload; `too_large`). (Code review A4) The routes stay: a
+     * renewed route keeps being requested at its current URL.
      */
     fun turnOff(route: Route?, reason: String) {
         lock.withLock {
-            if (state == State.OFF) return
-            state = State.OFF
+            if (renewOff) return
+            renewOff = true
         }
         out("declined:$reason t=${ctx.tuneId} pl=#${route?.id ?: "-"}")
     }
 
+    /** [route]'s reloads follow redirects from now on (a reference that cannot be rebased byte-safely, an other host). */
+    fun followFromNowOn(route: Route) {
+        route.follow = true
+    }
+
     /** True while [route] is on its first reload since it was learned or adopted. */
     fun isFresh(route: Route): Boolean = lock.withLock { route.fresh }
+
+    /** The fallback [route] already took, if any (its later reloads fail the same way without network). */
+    fun fallbackOf(route: Route): Outcome? = lock.withLock { route.fallback }
+
+    /** [requested] (Media3's URL for [route], maybe with delivery directives) mapped to the route's current URL. */
+    fun requestUrlFor(route: Route, requested: String): String = requestUrl(route, requested) ?: route.current
 
     // ---------------------------------------------------------------- renewal
 
     /**
      * Renews [route] after a reload of its current URL failed with [trigger], on the caller's thread and lease. [fetch]
      * requests O (redirects followed) and must never throw. Single flight: a second caller waits (interruptibly) for the
-     * running one. Never throws except [InterruptedIOException] when interrupted while waiting.
+     * running one and takes its outcome. [soft] (an I/O failure before the response headers, code review A1): at most
+     * one attempt per route per [IO_COOLDOWN_MS], the budget is never disabled by it, and the caller adopts only a
+     * [Outcome.Renewed]. Logs the outcome; never stores a fallback or signals the ladder ([fallBack] does).
+     * Never throws except [InterruptedIOException] when interrupted while waiting.
      */
-    fun renew(route: Route, trigger: String, fetch: () -> Fetched): Outcome {
+    fun renew(route: Route, trigger: String, soft: Boolean, fetch: () -> Fetched): Outcome {
         val startedAt = clock.nowMs()
+        // (Code review A9) A transient "no network" right at the expiry: re-check briefly before declining.
+        val isOnline = if (soft) online.isOnline() else awaitOnline()
         val flight: Flight
         var early: Outcome? = null
         lock.lockInterruptiblyOrThrow()
@@ -273,9 +336,9 @@ internal class HlsPlaylistRenewal(
                 if (ended) return Outcome.Cancelled
                 route.fallback?.let { return it }
                 val f = inflight ?: break
-                val left = startedAt + WAIT_MS - clock.nowMs()
+                val left = startedAt + waitMs - clock.nowMs()
                 if (left <= 0) {
-                    early = Outcome.Declined("busy")
+                    early = Outcome.Declined(BUSY)
                     break
                 }
                 try {
@@ -284,22 +347,22 @@ internal class HlsPlaylistRenewal(
                     Thread.currentThread().interrupt()
                     throw InterruptedIOException("renewal wait interrupted")
                 }
-                if (f.outcome is Outcome.Renewed && f.route === route) return Outcome.Joined
+                if (f.route === route) f.outcome?.let { o -> return if (o is Outcome.Renewed) Outcome.Joined else o }
             }
             if (early == null) {
+                val soft0 = route.softAt
                 early = when {
-                    !online.isOnline() -> Outcome.Declined(OFFLINE)
+                    !isOnline -> Outcome.Declined(OFFLINE)
+                    soft && soft0 != null && startedAt - soft0 < IO_COOLDOWN_MS -> Outcome.Declined(COOLDOWN)
                     budget.disabled(startedAt) -> Outcome.Declined("disabled")
-                    !budget.tryTake(startedAt) -> Outcome.Declined("budget")
+                    soft && !budget.tryTakeSoft(startedAt) -> Outcome.Declined(COOLDOWN)
+                    !soft && !budget.tryTake(startedAt) -> Outcome.Declined("budget")
                     else -> null
                 }
+                if (soft && early == null) route.softAt = startedAt
             }
-            if (early != null) {
-                if (early.isFallback) route.fallback = early
-                flight = Flight(route)
-            } else {
-                flight = Flight(route).also { inflight = it }
-            }
+            flight = Flight(route)
+            if (early == null) inflight = flight
         } finally {
             lock.unlock()
         }
@@ -316,12 +379,51 @@ internal class HlsPlaylistRenewal(
             lock.withLock {
                 flight.outcome = outcome
                 if (inflight === flight) inflight = null
-                if (outcome.isFallback) route.fallback = outcome
                 flightDone.signalAll()
             }
         }
         report(route, trigger, outcome, startedAt, before)
+        if (outcome is Outcome.Renewed) ctx.onEvent(PlaybackEventType.DECISION, RENEWED_CODE, "")
         return outcome
+    }
+
+    /**
+     * The reload of [route] ended in a fallback ([o]): stored, so later reloads fail the same way without network, and
+     * the controller is told at once (design §6.6). No-op for an outcome that is not a fallback or a route that fell back.
+     */
+    fun fallBack(route: Route, o: Outcome) {
+        if (!o.isFallback) return
+        lock.withLock {
+            if (ended || route.fallback != null) return
+            route.fallback = o
+        }
+        ctx.onEvent(PlaybackEventType.STALL, FALLBACK_CODE, o.label)
+    }
+
+    /** Null when [summary] may continue [route]'s last good playlist (the continuity rule), else the rule it breaks. */
+    fun continuityOf(route: Route, summary: HlsPlaylistScanner.Summary): String? {
+        val (last, lastAt) = lock.withLock { route.last to route.lastAt }
+        return continuityViolation(last, lastAt, summary, clock.nowMs())
+    }
+
+    /**
+     * (Code review A2) A redirect on a pinned reload whose renewal did not succeed was followed (today's request) and
+     * gave a usable continuation at [finalUrl]: it becomes the last good playlist. On the same host as the logical URL,
+     * [finalUrl] becomes the current URL ([adopt]); on another host the route follows redirects from now on.
+     */
+    fun onFollowed(route: Route, finalUrl: String, summary: HlsPlaylistScanner.Summary, adopt: Boolean, trigger: String) {
+        lock.withLock {
+            route.last = summary
+            route.lastAt = clock.nowMs()
+            if (adopt && finalUrl != route.current) {
+                route.current = finalUrl
+                route.fresh = true
+            } else {
+                route.fresh = false
+            }
+            if (!adopt) route.follow = true
+        }
+        out("followed t=${ctx.tuneId} pl=#${route.id} trigger=$trigger edge=${hostOf(finalUrl)} ${if (adopt) "adopted" else "other_host"}")
     }
 
     private fun evaluate(route: Route, got: Fetched, startedAt: Long): Outcome {
@@ -342,6 +444,9 @@ internal class HlsPlaylistRenewal(
             route.last = summary
             route.lastAt = now
             route.fresh = true
+            route.follow = false
+            // (Code review A5) A renewal that succeeds clears any fallback a timed-out waiter might have left.
+            route.fallback = null
         }
         telemetry.renewalCount.incrementAndGet()
         return Outcome.Renewed(served)
@@ -360,6 +465,8 @@ internal class HlsPlaylistRenewal(
 
     private fun report(route: Route, trigger: String, o: Outcome, startedAt: Long, before: HlsPlaylistScanner.Summary?) {
         if (o === Outcome.Joined || o === Outcome.Cancelled) return
+        // A blip's repeated reloads inside the cool-down: one line per blip is enough.
+        if (o is Outcome.Declined && o.reason == COOLDOWN) return
         val ms = clock.nowMs() - startedAt
         val line = StringBuilder(160).append(o.label).append(" t=").append(ctx.tuneId).append(" pl=#").append(route.id)
             .append(" trigger=").append(trigger).append(" in=").append(ms).append("ms")
@@ -373,20 +480,39 @@ internal class HlsPlaylistRenewal(
             if (o is Outcome.Renewed) line.append(" n=").append(telemetry.playlistRenewals)
         }
         out(line.toString())
-        if (o.isFallback) ctx.onEvent(PlaybackEventType.STALL, FALLBACK_CODE, o.label)
     }
 
     // ---------------------------------------------------------------- helpers
 
+    /** Media3's URL [s] is O itself: the `MediaItem` URI, or the same URL in another written form (code review A3). */
+    private fun isOrigin(s: String): Boolean = s == ctx.resolved.url || sameUrl(s, ctx.resolved.url)
+
     /** [requested] mapped to [r]'s current URL: equal to the logical URL, or it plus HLS delivery directives. */
-    private fun requestFor(r: Route, requested: String): String? {
-        if (requested == r.logical) return r.current
+    private fun requestUrl(r: Route, requested: String): String? {
+        val current = r.current
+        if (requested == r.logical) return current
         if (!requested.startsWith(r.logical)) return null
         val rest = requested.substring(r.logical.length)
         if (rest.length < 2 || (rest[0] != '?' && rest[0] != '&')) return null
         val params = rest.substring(1)
         if (params.split('&').any { !it.startsWith("_HLS_") }) return null
-        return r.current + (if (r.current.contains('?')) "&" else "?") + params
+        return current + (if (current.contains('?')) "&" else "?") + params
+    }
+
+    /** (Code review A9) Online now, or within [OFFLINE_RECHECKS] re-checks [OFFLINE_RECHECK_MS] apart (≤ 1.5 s). */
+    private fun awaitOnline(): Boolean {
+        if (online.isOnline()) return true
+        repeat(OFFLINE_RECHECKS) {
+            if (ended) return false
+            try {
+                pause(OFFLINE_RECHECK_MS)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw InterruptedIOException("renewal online check interrupted")
+            }
+            if (online.isOnline()) return true
+        }
+        return false
     }
 
     private fun ReentrantLock.lockInterruptiblyOrThrow() {
@@ -407,18 +533,41 @@ internal class HlsPlaylistRenewal(
         /** The controller's typed fast signal codes (`PlaybackEventType.STALL`, detail = outcome label / status). */
         const val FALLBACK_CODE = "HLS_RENEWAL_FALLBACK"
         const val SEGMENT_CODE = "HLS_SEGMENT_REFUSED"
+        /** (Code review A8) `PlaybackEventType.DECISION`: one playlist URL renewed in place (the controller counts it). */
+        const val RENEWED_CODE = "HLS_PLAYLIST_RENEWED"
 
         const val BUDGET_MAX = 3
         const val BUDGET_WINDOW_MS = 120_000L
         const val BUDGET_DISABLE_MS = 600_000L
         /** A waiting loader gives up after this long (O connect + headers + body, with margin). */
         const val WAIT_MS = 15_000L
+        /**
+         * (Code review A1) At most one renewal attempt per route per this long after an I/O failure: a blip's three
+         * Media3 retries then cost at most one request to O, and the retries run on their own schedule.
+         */
+        const val IO_COOLDOWN_MS = 30_000L
+        /** (Code review A9) Online re-checks before an expiry is declined as offline: 3 × 500 ms. */
+        const val OFFLINE_RECHECKS = 3
+        const val OFFLINE_RECHECK_MS = 500L
         /** Largest playlist body buffered (a live window of thousands of segments still fits). */
         const val MAX_PLAYLIST_BYTES = 1 shl 20
         const val MAX_ROUTES = 4
-        const val TD_TOLERANCE_S = 1L
+        /**
+         * (Code review A6) Target duration: a change up to max([TD_TOLERANCE_S], [TD_TOLERANCE_PERCENT] % of the last
+         * one) is the same stream. `#EXT-X-TARGETDURATION` is the longest segment rounded up, so a segmenter cutting at
+         * ≈ 11 s flips between 11 and 12 (measured, design §1.2); 25 % of 11 s allows 11 ↔ 13, and the ±2 s floor keeps
+         * short targets (2 s → 4 s) from tripping on the same rounding. A different stream is caught by `msn`/`names`.
+         */
+        const val TD_TOLERANCE_S = 2L
+        const val TD_TOLERANCE_PERCENT = 25L
         const val MSN_SLACK = 2L
+        /** (Code review A7) The same MSN on both sides: PDTs within this (when both carry one) and durations within [DUR_TOLERANCE_MS]. */
+        const val PDT_TOLERANCE_MS = 1_000L
+        const val DUR_TOLERANCE_MS = 500L
         internal const val OFFLINE = "offline"
+        internal const val BUSY = "busy"
+        internal const val COOLDOWN = "cooldown"
+        private val QUIET_DECLINES = setOf(OFFLINE, BUSY, COOLDOWN)
 
         /** Routers built in this process (test hook: TS, archive, clip and ring paths must leave it unchanged). */
         val created = AtomicInteger()
@@ -438,6 +587,12 @@ internal class HlsPlaylistRenewal(
             return x.scheme == y.scheme && x.host == y.host && x.port == y.port
         }
 
+        /** (Code review A3) The same URL once both are in OkHttp's normal form (`HttpUrl` equality); false if either is not one. */
+        fun sameUrl(a: String, b: String): Boolean {
+            val x = a.toHttpUrlOrNull() ?: return false
+            return x == b.toHttpUrlOrNull()
+        }
+
         /** The scan of [body] when it starts with `#EXTM3U` (after a BOM and blank space); else null. */
         fun mediaSummary(body: ByteArray): HlsPlaylistScanner.Summary? {
             var i = 0
@@ -452,16 +607,22 @@ internal class HlsPlaylistRenewal(
             return if (summary.master || summary.isMedia) summary else null
         }
 
+        /** (Code review A6) The target-duration rule: [td1] may follow [td0]. */
+        fun targetDurationAgrees(td0: Long, td1: Long): Boolean {
+            val d = kotlin.math.abs(td1 - td0)
+            return d <= TD_TOLERANCE_S || d * 100 <= td0 * TD_TOLERANCE_PERCENT
+        }
+
         /**
-         * The continuity rule (design §6.4, review M4): null when [next] may continue [last] (loaded at [lastAt]), else
-         * the name of the first rule it breaks.
+         * The continuity rule (design §6.4, review M4, code review A6/A7): null when [next] may continue [last] (loaded at
+         * [lastAt]), else the name of the first rule it breaks.
          */
         fun continuityViolation(last: HlsPlaylistScanner.Summary, lastAt: Long, next: HlsPlaylistScanner.Summary, nowMs: Long): String? {
             if (next.master || !next.isMedia) return "media"
             if (next.endList) return "endlist"
             val td0 = last.targetDurationS ?: return "td"
             val td1 = next.targetDurationS ?: return "td"
-            if (kotlin.math.abs(td1 - td0) > TD_TOLERANCE_S) return "td"
+            if (!targetDurationAgrees(td0, td1)) return "td"
             val m0 = last.msn ?: 0L
             val m1 = next.msn ?: 0L
             if (m1 < m0) return "msn_back"
@@ -470,12 +631,17 @@ internal class HlsPlaylistRenewal(
             val bySegments = (elapsed + tdMs - 1) / tdMs
             if (m1 > m0 + last.segments + bySegments + MSN_SLACK) return "msn_ahead"
             if ((next.discontinuitySequence ?: 0L) < (last.discontinuitySequence ?: 0L)) return "dseq"
-            // Where the two windows overlap, the same MSN must name the same file (the same segmenter).
-            val old = HashMap<Long, String>(last.entries.size * 2)
-            for (e in last.entries) old[e.msn] = e.nameHash
+            // Where the two windows overlap, the same MSN must name the same file (the same segmenter), last as long and,
+            // when both sides carry `#EXT-X-PROGRAM-DATE-TIME`, start at the same wall-clock time (code review A7).
+            val old = HashMap<Long, HlsPlaylistScanner.Segment>(last.entries.size * 2)
+            for (e in last.entries) old[e.msn] = e
             for (e in next.entries) {
-                val name = old[e.msn] ?: continue
-                if (name != e.nameHash) return "names"
+                val was = old[e.msn] ?: continue
+                if (was.nameHash != e.nameHash) return "names"
+                if (was.durMs > 0 && e.durMs > 0 && kotlin.math.abs(was.durMs - e.durMs) > DUR_TOLERANCE_MS) return "dur"
+                val p0 = was.pdtMs
+                val p1 = e.pdtMs
+                if (p0 != null && p1 != null && kotlin.math.abs(p0 - p1) > PDT_TOLERANCE_MS) return "pdt"
             }
             return null
         }
@@ -588,6 +754,11 @@ internal class RenewingHlsDataSourceFactory(
  *   on this thread and lease: the old call is already closed when O opens. The fresh body is returned as the answer to
  *   Media3's request and [getUri] stays the URL Media3 asked for, so the tracker's base and identity do not move.
  *   Every failure is rebuilt against Media3's own `DataSpec` (no O, no current URL, no headers, no body).
+ * - (Code review 2026-11-26) Only an unambiguous expiry ends in the typed fallback. A failure before the response
+ *   headers (A1) adopts a renewal only when it succeeds, else rethrows the original error for Media3's own retries. A
+ *   redirect whose renewal does not succeed (A2, A5, A9) is re-sent once with redirects followed, today's request: a
+ *   usable continuation is served; only when that fails too does the ladder hear of it (or, offline / busy, Media3
+ *   gets today's error). A route in follow mode (A4) is requested at its current URL with redirects followed.
  */
 @OptIn(UnstableApi::class)
 internal class RenewingHlsDataSource(
@@ -597,7 +768,8 @@ internal class RenewingHlsDataSource(
     private val renewal: HlsPlaylistRenewal,
     private val scope: SessionScope,
 ) : DataSource {
-    private enum class Mode { CLOSED, PASS, ORIGIN, SERVE }
+    /** FOLLOW: [inner] with redirects followed for a request that may not be Media3's own; its errors are translated. */
+    private enum class Mode { CLOSED, PASS, ORIGIN, SERVE, FOLLOW }
 
     private var mode = Mode.CLOSED
     private var spec: DataSpec? = null
@@ -619,7 +791,7 @@ internal class RenewingHlsDataSource(
         if (dataType == C.DATA_TYPE_MANIFEST) {
             when (val plan = renewal.plan(dataSpec.uri)) {
                 HlsPlaylistRenewal.Plan.Origin -> return openOrigin(dataSpec)
-                is HlsPlaylistRenewal.Plan.Pinned -> return openPinned(dataSpec, plan.route, plan.requestUrl, mayRenew = true)
+                is HlsPlaylistRenewal.Plan.Pinned -> return openPinned(dataSpec, plan.route, plan.requestUrl, plan.follow, mayRenew = true)
                 HlsPlaylistRenewal.Plan.None -> Unit
             }
         }
@@ -645,8 +817,13 @@ internal class RenewingHlsDataSource(
         return n
     }
 
-    private fun openPinned(dataSpec: DataSpec, route: HlsPlaylistRenewal.Route, requestUrl: String, mayRenew: Boolean): Long {
+    private fun openPinned(dataSpec: DataSpec, route: HlsPlaylistRenewal.Route, requestUrl: String, follow: Boolean, mayRenew: Boolean): Long {
+        // A route that fell back answers the same way without network or a second signal.
+        renewal.fallbackOf(route)?.let { throw typed(it, dataSpec) }
         val request = dataSpec.buildUpon().setUri(Uri.parse(requestUrl)).setPosition(0).setLength(C.LENGTH_UNSET.toLong()).build()
+        // (Code review A4) Renewal is off (loop, oversized body, budget time box) or this route follows redirects: its
+        // current URL with today's request, never the expired logical one.
+        if (follow) return openFollowed(request, dataSpec)
         inner.followRedirects = false
         var original: HttpDataSource.HttpDataSourceException? = null
         val trigger: String = try {
@@ -655,8 +832,13 @@ internal class RenewingHlsDataSource(
             if (!complete) {
                 // Not a live media playlist we can check: keep today's behaviour for the rest of the session.
                 renewal.turnOff(route, "too_large")
-                tail = true
-                return serve(got, dataSpec)
+                if (route.current == route.logical) {
+                    tail = true
+                    return serve(got, dataSpec)
+                }
+                // (Code review A4) A renewed route's body cannot be rebased unread: today's request at its current URL.
+                inner.close()
+                return openFollowed(request, dataSpec)
             }
             inner.close()
             val summary = HlsPlaylistRenewal.mediaSummary(got)
@@ -666,37 +848,108 @@ internal class RenewingHlsDataSource(
                     renewal.onPinnedLoaded(route, summary)
                     return serve(out, dataSpec)
                 }
-                "rebase"
-            } else {
-                "body"
+                // A reference that cannot be rewritten byte-safely: Media3 reads this route at its real URL from now on.
+                renewal.followFromNowOn(route)
+                return openFollowed(request, dataSpec)
             }
+            "body"
         } catch (e: HttpDataSource.HttpDataSourceException) {
             inner.close()
             if (e is LiveStreamException || scope.isEnded) throw translate(e, dataSpec)
             original = e
             triggerOf(e) ?: throw translate(e, dataSpec)
         }
-        if (trigger.startsWith("redirect") && renewal.isFresh(route)) {
+        val redirect = trigger.startsWith("redirect")
+        if (redirect && renewal.isFresh(route)) {
             // The first reload of a URL we just learned or adopted was redirected: this provider redirects every reload.
             renewal.turnOff(route, "loop")
-            inner.followRedirects = true
-            val n = inner.open(dataSpec)
-            mode = Mode.PASS
-            return n
+            return openFollowed(request, dataSpec)
         }
-        if (!mayRenew) throw original?.let { translate(it, dataSpec) } ?: HlsRenewalFailed("failed:$trigger", dataSpec)
-        return when (val outcome = renewal.renew(route, trigger) { fetchOrigin() }) {
-            is HlsPlaylistRenewal.Outcome.Renewed -> serve(outcome.body, dataSpec)
-            HlsPlaylistRenewal.Outcome.Joined -> openPinned(dataSpec, route, route.current, mayRenew = false)
+        if (!mayRenew) {
+            if (redirect) return openFollowed(request, dataSpec)
+            throw original?.let { translate(it, dataSpec) } ?: HlsRenewalFailed("failed:$trigger", dataSpec)
+        }
+        val soft = trigger.startsWith("io:")
+        val outcome = renewal.renew(route, trigger, soft) { fetchOrigin() }
+        when (outcome) {
+            is HlsPlaylistRenewal.Outcome.Renewed -> return serve(outcome.body, dataSpec)
+            HlsPlaylistRenewal.Outcome.Joined ->
+                return openPinned(dataSpec, route, renewal.requestUrlFor(route, dataSpec.uri.toString()), follow = false, mayRenew = false)
             HlsPlaylistRenewal.Outcome.Cancelled ->
                 if (scope.isEnded) throw preempted(dataSpec) else throw InterruptedIOException("renewal cancelled")
-            is HlsPlaylistRenewal.Outcome.Misaligned -> throw HlsRenewalMisaligned(outcome.rule, dataSpec)
-            is HlsPlaylistRenewal.Outcome.Declined ->
-                if (!outcome.isFallback) throw original?.let { translate(it, dataSpec) } ?: HlsRenewalFailed(outcome.label, dataSpec)
-                else throw HlsRenewalFailed(outcome.label, dataSpec)
-            is HlsPlaylistRenewal.Outcome.Failed -> throw HlsRenewalFailed(outcome.label, dataSpec)
+            else -> Unit
         }
+        // (Code review A1) A failure before the response headers may be a blip: the original error, unchanged, so
+        // Media3's own retries run exactly as before; no fallback is stored and the ladder hears nothing.
+        if (soft) throw translate(original ?: throw HlsRenewalFailed(outcome.label, dataSpec), dataSpec)
+        // (Code review A2, A5, A9) A redirect whose renewal did not succeed: today's request (followed) decides.
+        if (redirect) return followAfterRedirect(dataSpec, route, request, outcome, trigger)
+        if (!outcome.isFallback) throw original?.let { translate(it, dataSpec) } ?: HlsRenewalFailed(outcome.label, dataSpec)
+        renewal.fallBack(route, outcome)
+        throw typed(outcome, dataSpec)
     }
+
+    /**
+     * (Code review A2) [request] was answered with a redirect and its renewal ended in [outcome] (not renewed). Offline,
+     * busy or cool-down: exactly today's request, errors and retries ([openFollowed]). Otherwise the reload is re-sent once
+     * with redirects followed; a media playlist that continues the last good one is served (rebased against Media3's
+     * URL; on the same host its final URL becomes the current URL, on another host the route follows redirects from now
+     * on). Only when that fails too does the renewal's outcome become the typed fallback.
+     */
+    private fun followAfterRedirect(
+        dataSpec: DataSpec,
+        route: HlsPlaylistRenewal.Route,
+        request: DataSpec,
+        outcome: HlsPlaylistRenewal.Outcome,
+        trigger: String,
+    ): Long {
+        if (!outcome.isFallback) return openFollowed(request, dataSpec)
+        inner.followRedirects = true
+        val why: String = try {
+            inner.open(request)
+            val finalUrl = inner.uri?.toString()
+            val (got, complete) = readBody()
+            inner.close()
+            val summary = if (complete) HlsPlaylistRenewal.mediaSummary(got) else null
+            when {
+                finalUrl == null -> "internal"
+                !complete -> "too_large"
+                summary == null || summary.master -> "body"
+                else -> renewal.continuityOf(route, summary)?.let { "misaligned:$it" } ?: run {
+                    val served = if (finalUrl == route.logical) got else PlaylistRebase.rebase(got, route.logical, finalUrl)
+                    if (served != null) {
+                        renewal.onFollowed(route, finalUrl, summary, adopt = HlsPlaylistRenewal.sameAuthority(finalUrl, route.logical), trigger)
+                        return serve(served, dataSpec)
+                    }
+                    "rebase"
+                }
+            }
+        } catch (e: HttpDataSource.HttpDataSourceException) {
+            inner.close()
+            if (e is LiveStreamException || scope.isEnded || isInterruption(e)) throw translate(e, dataSpec)
+            if (e is HttpDataSource.InvalidResponseCodeException) "status:${e.responseCode}" else phaseOf(e)
+        }
+        HlsPlaylistRenewal.out("follow_failed:$why t=${ctx.tuneId} pl=#${route.id} trigger=$trigger")
+        renewal.fallBack(route, outcome)
+        throw typed(outcome, dataSpec)
+    }
+
+    /** [request] (maybe not Media3's own URL) with redirects followed: today's request; errors carry Media3's request only. */
+    private fun openFollowed(request: DataSpec, dataSpec: DataSpec): Long {
+        inner.followRedirects = true
+        val n = try {
+            inner.open(request)
+        } catch (e: HttpDataSource.HttpDataSourceException) {
+            inner.close()
+            throw translate(e, dataSpec)
+        }
+        spec = dataSpec
+        mode = Mode.FOLLOW
+        return n
+    }
+
+    private fun typed(o: HlsPlaylistRenewal.Outcome, spec: DataSpec): HlsRenewalException =
+        if (o is HlsPlaylistRenewal.Outcome.Misaligned) HlsRenewalMisaligned(o.rule, spec) else HlsRenewalFailed(o.label, spec)
 
     /** One GET of O through [inner] (redirects followed, no `Range`, the session's headers). Never throws. */
     private fun fetchOrigin(): HlsPlaylistRenewal.Fetched {
@@ -751,6 +1004,11 @@ internal class RenewingHlsDataSource(
         if (length == 0) return 0
         return when (mode) {
             Mode.PASS -> inner.read(buffer, offset, length)
+            Mode.FOLLOW -> try {
+                inner.read(buffer, offset, length)
+            } catch (e: HttpDataSource.HttpDataSourceException) {
+                throw translate(e, spec ?: e.dataSpec)
+            }
             Mode.ORIGIN -> {
                 val n = inner.read(buffer, offset, length)
                 if (n == C.RESULT_END_OF_INPUT) {
@@ -794,7 +1052,7 @@ internal class RenewingHlsDataSource(
     override fun close() {
         val was = mode
         try {
-            if (was == Mode.PASS || was == Mode.ORIGIN || tail) inner.close()
+            if (was == Mode.PASS || was == Mode.ORIGIN || was == Mode.FOLLOW || tail) inner.close()
         } finally {
             if (was == Mode.ORIGIN && originEnded) {
                 try {

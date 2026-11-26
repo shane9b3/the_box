@@ -154,6 +154,72 @@ class AutoTsRetryControllerTest {
         assertEquals("settled once", listOf(Result.INCONCLUSIVE), f.provider.tsRetries)
     }
 
+    /**
+     * (Code review 2026-11-26, B1) TS played, then keeps failing in the same tune: the first failure is the ladder's
+     * (a blip), the second falls back to HLS for the rest of the tune, once, without the format notice and without
+     * counting as a refusal.
+     */
+    @Test
+    fun tsThatPlaysAndThenKeepsFailingFallsBackToHlsForTheTune() {
+        due()
+        tune()
+        f.play()
+        f.advance(5_000)
+        f.ladder.script = { _, _ -> LadderDecision.ReResolve(0) }
+        f.exo.emitError(error())
+        f.idle()
+        assertEquals("the first failure: the ladder's re-resolve, still TS", XtreamOutput.TS, f.resolver.calls.last().output)
+        f.play()
+        f.advance(2_000)
+        f.exo.emitError(error())
+        f.idle()
+        assertEquals("the second: HLS for the rest of this tune", XtreamOutput.HLS, f.resolver.calls.last().output)
+        assertEquals("inconclusive once, never refused", listOf(Result.INCONCLUSIVE), f.provider.tsRetries)
+        f.play()
+        assertTrue(f.state is PlaybackState.Playing)
+        assertFalse(f.notices.any { it is PlaybackNotice.SwitchedFormat })
+        // Once: later failures on HLS are the ladder's.
+        f.advance(2_000)
+        f.exo.emitError(error())
+        f.idle()
+        assertEquals(XtreamOutput.HLS, f.resolver.calls.last().output)
+        assertTrue(retryEvents().contains("fallback_after_media"))
+    }
+
+    /** (B1) A decision that would end at the error card after TS played falls back to HLS instead. */
+    @Test
+    fun tsThatPlaysAndThenWouldEndAtTheCardFallsBackToHls() {
+        due()
+        tune()
+        f.play()
+        f.advance(5_000)
+        failWith(LadderDecision.Fail(PlaybackError(PlaybackErrorCode.STREAM_INTERRUPTED)))
+        assertFalse(f.state is PlaybackState.Error)
+        assertEquals(XtreamOutput.HLS, f.resolver.calls.last().output)
+        f.play()
+        assertTrue(f.state is PlaybackState.Playing)
+        assertEquals(listOf(Result.INCONCLUSIVE), f.provider.tsRetries)
+    }
+
+    /** (B1) A 405/406 after TS played (and after a first, inconclusive failure) is a refusal after all. */
+    @Test
+    fun aLaterRefusalAfterTsPlayedCountsAsRefused() {
+        due()
+        tune()
+        f.play()
+        f.advance(5_000)
+        f.ladder.script = { _, _ -> LadderDecision.RetrySame(0) }
+        f.exo.emitError(error())
+        f.idle()
+        f.play()
+        f.advance(1_000)
+        f.ladder.script = { _, _ -> LadderDecision.FlipXtreamOutput(XtreamOutput.HLS) }
+        f.exo.emitError(error())
+        f.idle()
+        assertEquals(listOf(Result.INCONCLUSIVE, Result.REFUSED), f.provider.tsRetries)
+        assertEquals(XtreamOutput.HLS, f.resolver.calls.last().output)
+    }
+
     @Test
     fun noPictureWithinTheBudgetFallsBackToHls() {
         due()

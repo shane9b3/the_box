@@ -242,6 +242,7 @@ class ErrorLadderImpl(
         -> true
         is FailureSignal.Network -> s.kind != NetworkFailureKind.CLEARTEXT
         is FailureSignal.Stall -> s.kind == StallKind.NO_BYTES || s.kind == StallKind.HLS_NO_PROGRESS
+        FailureSignal.PlaylistExpired -> true
         else -> false
     }
 
@@ -417,6 +418,13 @@ class ErrorLadderImpl(
             val exhausted = if ((e.s as FailureSignal.Network).kind == NetworkFailureKind.TIMEOUT) PlaybackErrorCode.NO_DATA_TIMEOUT else PlaybackErrorCode.CONNECT_FAILED
             transientRetry(e, true, exhausted, null)
         },
+        // (Code review 2026-11-26) The HLS playlist URL expired and could not be renewed (FailureSignal.PlaylistExpired):
+        // the L19 re-resolve without its first delay, so the restart's timing does not straddle the quiet-reconnect line
+        // by a random 0.8–1.2 s. Counted like L19 (a renewal storm still ends at L20 when the attempts are used up).
+        Row("L19p", { it.s == FailureSignal.PlaylistExpired && it.attemptsLeft(it.c.transientRetries) }) { e ->
+            val d = e.reResolve(LadderDecision.ReResolve(0)) { LadderDecision.RetrySame(0) }
+            Step(d, e.c.copy(transientRetries = e.c.transientRetries + 1), null, timeoutExempt = e.unlimited)
+        },
         Row("L19", { isReconnectClass(it) && it.attemptsLeft(it.c.transientRetries) }) { e ->
             val delay = e.retryDelay(e.c.transientRetries)
             val d = e.reResolve(LadderDecision.ReResolve(delay)) { LadderDecision.RetrySame(delay) }
@@ -551,6 +559,7 @@ class ErrorLadderImpl(
         is FailureSignal.ReconnectExhausted -> true
         is FailureSignal.Network -> !s.beforeFirstByte
         is FailureSignal.Stall -> s.kind == StallKind.NO_BYTES || s.kind == StallKind.HLS_NO_PROGRESS
+        FailureSignal.PlaylistExpired -> true
         else -> false
     }
 

@@ -367,6 +367,38 @@ class TestPlaylistTokenExpiry(PanelCase):
         time.sleep(0.3)
         self.assertEqual(self.edge(pl)[0], 403)
 
+    def test_moved_mode_redirects_to_a_working_playlist_on_the_main_port(self):
+        """(Code review 2026-11-26, A2) redirect_moved: the expired playlist 302s to a working new token on the main
+        port, and the provider URL hands out main-port tokens from then on."""
+        self.admin({"stream_faults": {"1": {"playlist_token_ttl": 0.2, "token_expire_mode": "redirect_moved"}}})
+        pl = self.tune()
+        time.sleep(0.3)
+        st, loc, _ = self.edge(pl)
+        self.assertEqual(st, 302)
+        self.assertRegex(loc, rf"^http://127\.0\.0\.1:{self.port}/hls/[0-9a-f]{{16}}/1\.m3u8$")
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request("GET", loc.split(str(self.port), 1)[1])
+        r = c.getresponse()
+        body = r.read().decode()
+        self.assertEqual(r.status, 200)
+        self.assertIn("#EXT-X-MEDIA-SEQUENCE", body)
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request("GET", "/live/test/test/1.m3u8")
+        r = c.getresponse()
+        r.read()
+        self.assertTrue(r.getheader("Location").startswith(f"http://127.0.0.1:{self.port}/hls/"))
+
+    def test_blip_drops_the_token_paths_inside_its_window(self):
+        """(Code review 2026-11-26, D) edge_blip_every: no response at all inside the window, normal outside it."""
+        self.admin({"stream_faults": {"1": {"playlist_token_ttl": 60}}})
+        pl = self.tune()
+        self.admin({"stream_faults": {"1": {"playlist_token_ttl": 60, "edge_blip_every": 1000000, "edge_blip_s": 1000000}}})
+        with self.assertRaises((http.client.RemoteDisconnected, ConnectionResetError)):
+            self.edge(pl)
+        self.admin({"stream_faults": {"1": {"playlist_token_ttl": 60, "edge_blip_every": 1000000, "edge_blip_s": 0}}})
+        self.assertEqual(self.edge(pl)[0], 200)
+        self.assertGreaterEqual(json.loads(self.get("/admin/stats")[2])["edge_blips"], 1)
+
     def test_unknown_token_and_other_streams_unaffected(self):
         self.admin({"stream_faults": {"1": {"playlist_token_ttl": 1}}})
         self.assertEqual(self.edge("/hls/0123456789abcdef/1.m3u8")[0], 403)

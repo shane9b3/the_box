@@ -3,6 +3,7 @@ package app.thebox.core.full.feed
 import app.thebox.core.full.StatLabel
 import app.thebox.core.full.StatLine
 import app.thebox.core.full.StatsFacts
+import app.thebox.core.full.TunnelingOff
 import app.thebox.core.playback.AfrMode
 import app.thebox.core.playback.BrokerSnapshot
 import app.thebox.core.playback.BufferProfile
@@ -22,6 +23,7 @@ class StatsFormatterTest {
         audioMime = "audio/eac3", audioChannels = 6, audioDecoder = "passthrough", audioPassthrough = true,
         streamBitrateBps = 7_812_345, bufferMs = 2_400, droppedFrames = 3,
         httpStatus = 200, host = "panel.example:8080", redirects = 1, format = StreamFormat.TS, reconnects = 2,
+        restarts = 1, quietRestarts = 1, visitRestarts = 1, visitQuietRestarts = 1,
         broker = BrokerSnapshot("p:1", active = 1, closing = 0, max = 2, waiting = 0, byKind = emptyMap()),
         bufferProfile = BufferProfile(startMs = 1_000, afterRebufferMs = 2_500, minBufferMs = 15_000, maxBufferMs = 30_000, targetBytes = 0, level = 1),
         afr = AfrMode.SEAMLESS, displayRefreshHz = 50f, tunneling = false, serverIndex = 1, serverCount = 3,
@@ -43,11 +45,12 @@ class StatsFormatterTest {
         assertEquals("3", v[StatLabel.DROPPED])
         assertEquals("TS", v[StatLabel.FORMAT])
         assertEquals("200 · 1 redirect · 2 reconnects", v[StatLabel.HTTP])
+        assertEquals("1 (1 quiet)", v[StatLabel.RESTARTS])
         assertEquals("panel.example:8080 · server 2 of 3", v[StatLabel.SERVER])
         assertEquals("1/2", v[StatLabel.CONNECTIONS])
         assertEquals("Auto L1 · start 1.0 s", v[StatLabel.BUFFER_PROFILE])
         assertEquals("50 Hz", v[StatLabel.DISPLAY])
-        assertEquals("off (setting)", v[StatLabel.TUNNELING])
+        assertEquals("off", v[StatLabel.TUNNELING])
     }
 
     /** (2026-11-25, docs/decisions/2026-11-25-tunneling-off-per-visit.md) On, off by the settings, off for this visit. */
@@ -55,9 +58,31 @@ class StatsFormatterTest {
     fun theTunnelingLineHasThreeStates() {
         fun line(f: StatsFacts) = StatsFormatter.lines(f).first { it.label == StatLabel.TUNNELING }.value
         assertEquals("on", line(StatsFacts(tunneling = true)))
-        assertEquals("off (setting)", line(StatsFacts(tunneling = false)))
-        assertEquals("off for now (stalled)", line(StatsFacts(tunneling = false, tunnelingOffForVisit = true)))
-        assertEquals("on", line(StatsFacts(tunneling = true, tunnelingOffForVisit = true)), "on wins over a stale flag")
+        assertEquals("off", line(StatsFacts(tunneling = false)), "the reason is not known yet")
+        // (Code review 2026-11-26, B3) Each reason in its own words.
+        assertEquals("off (setting)", line(StatsFacts(tunnelingOff = TunnelingOff.SETTING)))
+        assertEquals("off for now (stalled)", line(StatsFacts(tunnelingOff = TunnelingOff.STALLED)))
+        assertEquals("off for now (stalled before)", line(StatsFacts(tunnelingOff = TunnelingOff.STALLED_BEFORE)))
+        assertEquals("not used for replays", line(StatsFacts(tunnelingOff = TunnelingOff.REPLAY)))
+        assertEquals("not supported for this stream/device", line(StatsFacts(tunnelingOff = TunnelingOff.NOT_SUPPORTED)))
+        assertEquals("on", line(StatsFacts(tunneling = true, tunnelingOff = TunnelingOff.STALLED)), "on wins over a stale reason")
+    }
+
+    /** (Code review 2026-11-26, A8) Renewals and restarts per tune, with the visit's totals once they are larger. */
+    @Test
+    fun renewalsAndRestartsCountPerTuneAndVisit() {
+        fun line(f: StatsFacts, label: StatLabel) = StatsFormatter.lines(f).firstOrNull { it.label == label }?.value
+        assertEquals(null, line(StatsFacts(), StatLabel.HTTP))
+        assertEquals(null, line(StatsFacts(), StatLabel.RESTARTS))
+        assertEquals("200 · 1 renewal", line(StatsFacts(httpStatus = 200, playlistRenewals = 1, visitPlaylistRenewals = 1), StatLabel.HTTP))
+        assertEquals("0 renewals (visit 3)", line(StatsFacts(visitPlaylistRenewals = 3), StatLabel.HTTP))
+        assertEquals("1 (1 quiet)", line(StatsFacts(restarts = 1, quietRestarts = 1, visitRestarts = 1, visitQuietRestarts = 1), StatLabel.RESTARTS))
+        assertEquals("2", line(StatsFacts(restarts = 2, visitRestarts = 2), StatLabel.RESTARTS))
+        assertEquals(
+            "2 (1 quiet) · visit 5 (3 quiet)",
+            line(StatsFacts(restarts = 2, quietRestarts = 1, visitRestarts = 5, visitQuietRestarts = 3), StatLabel.RESTARTS),
+        )
+        assertEquals("0 · visit 3", line(StatsFacts(visitRestarts = 3), StatLabel.RESTARTS))
     }
 
     @Test
@@ -65,7 +90,7 @@ class StatsFormatterTest {
         val lines = StatsFormatter.lines(StatsFacts())
         // Only facts that are meaningful at zero remain: the buffer, dropped frames and the tunneling switch.
         assertEquals(listOf(StatLabel.BUFFER, StatLabel.DROPPED, StatLabel.TUNNELING), lines.map { it.label })
-        assertEquals(listOf(StatLine(StatLabel.BUFFER, "0.0 s"), StatLine(StatLabel.DROPPED, "0"), StatLine(StatLabel.TUNNELING, "off (setting)")), lines)
+        assertEquals(listOf(StatLine(StatLabel.BUFFER, "0.0 s"), StatLine(StatLabel.DROPPED, "0"), StatLine(StatLabel.TUNNELING, "off")), lines)
         assertTrue(lines.none { it.value.isBlank() })
     }
 

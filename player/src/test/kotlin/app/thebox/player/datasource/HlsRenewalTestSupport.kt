@@ -9,6 +9,7 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import mockwebserver3.SocketEffect
 import java.io.ByteArrayOutputStream
 import java.net.ServerSocket
 import java.util.concurrent.ConcurrentHashMap
@@ -27,6 +28,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * - **edge2**: the same edge logic on another port, for "the edge really changed".
  */
 internal class FakeOriginEdge(var td: Int = 11, private val window: Int = 6) : AutoCloseable {
+    /** Every segment's `#EXTINF` (s). */
+    private val segmentS = td
     enum class OriginMode { REDIRECT, REDIRECT_EDGE2, DIRECT, MULTIVARIANT, STATUS, STALL }
 
     val origin = MockWebServer()
@@ -48,6 +51,13 @@ internal class FakeOriginEdge(var td: Int = 11, private val window: Int = 6) : A
     @Volatile var renewalNamePrefix: String? = null
     @Volatile var segmentStatus = 200
     @Volatile var onOrigin: (() -> Unit)? = null
+    /** (Code review A2) Where an expired token's playlist redirects; null = [deadUrl]. */
+    @Volatile var expiredLocation: (() -> String)? = null
+    /** (Code review A1) Playlists of these tokens (or of every token, [blipAll]) close the socket before any header. */
+    val blipTokens: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    @Volatile var blipAll = false
+    /** (Code review A5) Headers delay of the origin's redirect. */
+    @Volatile var originDelayMs = 0L
 
     val tokens = CopyOnWriteArrayList<String>()
     val expired: MutableSet<String> = ConcurrentHashMap.newKeySet()
@@ -88,6 +98,13 @@ internal class FakeOriginEdge(var td: Int = 11, private val window: Int = 6) : A
 
     fun edgePaths(): List<String> = edgeRequests.map { it.url.encodedPath }
 
+    /** A new token, served by [server] (either edge serves every issued token): its playlist URL. */
+    fun issue(server: MockWebServer = edge): String {
+        val tok = token(tokens.size + 1)
+        tokens += tok
+        return playlistUrl(tok, server)
+    }
+
     private fun originResponse(request: RecordedRequest): MockResponse {
         originHits.incrementAndGet()
         originRequests += request
@@ -99,7 +116,8 @@ internal class FakeOriginEdge(var td: Int = 11, private val window: Int = 6) : A
                 renewalNamePrefix?.let { if (tokens.size > 1) tokenPrefix[tok] = it }
                 val server = if (originMode == OriginMode.REDIRECT_EDGE2) edge2 else edge
                 val file = if (originMode == OriginMode.MULTIVARIANT) "master.m3u8" else "index.m3u8"
-                MockResponse.Builder().code(302).addHeader("Location", server.url("/hls/$tok/$file").toString()).build()
+                MockResponse.Builder().code(302).addHeader("Location", server.url("/hls/$tok/$file").toString())
+                    .apply { if (originDelayMs > 0) headersDelay(originDelayMs, TimeUnit.MILLISECONDS) }.build()
             }
             OriginMode.DIRECT -> playlistResponse("direct", origin = true)
             OriginMode.STATUS -> MockResponse.Builder().code(originStatus).addHeader("X-Secret", "origin-header").body("origin-error-body").build()
@@ -117,8 +135,10 @@ internal class FakeOriginEdge(var td: Int = 11, private val window: Int = 6) : A
         return when {
             file == "master.m3u8" -> MockResponse.Builder().code(200)
                 .body("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nindex.m3u8\n").build()
+            file == "index.m3u8" && (blipAll || tok in blipTokens) ->
+                MockResponse.Builder().code(200).onResponseStart(SocketEffect.CloseSocket()).build()
             file == "index.m3u8" && tok in expired ->
-                MockResponse.Builder().code(302).addHeader("Location", deadUrl).build()
+                MockResponse.Builder().code(302).addHeader("Location", expiredLocation?.invoke() ?: deadUrl).build()
             file == "index.m3u8" -> playlistResponse(tok, origin = false)
             file.startsWith("seg_") -> MockResponse.Builder().code(segmentStatus).body("x".repeat(376)).build()
             else -> MockResponse.Builder().code(404).build()
@@ -135,7 +155,9 @@ internal class FakeOriginEdge(var td: Int = 11, private val window: Int = 6) : A
         if (ds != null) sb.append("#EXT-X-DISCONTINUITY-SEQUENCE:").append(ds).append('\n')
         for (i in 0 until window) {
             val n = msn + i
-            sb.append("#EXTINF:").append(tdNow).append(".000,\n")
+            // Each segment keeps its own length whatever the target duration says (as a real segmenter): the measured
+            // td 11 → 12 is a rounding of the longest segment, not a change of the segments.
+            sb.append("#EXTINF:").append(segmentS).append(".000,\n")
             if (origin) sb.append("/seg/").append(n).append(".ts\n") else sb.append("/hls/").append(tok).append('/').append(prefix).append(n).append(".ts\n")
         }
         if (first && renewalEndList) sb.append("#EXT-X-ENDLIST\n")

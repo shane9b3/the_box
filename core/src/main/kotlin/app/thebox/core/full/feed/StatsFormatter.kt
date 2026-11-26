@@ -3,6 +3,7 @@ package app.thebox.core.full.feed
 import app.thebox.core.full.StatLabel
 import app.thebox.core.full.StatLine
 import app.thebox.core.full.StatsFacts
+import app.thebox.core.full.TunnelingOff
 import app.thebox.core.playback.AfrMode
 import app.thebox.core.playback.HdrKind
 import app.thebox.core.playback.StreamFormat
@@ -32,6 +33,7 @@ object StatsFormatter {
         add(StatLabel.DROPPED, facts.droppedFrames.coerceAtLeast(0).toString())
         add(StatLabel.FORMAT, formatName(facts.format))
         add(StatLabel.HTTP, http(facts))
+        add(StatLabel.RESTARTS, restarts(facts))
         add(StatLabel.SERVER, server(facts.host, facts.serverIndex, facts.serverCount))
         add(StatLabel.CONNECTIONS, facts.broker?.let { b ->
             buildString {
@@ -45,8 +47,7 @@ object StatsFormatter {
             mode + SEP + "start " + seconds(p.startMs.toLong())
         })
         add(StatLabel.DISPLAY, facts.displayRefreshHz?.takeIf { it > 0f }?.let { number(it) + " Hz" })
-        // (2026-11-25) Three states: on; off by the settings (global or this channel's option); off for this visit.
-        add(StatLabel.TUNNELING, if (facts.tunneling) "on" else if (facts.tunnelingOffForVisit) "off for now (stalled)" else "off (setting)")
+        add(StatLabel.TUNNELING, tunneling(facts))
         return out
     }
 
@@ -92,12 +93,39 @@ object StatsFormatter {
     }
 
     private fun http(f: StatsFacts): String? {
-        val parts = ArrayList<String>(3)
+        val parts = ArrayList<String>(5)
         f.httpStatus?.takeIf { it > 0 }?.let { parts += it.toString() }
         if (f.redirects > 0) parts += plural(f.redirects, "redirect")
         if (f.reconnects > 0) parts += plural(f.reconnects, "reconnect")
-        if (f.playlistRenewals > 0) parts += plural(f.playlistRenewals, "playlist renewal")
+        // (Code review 2026-11-26, A8) Per tune, across its restarts; the visit's total when it is larger.
+        if (f.playlistRenewals > 0 || f.visitPlaylistRenewals > 0) {
+            parts += plural(f.playlistRenewals, "renewal") +
+                (if (f.visitPlaylistRenewals > f.playlistRenewals) " (visit ${f.visitPlaylistRenewals})" else "")
+        }
         return parts.takeIf { it.isNotEmpty() }?.joinToString(SEP)
+    }
+
+    /**
+     * (Code review 2026-11-26, A8) Ladder reconnect restarts after first media: "2 (1 quiet)" this tune, then the visit's
+     * total once it is larger: "2 (1 quiet) · visit 5 (3 quiet)". Left out while there were none.
+     */
+    private fun restarts(f: StatsFacts): String? {
+        if (f.restarts <= 0 && f.visitRestarts <= 0) return null
+        fun count(n: Int, quiet: Int) = n.toString() + if (quiet > 0) " ($quiet quiet)" else ""
+        return count(f.restarts, f.quietRestarts) + if (f.visitRestarts > f.restarts) SEP + "visit " + count(f.visitRestarts, f.visitQuietRestarts) else ""
+    }
+
+    /**
+     * (2026-11-25; code review 2026-11-26, B3) "on", or why it is off: the settings, a stall this visit, stalls on the
+     * last visits (until the app restarts), a replay, or not supported here; plain "off" while the reason is not known.
+     */
+    private fun tunneling(f: StatsFacts): String = if (f.tunneling) "on" else when (f.tunnelingOff) {
+        TunnelingOff.SETTING -> "off (setting)"
+        TunnelingOff.STALLED -> "off for now (stalled)"
+        TunnelingOff.STALLED_BEFORE -> "off for now (stalled before)"
+        TunnelingOff.REPLAY -> "not used for replays"
+        TunnelingOff.NOT_SUPPORTED -> "not supported for this stream/device"
+        null -> "off"
     }
 
     /** "host · server 2 of 3" (E23: read-only; the switch is M5); just the host with one base URL. */

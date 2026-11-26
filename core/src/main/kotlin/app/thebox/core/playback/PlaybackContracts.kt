@@ -241,6 +241,13 @@ sealed interface FailureSignal {
     data object ChannelMissing : FailureSignal
     data class Unknown(val media3ErrorCode: Int) : FailureSignal
     /**
+     * (Code review 2026-11-26, docs/design/m6-hls-edge-handover.md §10) The live HLS playlist URL Media3 pinned expired
+     * and the data source could neither renew it nor follow its redirect to a usable continuation: the stream itself is
+     * fine, only a fresh resolve from the provider URL helps. Row L19p re-resolves with no initial delay (still counted as
+     * a transient retry, so a storm ends at L20).
+     */
+    data object PlaylistExpired : FailureSignal
+    /**
      * (M6 time-shift commit 0, docs/design/m6-timeshift.md §16.3; additive) A ring reader reached a segment boundary
      * (`RingBoundaryException`). Handled **before** the ladder by `TimelineRouter.onGap` (§7.4): no counters, no stats
      * error, no event-log ERROR row (A-N2).
