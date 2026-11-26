@@ -1,6 +1,9 @@
 // Contract (NFL commit 0, docs/design/m6-nfl.md §1.3, B3): the signatures are fixed; WP-1 writes the bodies.
 package app.thebox.core.sports
 
+import app.thebox.core.sports.hub.ClipKind
+import app.thebox.core.sports.hub.EspnVideoDto
+import app.thebox.core.sports.hub.EspnVideoMapper
 import app.thebox.core.sports.hub.PeriodScore
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -32,6 +35,9 @@ import kotlin.math.floor
  * - [GameSnapshot.dayKey] is the event's own ET date; [TeamLine.logo] the feed's light logo when it is under
  *   [logoBase] (the source derives the dark combiner URL, §1.5), else one derived from the abbreviation.
  * - [GameSnapshot.detail] is always a [LeagueDetail.Nfl]; with no `situation` its play is [NflPlay.None].
+ *   (NFL hub §2.5) [LeagueDetail.Nfl.delayed] is set when `status.type.name` contains "DELAY" (`STATUS_DELAYED`,
+ *   `STATUS_RAIN_DELAY`); the phase stays LIVE.
+ * - (NFL hub §5.1) [GameSnapshot.media] carries the board's offered Final Game Highlight (see [highlight]).
  */
 object EspnMapper {
     /** The week or a dated board. [DayBoard.dayKey] is the week key (`w2026-2-9`) or the ET date ("2026-11-08"). */
@@ -189,10 +195,27 @@ object EspnMapper {
             otNumber = otNumber,
             clock = clock,
             finalKind = finalKind,
-            detail = detail(sit, away, home, ::sideOfId, breakKind, lastPlay),
+            detail = detail(sit, away, home, ::sideOfId, breakKind, lastPlay, delayed = name?.uppercase()?.contains(DELAY) == true),
             broadcasts = if (boardFacts) broadcasts(comp.broadcasts) else emptyList(),
             extras = if (boardFacts) extras(comp, awayC, homeC, state, ::sideOfId) else null,
+            media = highlight(comp.highlights, serverDateMs, httpOk = logoBase.startsWith("http://", ignoreCase = true)),
         )
+    }
+
+    private const val DELAY = "DELAY"
+
+    /**
+     * (NFL hub §4.3, §5.1) The board's `highlights[]` → `GameMedia(recapId, condensedId = null, goalClips = 0,
+     * recapExpiresMs)`: the first entry [EspnVideoMapper] maps to a [ClipKind.RECAP], offered at the board's own
+     * [serverDateMs] (so this pure mapper needs no wall clock; without a date the time check is skipped and the UI's
+     * `ClipOffer` check at draw time decides). An expired, embargoed, non-settop or non-https highlight gives no media.
+     * [httpOk]: the logo base is plain http, which only the debug override origin (the fake panel) is.
+     */
+    private fun highlight(list: List<EspnVideoDto>?, serverDateMs: Long?, httpOk: Boolean): GameMedia? {
+        val clip = list.orEmpty().firstNotNullOfOrNull { dto ->
+            EspnVideoMapper.entry(dto, serverDateMs, httpOk)?.clip?.takeIf { it.kind == ClipKind.RECAP }
+        } ?: return null
+        return GameMedia(recapId = clip.videoId, condensedId = null, goalClips = 0, recapExpiresMs = clip.expiresMs)
     }
 
     // ------------------------------------------------------------------ Sports Hub board facts (m6-sports-hub.md §7.1, §7.2)
@@ -365,8 +388,9 @@ object EspnMapper {
         sideOf: (String?) -> Side?,
         breakKind: NflBreak?,
         lastPlay: NflLastPlay?,
+        delayed: Boolean,
     ): LeagueDetail.Nfl {
-        if (sit == null) return LeagueDetail.Nfl(NflPlay.None, null, redZone = false, breakKind = breakKind, lastPlay = null)
+        if (sit == null) return LeagueDetail.Nfl(NflPlay.None, null, redZone = false, breakKind = breakKind, lastPlay = null, delayed = delayed)
         val possession = sideOf(sit.str("possession"))
         val down = sit.int("down")
         val distance = sit.int("distance")
@@ -395,6 +419,7 @@ object EspnMapper {
             play, possession, redZone, breakKind, lastPlay,
             awayTimeouts = timeouts(sit, "awayTimeouts"),
             homeTimeouts = timeouts(sit, "homeTimeouts"),
+            delayed = delayed,
         )
     }
 
