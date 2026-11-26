@@ -145,7 +145,7 @@ internal fun HeaderClock(dateText: String, timeText: String) {
 
 /** Settings gear (no icon font is bundled): a ring with eight teeth. */
 @Composable
-private fun Gear(color: Color, modifier: Modifier) {
+internal fun Gear(color: Color, modifier: Modifier) {
     Canvas(modifier) {
         val c = Offset(size.width / 2f, size.height / 2f)
         val r = size.minDimension * 0.30f
