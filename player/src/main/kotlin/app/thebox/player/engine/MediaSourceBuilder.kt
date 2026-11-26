@@ -11,6 +11,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
+import androidx.media3.exoplayer.hls.DefaultHlsDataSourceFactory
 import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
@@ -112,7 +113,13 @@ internal class MediaSourceBuilder(
                 MediaSourceWithTelemetry(source, telemetry)
             }
             StreamFormat.HLS -> {
-                val (factory, telemetry) = transport.http(ctx)
+                // (HLS playlist renewal, docs/design/m6-hls-edge-handover.md §6) Live: the transport's typed HLS data
+                // sources (playlist-URL renewal inside); archive: the brokered `http` factory exactly as before.
+                val (dataSources, telemetry) = if (isArchive) {
+                    transport.http(ctx).let { (f, t) -> DefaultHlsDataSourceFactory(f) to t }
+                } else {
+                    transport.liveHls(ctx)
+                }
                 // (HLS edge hand-over, stage 0) Debug builds only, live only: an observe-only wrapper that logs `HlsEdge`
                 // lines. Null in release (and for archive), and then the factory below is exactly the one always built.
                 val edgeProbe = if (!isArchive) HlsEdgeProbe.begin(ctx) else null
@@ -134,7 +141,7 @@ internal class MediaSourceBuilder(
                         }
                     }
                     .build()
-                val hlsFactory = if (edgeProbe != null) HlsMediaSource.Factory(HlsEdgeDataSourceFactory(factory, edgeProbe)) else HlsMediaSource.Factory(factory)
+                val hlsFactory = HlsMediaSource.Factory(if (edgeProbe != null) HlsEdgeDataSourceFactory(dataSources, edgeProbe) else dataSources)
                 val source: MediaSource = hlsFactory
                     .setAllowChunklessPreparation(true)
                     .setLoadErrorHandlingPolicy(policyFor(if (isArchive) LoadOrigin.ARCHIVE else LoadOrigin.HLS_MANIFEST))

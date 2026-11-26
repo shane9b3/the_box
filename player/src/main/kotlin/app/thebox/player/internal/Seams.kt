@@ -67,6 +67,8 @@ internal interface StreamTelemetry {
     val inReconnect: Boolean
     val reconnects: Int
     val sniffed: StreamFormat
+    /** (HLS playlist renewal, 2026-11-25) Live HLS playlist URLs renewed in place this session (stats only). */
+    val playlistRenewals: Int get() = 0
     /** (amended 2026-10-13) True while an open is blocked in `broker.acquire` (the controller's WAITING_FOR_SLOT). */
     val waitingForLease: Boolean get() = false
     /**
@@ -96,6 +98,15 @@ internal interface TransportFactory {
     fun liveTs(ctx: StreamSessionContext): Pair<DataSource.Factory, StreamTelemetry>
     /** HLS manifests/segments and finite archive files: brokered OkHttp, Range allowed, no reconnect. */
     fun http(ctx: StreamSessionContext): Pair<DataSource.Factory, StreamTelemetry>
+    /**
+     * (HLS playlist renewal, docs/design/m6-hls-edge-handover.md §6) Live HLS only: the session's HLS data sources, typed
+     * per load (manifest, media, key). The default is Media3's own wrapper over [http], i.e. exactly what an HLS source
+     * was built from before; `TransportFactoryImpl` adds the playlist-URL renewal.
+     */
+    fun liveHls(ctx: StreamSessionContext): Pair<androidx.media3.exoplayer.hls.HlsDataSourceFactory, StreamTelemetry> {
+        val (factory, telemetry) = http(ctx)
+        return androidx.media3.exoplayer.hls.DefaultHlsDataSourceFactory(factory) to telemetry
+    }
     /** Ends the session's transport: cancels every call, waits for close, releases the lease. Idempotent, main-safe. */
     fun endSession(tuneId: Long)
     /**

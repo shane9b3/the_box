@@ -64,10 +64,16 @@ internal class BrokeredHttpDataSource(
     private var opened = false
     private var bytesRemaining = C.LENGTH_UNSET.toLong()
 
+    /**
+     * (HLS playlist renewal) Read at each [open]: false sends that open's call through the lease's no-follow client
+     * (a pinned playlist reload, `RenewingHlsDataSource`). Every other caller leaves it true (today's behaviour).
+     */
+    @Volatile var followRedirects = true
+
     /** Records this source's own call so [close] can cancel it without touching the session's other loads. */
     private val recordingFactory = Call.Factory { request: Request ->
         val factory = calls ?: throw IOException("no lease")
-        factory.newCall(request).also {
+        factory.newCall(request, followRedirects).also {
             currentCall = it
             // (HLS edge hand-over, stage 0) Observe-only listener for a live HLS open in a debug build; else a no-op.
             HlsEdgeProbe.attach(it)

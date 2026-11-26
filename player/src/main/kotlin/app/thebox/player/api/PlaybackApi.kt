@@ -358,6 +358,8 @@ data class StreamStats(
     val redirects: Int = 0,
     val format: StreamFormat = StreamFormat.UNKNOWN,
     val reconnects: Int = 0,
+    /** (HLS playlist renewal) Live HLS playlist URLs renewed in place this session. */
+    val playlistRenewals: Int = 0,
     val broker: BrokerSnapshot? = null,
     val bufferProfile: BufferProfile? = null,
     val afr: AfrMode = AfrMode.SEAMLESS,

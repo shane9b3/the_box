@@ -66,6 +66,7 @@ object PlayerMappers {
         redirects = stats.redirects,
         format = stats.format,
         reconnects = stats.reconnects,
+        playlistRenewals = stats.playlistRenewals,
         broker = stats.broker,
         bufferProfile = stats.bufferProfile,
         afr = stats.afr,

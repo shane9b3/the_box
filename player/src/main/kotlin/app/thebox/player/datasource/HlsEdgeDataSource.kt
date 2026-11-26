@@ -11,22 +11,24 @@ import androidx.media3.exoplayer.hls.HlsDataSourceFactory
 import java.util.Locale
 
 /**
- * (HLS edge hand-over, stage 0) The live HLS source's data-source factory while [HlsEdgeProbe] is on. Media3's own
- * `DefaultHlsDataSourceFactory` ignores the data type and calls `upstream.createDataSource()`; this one does the same
- * and wraps the result in an observe-only [HlsEdgeDataSource] that knows the type (manifest, media, key).
+ * (HLS edge hand-over, stage 0) The live HLS source's data-source factory while [HlsEdgeProbe] is on: it asks
+ * [upstream] (the transport's live HLS factory, playlist renewal inside) for the same data type and wraps the result in
+ * an observe-only [HlsEdgeDataSource] that knows the type (manifest, media, key).
  */
 @OptIn(UnstableApi::class)
 internal class HlsEdgeDataSourceFactory(
-    private val upstream: DataSource.Factory,
+    private val upstream: HlsDataSourceFactory,
     private val session: HlsEdgeSession,
 ) : HlsDataSourceFactory {
+    constructor(upstream: DataSource.Factory, session: HlsEdgeSession) : this(HlsDataSourceFactory { upstream.createDataSource() }, session)
+
     init {
         factories.incrementAndGet()
     }
 
     override fun createDataSource(dataType: Int): DataSource {
         created.incrementAndGet()
-        return HlsEdgeDataSource(upstream.createDataSource(), dataType, session)
+        return HlsEdgeDataSource(upstream.createDataSource(dataType), dataType, session)
     }
 
     companion object {

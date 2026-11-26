@@ -286,16 +286,55 @@ class LadderExecutionTest {
     }
 
     @Test
-    fun transientReconnectAfterFirstMediaShowsProgressAndAnnouncesReconnected() {
+    fun transientReconnectThatRendersWithinThreeSecondsShowsNoNotice() {
+        // (Quiet reconnect, PlaybackControllerImpl.QUIET_FAST_RECONNECT) The waiting state shows, the notices do not.
         tuneAndFail(LadderDecision.ReResolve(1_000), playFirst = true, transient = true)
         assertTrue(f.ladder.seen.single().signal is FailureSignal.Network)
         val st = f.state as PlaybackState.Buffering
         assertEquals(BufferingCause.RECONNECTING, st.cause)
-        assertEquals(1, f.notices.count { it is PlaybackNotice.Reconnecting })
+        assertTrue(f.notices.none { it is PlaybackNotice.Reconnecting })
         f.advance(1_100)
+        f.play()
+        f.advance(5_000)
+        assertTrue(f.notices.none { it is PlaybackNotice.Reconnecting || it == PlaybackNotice.Reconnected })
+        assertTrue(f.state is PlaybackState.Playing)
+    }
+
+    @Test
+    fun transientReconnectPastThreeSecondsShowsProgressAndAnnouncesReconnected() {
+        tuneAndFail(LadderDecision.ReResolve(1_000), playFirst = true, transient = true)
+        f.advance(PlaybackControllerImpl.QUIET_RECONNECT_MS - 100)
+        assertTrue(f.notices.none { it is PlaybackNotice.Reconnecting })
+        f.advance(200)
+        assertEquals(1, f.notices.count { it is PlaybackNotice.Reconnecting })
         f.play()
         assertEquals(1, f.notices.count { it == PlaybackNotice.Reconnected })
         assertTrue(f.state is PlaybackState.Playing)
+    }
+
+    @Test
+    fun anHlsRenewalFallbackReachesTheLadderAtOnceAsTodaysNetworkRow() {
+        tuneAndFail(LadderDecision.ReResolve(1_000), playFirst = true, transient = true)
+        f.advance(1_100)
+        f.play()
+        val seen = f.ladder.seen.size
+        f.sources.last.ctx.onEvent(app.thebox.core.playback.PlaybackEventType.STALL, app.thebox.player.datasource.HlsPlaylistRenewal.FALLBACK_CODE, "misaligned:msn_back")
+        f.idle()
+        assertEquals(
+            FailureSignal.Network(app.thebox.core.playback.NetworkFailureKind.OTHER, beforeFirstByte = false),
+            f.ladder.seen.drop(seen).single().signal,
+        )
+    }
+
+    @Test
+    fun aRefusedHlsSegmentReachesTheLadderAtOnceWithItsStatus() {
+        tuneAndFail(LadderDecision.ReResolve(1_000), playFirst = true, transient = true)
+        f.advance(1_100)
+        f.play()
+        val seen = f.ladder.seen.size
+        f.sources.last.ctx.onEvent(app.thebox.core.playback.PlaybackEventType.STALL, app.thebox.player.datasource.HlsPlaylistRenewal.SEGMENT_CODE, "status=403")
+        f.idle()
+        assertEquals(FailureSignal.Http(403, app.thebox.core.playback.LoadOrigin.HLS_SEGMENT), f.ladder.seen.drop(seen).single().signal)
     }
 
     @Test

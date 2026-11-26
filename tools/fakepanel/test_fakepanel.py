@@ -7,6 +7,7 @@ import gzip
 import http.client
 import json
 import os
+import re
 import shutil
 import socket
 import sys
@@ -292,6 +293,86 @@ class TestHlsEdgeCases(PanelCase):
         c3 = http.client.HTTPConnection("127.0.0.1", self.panel.lb_port, timeout=5)
         c3.request("GET", "/live/test/test/" + seg)
         self.assertEqual(c3.getresponse().status, 200)
+
+
+class TestPlaylistTokenExpiry(PanelCase):
+    """playlist_token_ttl: the measured half-hour shape (docs/design/m6-hls-edge-handover.md §1.2) in seconds."""
+
+    def tune(self, sid=1):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request("GET", f"/live/test/test/{sid}.m3u8")
+        r = c.getresponse()
+        r.read()
+        self.assertEqual(r.status, 302)
+        loc = r.getheader("Location")
+        self.assertRegex(loc, rf"^http://127\.0\.0\.1:{self.panel.lb_port}/hls/[0-9a-f]{{16}}/{sid}\.m3u8$")
+        return loc.split(str(self.panel.lb_port), 1)[1]
+
+    def edge(self, path):
+        c = http.client.HTTPConnection("127.0.0.1", self.panel.lb_port, timeout=5)
+        c.request("GET", path)
+        r = c.getresponse()
+        return r.status, r.getheader("Location"), r.read().decode(errors="replace")
+
+    @staticmethod
+    def msn(body):
+        return int(re.search(r"#EXT-X-MEDIA-SEQUENCE:(\d+)", body)[1])
+
+    def test_token_playlist_expires_into_a_dead_redirect_and_a_new_tune_continues(self):
+        self.admin({"stream_faults": {"1": {"playlist_token_ttl": 1}}})
+        pl = self.tune()
+        st, _, body = self.edge(pl)
+        self.assertEqual(st, 200)
+        segs = [l for l in body.splitlines() if l and not l.startswith("#")]
+        tok = pl.split("/")[2]
+        self.assertTrue(all(s.startswith(f"/hls/{tok}/1_") and s.endswith(".ts") for s in segs), segs)
+        self.assertEqual(self.edge(segs[-1])[0], 200)
+        old_msn = self.msn(body)
+        seg_s = float(re.search(r"#EXTINF:([0-9.]+),", body)[1])
+        t0 = time.time()
+        time.sleep(1.1)
+        st, loc, _ = self.edge(pl)
+        self.assertEqual(st, 302)
+        self.assertTrue(loc.startswith("http://10.255.255.1:"), loc)
+        self.assertEqual(self.edge(segs[-1])[0], 200)  # segments of the last good playlist still answer
+        pl2 = self.tune()
+        self.assertNotEqual(pl, pl2)
+        st, _, body2 = self.edge(pl2)
+        self.assertEqual(st, 200)
+        self.assertGreaterEqual(self.msn(body2), old_msn)  # the same media sequence, continued
+        self.assertLessEqual(self.msn(body2), old_msn + int((time.time() - t0) / seg_s) + 2)  # elapsed time only
+        # The same segment names at the same sequence numbers, under the new token.
+        names = lambda b: {l.rsplit("/", 1)[1] for l in b.splitlines() if l and not l.startswith("#")}
+        self.assertTrue(names(body) & names(body2))
+        stats = json.loads(self.get("/admin/stats")[2])
+        self.assertEqual(stats["edge_tokens_issued"], 2)
+        self.assertEqual(stats["edge_token_expired"], 1)
+
+    def test_restart_mode_restarts_the_sequence_for_a_new_token(self):
+        self.admin({"stream_faults": {"1": {"playlist_token_ttl": 60, "token_msn": "restart"}}})
+        self.assertEqual(self.msn(self.edge(self.tune())[2]), 0)
+        self.admin({"stream_faults": {"1": {"playlist_token_ttl": 60, "token_msn": "continue"}}})
+        self.assertGreater(self.msn(self.edge(self.tune())[2]), 1000)
+
+    def test_refused_and_status_expiry_modes(self):
+        self.admin({"stream_faults": {"1": {"playlist_token_ttl": 0.2, "token_expire_mode": "redirect_refused"}}})
+        pl = self.tune()
+        time.sleep(0.3)
+        st, loc, _ = self.edge(pl)
+        self.assertEqual((st, loc), (302, f"http://127.0.0.1:{self.panel.dead_port}{pl}"))
+        with self.assertRaises(ConnectionRefusedError):
+            socket.create_connection(("127.0.0.1", self.panel.dead_port), timeout=2).close()
+        self.admin({"stream_faults": {"1": {"playlist_token_ttl": 0.2, "token_expire_mode": "403"}}})
+        pl = self.tune()
+        time.sleep(0.3)
+        self.assertEqual(self.edge(pl)[0], 403)
+
+    def test_unknown_token_and_other_streams_unaffected(self):
+        self.admin({"stream_faults": {"1": {"playlist_token_ttl": 1}}})
+        self.assertEqual(self.edge("/hls/0123456789abcdef/1.m3u8")[0], 403)
+        st, _, body = self.get("/live/test/test/2.m3u8")
+        self.assertEqual(st, 200)
+        self.assertIn("#EXT-X-MEDIA-SEQUENCE", body.decode())
 
 
 # ------------------------------------------------------------------ synthetic TS + independent decoders

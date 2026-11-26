@@ -422,6 +422,9 @@ internal class PlaybackControllerImpl @Inject constructor(
         var failureCount = 0
         var rebufferCount = 0
         var reconnectNoticeShown = false
+        /** (Quiet reconnect, 2026-11-25) The deferred "Reconnecting" notice, and whether it has been shown. */
+        var reconnectNoticeJob: Job? = null
+        var reconnectNoticeEmitted = false
 
         // (M6 time-shift, §7) The cycle's local buffer.
         /** The cycle's time-shift session (null = unbuffered, or not started yet). */
@@ -1620,8 +1623,41 @@ internal class PlaybackControllerImpl @Inject constructor(
             c.uaFallbackPending = false
             _notices.tryEmit(PlaybackNotice.UserAgentSwitched(settings.current.userAgentFallbackPreset))
         }
-        if (c.reconnectNoticeShown) {
-            c.reconnectNoticeShown = false
+        if (c.reconnectNoticeShown) noticeReconnected(c)
+    }
+
+    /**
+     * (Quiet reconnect, lead's decision pending the owner, 2026-11-25) With [QUIET_FAST_RECONNECT] the "Reconnecting"
+     * notice waits [QUIET_RECONNECT_MS] from the first restart of a series; a recovery inside that time shows neither it
+     * nor "Reconnected". A later restart in the same series, once the notice is shown, announces itself at once.
+     */
+    private fun noticeReconnecting(c: Cycle, n: Int, max: Int) {
+        c.reconnectNoticeShown = true
+        if (!QUIET_FAST_RECONNECT || c.reconnectNoticeEmitted) {
+            c.reconnectNoticeEmitted = true
+            _notices.tryEmit(PlaybackNotice.Reconnecting(n, max))
+            return
+        }
+        if (c.reconnectNoticeJob?.isActive == true) return
+        c.reconnectNoticeJob = scope.launch {
+            delay(QUIET_RECONNECT_MS)
+            val st = _state.value
+            if (cycle === c && c.reconnectNoticeShown && !c.reconnectNoticeEmitted &&
+                st is PlaybackState.Buffering && st.cause == BufferingCause.RECONNECTING
+            ) {
+                c.reconnectNoticeEmitted = true
+                _notices.tryEmit(PlaybackNotice.Reconnecting(c.counters.transientRetries.coerceAtLeast(1), max))
+            }
+        }
+    }
+
+    /** The reconnect series ended with media: "Reconnected" only if "Reconnecting" was shown. */
+    private fun noticeReconnected(c: Cycle) {
+        c.reconnectNoticeShown = false
+        c.reconnectNoticeJob?.cancel()
+        c.reconnectNoticeJob = null
+        if (c.reconnectNoticeEmitted) {
+            c.reconnectNoticeEmitted = false
             _notices.tryEmit(PlaybackNotice.Reconnected)
         }
     }
@@ -1681,6 +1717,16 @@ internal class PlaybackControllerImpl @Inject constructor(
             PlaybackEventType.STALL -> if (code == app.thebox.player.engine.MediaSourceBuilder.STUCK_AUDIO_CODE) {
                 BoxLog.i(TAG) { "audio timestamps stuck ($detail): asking the ladder" }
                 onFailure(c, FailureSignal.AudioTimestampsStuck, null)
+            } else if (code == app.thebox.player.datasource.HlsPlaylistRenewal.FALLBACK_CODE) {
+                // (HLS playlist renewal, design §6.6) The pinned playlist URL expired and could not be renewed: today's
+                // network row (L19), now instead of after Media3's retries have drained the buffer.
+                BoxLog.i(TAG) { "hls playlist renewal $detail: asking the ladder" }
+                onFailure(c, FailureSignal.Network(app.thebox.core.playback.NetworkFailureKind.OTHER, beforeFirstByte = false), null)
+            } else if (code == app.thebox.player.datasource.HlsPlaylistRenewal.SEGMENT_CODE) {
+                // A segment refused with 401/403/410 is fatal in the policy but reaches the player only once the buffer
+                // ran dry: the same status row, now.
+                val status = detail.substringAfter("status=").toIntOrNull()
+                if (status != null) onFailure(c, FailureSignal.Http(status, app.thebox.core.playback.LoadOrigin.HLS_SEGMENT), null)
             }
             PlaybackEventType.RECONNECT -> {
                 val st = _state.value
@@ -2024,8 +2070,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             }
             transient -> {
                 val n = c.counters.transientRetries.coerceAtLeast(1)
-                _notices.tryEmit(PlaybackNotice.Reconnecting(n, max))
-                c.reconnectNoticeShown = true
+                noticeReconnecting(c, n, max)
                 ({ np -> PlaybackState.Buffering(np, BufferingCause.RECONNECTING, ReconnectProgress(n, max)) })
             }
             else -> {
@@ -2516,6 +2561,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             redirects = t?.redirects ?: base.redirects,
             format = s?.format ?: base.format,
             reconnects = t?.reconnects ?: base.reconnects,
+            playlistRenewals = t?.playlistRenewals ?: base.playlistRenewals,
             broker = try {
                 s?.ctx?.broker?.snapshot()
             } catch (e: Exception) {
@@ -2955,10 +3001,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         val st = _state.value
         if (st is PlaybackState.Connecting && st.phase == ConnectPhase.CONNECTING) setActiveState(c, st.copy(phase = ConnectPhase.BUFFERING_INITIAL))
         // A writer restart (no new reader session, so onFirstMedia does not run): announce the reconnect's end here.
-        if (!first && c.reconnectNoticeShown && c.firstMediaReached) {
-            c.reconnectNoticeShown = false
-            _notices.tryEmit(PlaybackNotice.Reconnected)
-        }
+        if (!first && c.reconnectNoticeShown && c.firstMediaReached) noticeReconnected(c)
         publishLocalBuffer(force = true)
     }
 
@@ -3149,8 +3192,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             val max = settings.current.reconnectAttempts
             if ((d is LadderDecision.ReResolve || d is LadderDecision.RetrySame) && isTransient(signal)) {
                 val n = c.counters.transientRetries.coerceAtLeast(1)
-                _notices.tryEmit(PlaybackNotice.Reconnecting(n, max))
-                c.reconnectNoticeShown = true
+                noticeReconnecting(c, n, max)
                 setActiveState(c, PlaybackState.Buffering(nowPlaying(c), BufferingCause.RECONNECTING, ReconnectProgress(n, max)))
             } else {
                 c.attempt++
@@ -3508,6 +3550,13 @@ internal class PlaybackControllerImpl @Inject constructor(
 
         /** (follow-up 2026-10-14) Healthy playback at a raised TS compat level before it is saved (L27b). */
         const val COMPAT_PERSIST_HEALTHY_MS = 30_000L
+
+        /**
+         * (Quiet reconnect, 2026-11-25; lead's decision pending owner confirmation: flip to false to restore the
+         * immediate notices) A reconnect that renders again within [QUIET_RECONNECT_MS] shows no notice, all providers.
+         */
+        const val QUIET_FAST_RECONNECT = true
+        const val QUIET_RECONNECT_MS = 3_000L
 
         /**
          * Signals that may persist a compat raise: decoder-side stalls (b1 and the readiness stall are DECODER_STUCK;

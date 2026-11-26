@@ -95,6 +95,7 @@ object StatsFormatter {
         f.httpStatus?.takeIf { it > 0 }?.let { parts += it.toString() }
         if (f.redirects > 0) parts += plural(f.redirects, "redirect")
         if (f.reconnects > 0) parts += plural(f.reconnects, "reconnect")
+        if (f.playlistRenewals > 0) parts += plural(f.playlistRenewals, "playlist renewal")
         return parts.takeIf { it.isNotEmpty() }?.joinToString(SEP)
     }
 
