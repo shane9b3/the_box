@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.thebox.core.full.QuickBarState
@@ -69,17 +71,33 @@ fun QuickBar(state: QuickBarState, modifier: Modifier = Modifier, clock24: Boole
         userScrollEnabled = false,
     ) {
         itemsIndexed(state.items, key = { _, item -> item.name }) { i, item ->
-            QuickPill(stringResource(PlayerText.quickLabel(item)), PlayerText.quickValue(res, item, state, clock24), focused = i == state.focused, checked = item == QuickItem.STREAM_INFO && state.statsOn)
+            // (Settings panel §5.8) While the panel is open the Settings pill is drawn active, never focused: the panel has the keys.
+            val active = state.panelOpen && item == QuickItem.SETTINGS
+            QuickPill(
+                stringResource(PlayerText.quickLabel(item)), PlayerText.quickValue(res, item, state, clock24),
+                focused = !state.panelOpen && i == state.focused, checked = item == QuickItem.STREAM_INFO && state.statsOn, active = active,
+            )
         }
     }
 }
 
+/** (Settings panel §5.8) The active pill's fill (White .16) and its 2 px accent border; FG text. */
+internal val QuickActiveFill = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f)
+internal const val QUICK_ACTIVE_BORDER = 2
+/** (Settings panel §5.8) TalkBack's state of the active Settings pill. */
+internal const val QUICK_ACTIVE_STATE = "Open"
+
 @Composable
-private fun QuickPill(label: String, value: String?, focused: Boolean, checked: Boolean) {
+private fun QuickPill(label: String, value: String?, focused: Boolean, checked: Boolean, active: Boolean = false) {
     val shape = RoundedCornerShape(DesignTokens.Radii.Pill)
     val text = if (focused) GuideUi.Canvas else GuideUi.Fg
     var m = Modifier.testTag(QUICK_ITEM_TAG).height(PlayerUi.QUICK_PILL_H.dp)
-    m = if (focused) m.border(GuideUi.FocusRing, GuideUi.Accent, shape).background(GuideUi.Fg, shape) else m.background(PlayerUi.ChipFill, shape)
+    m = when {
+        focused -> m.border(GuideUi.FocusRing, GuideUi.Accent, shape).background(GuideUi.Fg, shape)
+        active -> m.border(QUICK_ACTIVE_BORDER.dp, GuideUi.Accent, shape).background(QuickActiveFill, shape)
+            .semantics { stateDescription = QUICK_ACTIVE_STATE }
+        else -> m.background(PlayerUi.ChipFill, shape)
+    }
     Row(
         m.padding(horizontal = PlayerUi.QUICK_PILL_PAD_H.dp),
         verticalAlignment = Alignment.CenterVertically,

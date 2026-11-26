@@ -104,10 +104,26 @@ fun valueText(row: SettingsRow): String? {
  * S11 "not a modal"). Pure renderer: [focused] and [choice] come from `SettingsUiState`.
  */
 @Composable
-fun SettingsRowView(row: SettingsRow, focused: Boolean, choice: ChoiceState?, moving: Boolean, modifier: Modifier = Modifier) {
+fun SettingsRowView(row: SettingsRow, focused: Boolean, choice: ChoiceState?, moving: Boolean, modifier: Modifier = Modifier, compact: Boolean = false) {
     // (M5 integration) The lifted row of move mode is WP-D's MoveModeRow (§3.2.2).
     if (moving) {
-        MoveModeRow(row.label, valueText(row), modifier.testTag(SETTINGS_ROW_TAG + row.id.key))
+        // (Settings panel S9) In the panel it takes the row's width; its hint is in the band.
+        if (compact) Box(modifier.testTag(SETTINGS_ROW_TAG + row.id.key)) { MoveModeRow(row.label, valueText(row), width = SettingsPanelUi.INNER_W, compact = true) }
+        else MoveModeRow(row.label, valueText(row), modifier.testTag(SETTINGS_ROW_TAG + row.id.key))
+        return
+    }
+    if (compact) {
+        // (Settings panel §5.4, §5.5) The panel draws an open option list as its own window slots (CompactOptionRow); this
+        // path draws the row and its list together, for callers that lay a row out as one item.
+        Column(modifier.fillMaxWidth()) {
+            CompactRowBody(row, focused && choice == null)
+            if (choice != null && choice.row == row.id) {
+                compactOptions(row)?.let { (options, selected, multi) ->
+                    Spacer(Modifier.height(SettingsPanelUi.ROW_GAP.dp))
+                    options.forEachIndexed { i, o -> CompactOptionRow(row, o, i, selected = i in selected, focused = i == choice.focused, multi = multi) }
+                }
+            }
+        }
         return
     }
     Column(modifier.fillMaxWidth()) {
@@ -349,13 +365,159 @@ internal fun CheckBox(checked: Boolean, ring: Color, modifier: Modifier = Modifi
     }
 }
 
-/** An unloaded row of a paged list (§3.2.1): row height, `.03` fill. */
+
+// ---------------------------------------------------------------- (Settings panel §5.4, §5.5) compact rows
+
+/** The options of [row]'s inline list (Choice or MultiChoice): options, the selected indices, multi. Null for other kinds. */
+internal fun compactOptions(row: SettingsRow): Triple<List<ChoiceOption>, Set<Int>, Boolean>? = when (val k = row.kind) {
+    is RowKind.Choice -> Triple(k.options, setOf(k.selected), false)
+    is RowKind.MultiChoice -> Triple(k.options, k.selected, true)
+    else -> null
+}
+
+/** The account card of a playlist page (N8: its line wraps to 2 lines before it ellipsises). */
+internal const val ACCOUNT_ROW = "playlist.account"
+
+/** (§2.7) How many lines the Info text under a compact row's label may take: the account card 2 (N8), others 3. */
+internal fun compactInfoLines(row: SettingsRow): Int = if (row.id.key == ACCOUNT_ROW) 2 else 3
+
+/** (§5.4) True when a compact row has a second line (value, badges or Info lines): its minimum height is then 92, else 64. */
+internal fun compactHasSecondLine(row: SettingsRow, value: String?): Boolean =
+    (value != null && row.kind !is RowKind.Toggle) ||
+        ((row.kind as? RowKind.Item)?.badges?.isNotEmpty() == true) ||
+        ((row.kind as? RowKind.Info)?.lines?.isNotEmpty() == true)
+
+/**
+ * (Settings panel §5.4) One compact row: 464 wide, at least 64 (92 with a second line), padding 16 / 10, radius 12; the
+ * label 26/500 on up to 2 lines; under it the value 22/400 (mono for mono values, a middle ellipsis for URLs and hosts)
+ * led by the badges, or the Info lines (3; the account card 2, N8; storage rows: one line each); at the right the toggle,
+ * a chevron or the destructive dot. The description is not drawn here: the panel's band shows it. Focus is the kit's (FG
+ * fill, 3 px accent ring, dark text); disabled rows at .4. No wordmark, no progress track, no searching dots (those
+ * pages expand, §2.6).
+ */
 @Composable
-fun PlaceholderRow(index: Int, modifier: Modifier = Modifier) {
+internal fun CompactRowBody(row: SettingsRow, focused: Boolean) {
+    val shape = RoundedCornerShape(SettingsPanelUi.ROW_RADIUS.dp)
+    val alpha = if (row.enabled) 1f else SettingsUi.DISABLED_ALPHA
+    val base = if (focused) SettingsUi.Canvas else SettingsUi.Fg
+    val text = base.copy(alpha = alpha)
+    val value = valueText(row)
+    val two = compactHasSecondLine(row, value)
+    var m = Modifier
+        .fillMaxWidth()
+        .heightIn(min = (if (two) SettingsPanelUi.ROW_H_TWO else SettingsPanelUi.ROW_H).dp)
+        .testTag(SETTINGS_ROW_TAG + row.id.key)
+        .semantics { selected = focused; contentDescription = rowDescription(row) }
+    if (focused) m = m.border(SettingsUi.FOCUS_RING.dp, SettingsUi.Accent, shape).background(SettingsUi.Fg, shape)
+    Row(
+        m.padding(horizontal = SettingsPanelUi.ROW_PAD_H.dp, vertical = SettingsPanelUi.ROW_PAD_V.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+            Line(
+                row.label, SettingsPanelUi.RowLabel.copy(color = if (focused) text else SettingsUi.Fg92.copy(alpha = 0.92f * alpha)),
+                Modifier.testTag(SETTINGS_PANEL_LABEL_TAG), maxLines = 2,
+            )
+            CompactSecondLine(row, value, focused, text)
+        }
+        CompactTrailing(row, focused, text)
+    }
+}
+
+@Composable
+private fun CompactSecondLine(row: SettingsRow, value: String?, focused: Boolean, text: Color) {
+    val badges = (row.kind as? RowKind.Item)?.badges.orEmpty()
+    val shownValue = value?.takeIf { row.kind !is RowKind.Toggle }
+    if (badges.isNotEmpty() || shownValue != null) {
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            badges.sortedBy { it.ordinal }.forEach { b ->
+                if (SettingsUi.isAccentBadge(b)) AccentBadgeChip(stringResource(SettingsUi.badgeLabel(b)), focused)
+                else BadgeChip(stringResource(SettingsUi.badgeLabel(b)), text)
+            }
+            if (shownValue != null) {
+                val style = if (SettingsUi.isMonoValue(shownValue)) SettingsPanelUi.RowValueMono else SettingsPanelUi.RowValue
+                val amber = SettingsUi.isWarnText(row.value) && !focused
+                Text(
+                    shownValue,
+                    style = style.copy(color = if (amber) SettingsUi.Amber.copy(alpha = text.alpha) else SettingsUi.secondary(text, focused, 0.65f)),
+                    maxLines = 1,
+                    overflow = if (shownValue.contains("://") || shownValue.contains('.')) TextOverflow.MiddleEllipsis else TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag(SETTINGS_PANEL_VALUE_TAG),
+                )
+            }
+        }
+    }
+    val info = row.kind as? RowKind.Info ?: return
+    if (info.lines.isEmpty()) return
+    val tone = if (focused) text else SettingsUi.toneColor(info.tone).copy(alpha = text.alpha)
+    if (isStorageInfo(row)) {
+        info.lines.forEach {
+            val style = if (SettingsUi.isMonoValue(it)) SettingsPanelUi.RowValueMono else SettingsPanelUi.RowValue
+            Line(it, style.copy(color = tone), Modifier.padding(top = 2.dp).testTag(SETTINGS_PANEL_INFO_TAG), maxLines = 2)
+        }
+    } else {
+        Line(
+            info.lines.joinToString("  ·  "), SettingsPanelUi.RowValue.copy(color = tone),
+            Modifier.padding(top = 2.dp).testTag(SETTINGS_PANEL_INFO_TAG), maxLines = compactInfoLines(row),
+        )
+    }
+}
+
+@Composable
+private fun CompactTrailing(row: SettingsRow, focused: Boolean, text: Color) {
+    val chevronColor = SettingsUi.secondary(text, focused, 0.45f)
+    when (val k = row.kind) {
+        is RowKind.Toggle -> TogglePill(k.on, Modifier.padding(start = 12.dp).semantics { stateDescription = if (k.on) "on" else "off" }, onLight = focused)
+        is RowKind.Link -> CompactChevron(chevronColor)
+        is RowKind.Item -> if (k.route != null) CompactChevron(chevronColor)
+        is RowKind.Action -> if (k.destructive) Box(Modifier.padding(start = 12.dp)) { Dot(SettingsUi.Bad.copy(alpha = text.alpha), 10) }
+        else -> Unit
+    }
+}
+
+@Composable
+internal fun CompactChevron(color: Color) {
+    Line(stringResource(R.string.settings_ui_chevron), SettingsPanelUi.Chevron.copy(color = color), Modifier.padding(start = 12.dp))
+}
+
+/**
+ * (Settings panel §5.5) One option of a compact inline list: indent 24, at least 56 high (76 with a detail), the label
+ * 24/400 on up to 2 lines (N7), the detail 22 .55 on one line under it, a radio or check box of 18 and a gap of 14.
+ */
+@Composable
+internal fun CompactOptionRow(row: SettingsRow, o: ChoiceOption, i: Int, selected: Boolean, focused: Boolean, multi: Boolean, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(SettingsPanelUi.ROW_RADIUS.dp)
+    val alpha = if (o.enabled) 1f else SettingsUi.DISABLED_ALPHA
+    val text = (if (focused) SettingsUi.Canvas else SettingsUi.Fg).copy(alpha = alpha)
+    var m = modifier
+        .fillMaxWidth()
+        .padding(start = SettingsPanelUi.CHOICE_INDENT.dp)
+        .heightIn(min = (if (o.detail != null) SettingsPanelUi.OPTION_H_DETAIL else SettingsPanelUi.OPTION_H).dp)
+        .testTag("$SETTINGS_OPTION_TAG${row.id.key}:$i")
+        .semantics { this.selected = focused; stateDescription = if (selected) "checked" else "unchecked"; contentDescription = o.label }
+    if (focused) m = m.border(SettingsUi.FOCUS_RING.dp, SettingsUi.Accent, shape).background(SettingsUi.Fg, shape)
+    Row(m.padding(horizontal = SettingsPanelUi.ROW_PAD_H.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (multi) CheckBox(selected, text) else Radio(selected, text)
+        Spacer(Modifier.width(SettingsPanelUi.OPTION_GAP.dp))
+        Column(Modifier.weight(1f)) {
+            Line(o.label, SettingsPanelUi.OptionLabel.copy(color = text), Modifier.testTag(SETTINGS_PANEL_LABEL_TAG), maxLines = 2)
+            o.detail?.let { Line(it, SettingsPanelUi.OptionDetail.copy(color = SettingsUi.secondary(text, focused, 0.55f)), Modifier.padding(top = 2.dp)) }
+        }
+    }
+}
+
+/** Test tags of the compact rows' texts (labels must be whole; values may ellipsise). */
+const val SETTINGS_PANEL_LABEL_TAG = "settings_panel_label"
+const val SETTINGS_PANEL_VALUE_TAG = "settings_panel_value"
+const val SETTINGS_PANEL_INFO_TAG = "settings_panel_info"
+
+/** An unloaded row of a paged list (§3.2.1): row height, `.03` fill. [height]: 72 (an item row), 64 in the panel. */
+@Composable
+fun PlaceholderRow(index: Int, modifier: Modifier = Modifier, height: Int = SettingsUi.ITEM_ROW_H) {
     Box(
         modifier
             .fillMaxWidth()
-            .height(SettingsUi.ITEM_ROW_H.dp)
+            .height(height.dp)
             .testTag(SETTINGS_PLACEHOLDER_ROW_TAG + index)
             .background(SettingsUi.White03, RoundedCornerShape(SettingsUi.ROW_RADIUS.dp)),
     )
