@@ -6,7 +6,10 @@ import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.SportsTiming
 
 /**
- * (Sports Hub, docs/design/m6-sports-hub.md §4.3; WP-1) When the shown game's detail is fetched again. Pure.
+ * (Sports Hub, docs/design/m6-sports-hub.md §4.3; WP-1) When the shown game's detail is fetched again. Pure. The table
+ * is [DetailCadence.NHL]'s; (NFL hub §5.2) [DetailCadence.NFL] reads every 30 min before the game, every 60 s (not
+ * aligned) live and in breaks, forces a re-read on a phase change (15 s floor), and keeps the final's 5 min re-read for
+ * up to 2 h until a highlight is offered and for 30 min while the game has single-play clips.
  *
  * | Phase | Next request |
  * |---|---|
@@ -44,18 +47,25 @@ object DetailPollPolicy {
     /**
      * The phase's re-read interval under [cadence], or null for none (the staleness yardstick too).
      *
-     * (NFL hub commit 0) Only the NHL rules are implemented: [DetailCadence.preMs], [DetailCadence.liveMs] and the final
-     * recap wait ([FinalFacts.recapPosted], [DetailCadence.finalWaitMs]). P1: the NFL's [DetailCadence.playsWaitMs] rule.
+     * FINAL (NFL hub §5.2): every `HUB_DETAIL_IDLE_MS` while either wait holds, else none (expiry is local, §4.3):
+     * - no recap / offered highlight ([FinalFacts.recapPosted] false) and the game ended < [DetailCadence.finalWaitMs] ago;
+     * - (NFL, arch m6) the detail lists a PLAY clip ([FinalFacts.playClips]) and the game ended < [DetailCadence.playsWaitMs]
+     *   ago, so a single-play clip ESPN posts after the highlight (MNF: 7 min later) is still picked up.
+     * An unknown end ([FinalFacts.endedAgoMs] null) waits for neither. [DetailCadence.NHL] has no plays wait, so its
+     * behaviour is the Sports Hub's unchanged.
      */
     fun intervalMs(cadence: DetailCadence, phase: GamePhase, final: FinalFacts): Long? = when (phase) {
         GamePhase.SCHEDULED, GamePhase.PRE -> cadence.preMs
         GamePhase.LIVE, GamePhase.INTERMISSION -> cadence.liveMs
-        GamePhase.FINAL -> if (!final.recapPosted && final.endedAgoMs != null && final.endedAgoMs < cadence.finalWaitMs) {
-            SportsConstants.HUB_DETAIL_IDLE_MS
-        } else {
-            null
-        }
+        GamePhase.FINAL -> if (finalWait(cadence, final)) SportsConstants.HUB_DETAIL_IDLE_MS else null
         GamePhase.POSTPONED -> null
+    }
+
+    private fun finalWait(cadence: DetailCadence, final: FinalFacts): Boolean {
+        val ended = final.endedAgoMs ?: return false
+        if (!final.recapPosted && ended < cadence.finalWaitMs) return true
+        val plays = cadence.playsWaitMs ?: return false
+        return final.playClips && ended < plays
     }
 
     /**
@@ -63,10 +73,13 @@ object DetailPollPolicy {
      * game (null = none yet: now). After [failures] consecutive failures since it, the back-off from [lastFailMono]
      * ([jitter] ∈ [-1, 1]); back-off is checked first. [fetchedPhase] is the phase of the cached detail.
      *
-     * (NFL hub commit 0) P1: the phase-change rule (`effective != fetchedPhase` due at once, no earlier than `lastOk +
-     * phaseChangeFloorMs`) for a cadence that sets [DetailCadence.phaseChangeFloorMs]; today [fetchedPhase] is unused.
+     * (NFL hub §5.2, arch m5) With [DetailCadence.phaseChangeFloorMs] set (the NFL), a phase change is due at once: when
+     * [phase] (the effective phase) is in a later phase group than [fetchedPhase] (pre-game: SCHEDULED, PRE; play: LIVE,
+     * INTERMISSION; FINAL; POSTPONED), the next request is `max(nowMono, lastOk + floor)`, even when the new phase has no
+     * interval of its own. Within a group (SCHEDULED → PRE, LIVE ↔ a break) nothing is forced: the plain loop already
+     * covers it (§17.1 P1 note 1). Back-off is checked first and always wins. The NHL ([DetailCadence.NHL]) ignores
+     * [fetchedPhase], as before.
      */
-    @Suppress("UNUSED_PARAMETER")
     fun nextAt(
         cadence: DetailCadence,
         gate: DetailGate,
@@ -88,6 +101,10 @@ object DetailPollPolicy {
             return if (refused) maxOf(at, lastFailMono + SportsConstants.BACKOFF_MAX_MS) else at
         }
         lastOk ?: return nowMono
+        val floor = cadence.phaseChangeFloorMs
+        if (floor != null && fetchedPhase != null && group(phase) > group(fetchedPhase)) {
+            return maxOf(nowMono, lastOk.receivedMono + floor)
+        }
         val interval = intervalMs(cadence, phase, final) ?: return null
         return when (phase) {
             GamePhase.LIVE, GamePhase.INTERMISSION ->
@@ -108,6 +125,14 @@ object DetailPollPolicy {
 
     private const val STALE_FACTOR = 2
 
+    /** The phase-change rule's groups: a break is still the game in play; SCHEDULED and PRE are both before it. */
+    private fun group(p: GamePhase): Int = when (p) {
+        GamePhase.SCHEDULED, GamePhase.PRE -> 0
+        GamePhase.LIVE, GamePhase.INTERMISSION -> 1
+        GamePhase.FINAL -> 2
+        GamePhase.POSTPONED -> 3
+    }
+
     private fun rank(p: GamePhase): Int = when (p) {
         GamePhase.SCHEDULED -> 0
         GamePhase.PRE -> 1
@@ -119,7 +144,7 @@ object DetailPollPolicy {
 
 /**
  * (NFL hub commit 0, docs/design/m6-nfl-hub.md §5.2, §6.3) A league's detail cadence. Pure. [NHL] reproduces the Sports
- * Hub's numbers exactly (the table above); [NFL] is declared here and its rules are P1's.
+ * Hub's numbers exactly (the table above); [NFL] is §5.2's (P1).
  */
 data class DetailCadence(
     /** SCHEDULED, PRE: the re-read interval. */
