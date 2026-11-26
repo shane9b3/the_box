@@ -410,4 +410,60 @@ class WpaPagesTest {
         assertEquals("ERR_HEADER", v.validate(RowId("x"), app.thebox.core.settings.TextHint.HEADER, "no separator"))
         assertEquals("ERR_PASSPHRASE(8)", v.validate(RowId("x"), app.thebox.core.settings.TextHint.PASSPHRASE, "short"))
     }
+
+    // ---------------------------------------------------------------- Settings panel A4 (m6-player-settings-panel §4.4, S8)
+
+    private val effectKeys = mapOf(
+        EffectTiming.NEXT_TUNE to "EFFECT_NEXT_TUNE", EffectTiming.REPREPARE to "EFFECT_REPREPARE",
+        EffectTiming.NEXT_REFRESH to "EFFECT_NEXT_REFRESH", EffectTiming.NEXT_EPG_IMPORT to "EFFECT_NEXT_EPG_IMPORT",
+        EffectTiming.NEXT_LAUNCH to "EFFECT_NEXT_LAUNCH", EffectTiming.RESTART to "EFFECT_RESTART",
+    )
+
+    /**
+     * In the panel every row of every WpaPages section is the full-screen row without the appended timing sentence (the
+     * band draws it as its own line): same ids, labels, values, kinds and effects; a description that was the sentence
+     * alone is gone, one with a sentence appended keeps its own part. Full screen is unchanged.
+     */
+    @Test
+    fun panelDescriptionsOmitTheTimingSentence() {
+        var stripped = 0
+        for (id in WpaPages.HANDLED) for (advanced in listOf(true, false)) {
+            val full = pages.build(SettingsRoute.Section(id), advanced)
+            val panel = pages.build(SettingsRoute.Section(id), advanced, panel = true)
+            assertEquals(full.rows.map { it.id }, panel.rows.map { it.id }, "$id: same rows")
+            assertEquals(full.title, panel.title)
+            for ((f, p) in full.rows.zip(panel.rows)) {
+                assertEquals(f.copy(description = p.description), p, "${f.id.key}: only the description differs")
+                val effect = effectKeys[f.effect]
+                val d = f.description
+                when {
+                    effect == null || d == null -> assertEquals(d, p.description, "${f.id.key}: LIVE/NONE rows unchanged")
+                    d == effect -> { assertNull(p.description, "${f.id.key}: the sentence alone is dropped"); stripped++ }
+                    d.endsWith(" · $effect") || d.endsWith("SEP$effect") -> {
+                        assertFalse(p.description!!.contains(effect), "${f.id.key}: '${p.description}'")
+                        assertTrue(d.startsWith(p.description!!), "${f.id.key}: keeps its own part")
+                        stripped++
+                    }
+                    else -> assertEquals(d, p.description, "${f.id.key}: a replaced description is kept")
+                }
+                p.description?.let { assertFalse(it.contains("EFFECT_"), "${f.id.key}: no timing sentence in the panel: '$it'") }
+            }
+        }
+        assertTrue(stripped > 0, "some rows carried a timing sentence")
+    }
+
+    @Test
+    fun panelExamples() = runTest {
+        val ctxFull = app.thebox.core.settings.state.PageContext(advanced = true, nowMs = 0L)
+        val full = pages.page(SettingsRoute.Section(SectionId.PLAYBACK), ctxFull).rows
+        val panel = pages.page(SettingsRoute.Section(SectionId.PLAYBACK), ctxFull.copy(panel = true)).rows
+        fun of(rows: List<SettingsRow>, id: RowId) = rows.first { it.id == id }
+        // REPREPARE row: full screen carries the sentence; the panel does not (the band's timing line says it).
+        assertTrue(of(full, PlaybackRows.BUFFER).description!!.contains("EFFECT_REPREPARE"))
+        assertFalse(of(panel, PlaybackRows.BUFFER).description.orEmpty().contains("EFFECT_REPREPARE"))
+        assertTrue(of(full, PlaybackRows.DECODER).description!!.contains("EFFECT_REPREPARE"))
+        assertFalse(of(panel, PlaybackRows.DECODER).description.orEmpty().contains("EFFECT_REPREPARE"))
+        // A LIVE row is the same in both.
+        assertEquals(of(full, PlaybackRows.AFR), of(panel, PlaybackRows.AFR))
+    }
 }
