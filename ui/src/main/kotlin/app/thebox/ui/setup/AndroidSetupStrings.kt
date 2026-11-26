@@ -63,6 +63,11 @@ class AndroidSetupStrings(private val context: Context) : SetupStrings {
             SetupText.FORMAT_TS -> R.string.setup_format_ts
             SetupText.FORMAT_HLS -> R.string.setup_format_hls
             SetupText.FORMAT_LEARNED_HLS -> R.string.setup_format_learned_hls
+            SetupText.FORMAT_LEARNED_HLS_RETRY_NEXT -> R.string.setup_format_learned_hls_retry_next
+            SetupText.FORMAT_LEARNED_HLS_RETRY_TODAY -> R.string.setup_format_learned_hls_retry_today
+            SetupText.FORMAT_LEARNED_HLS_RETRY_TOMORROW -> R.string.setup_format_learned_hls_retry_tomorrow
+            SetupText.FORMAT_LEARNED_HLS_RETRY_DAYS -> R.string.setup_format_learned_hls_retry_days
+            SetupText.FORMAT_AUTO_RESET_DETAIL -> R.string.setup_format_auto_reset_detail
             SetupText.UA_THE_BOX -> R.string.setup_ua_the_box
             SetupText.UA_VLC -> R.string.setup_ua_vlc
             SetupText.UA_BROWSER -> R.string.setup_ua_browser

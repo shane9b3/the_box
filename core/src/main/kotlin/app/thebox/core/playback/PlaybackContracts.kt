@@ -46,6 +46,11 @@ data class PlaylistPlaybackInfo(
     val ignoreTlsErrors: Boolean = false,
     val maxConnectionsOverride: Int? = null,
     val needsReauth: Boolean = false,
+    /**
+     * (2026-11-25, docs/decisions/2026-11-25-auto-format-retries-ts.md) `AutoTsRetry.due` at the time of the read: Auto,
+     * learned HLS, TS allowed, the back-off over. Only the controller acts on it, and only at a user tune.
+     */
+    val autoTsRetryDue: Boolean = false,
 )
 
 /** What the resolver needs from one channel row (the URL is still a template). */

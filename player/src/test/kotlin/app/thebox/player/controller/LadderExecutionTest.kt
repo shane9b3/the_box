@@ -411,17 +411,21 @@ class LadderExecutionTest {
         assertEquals("RepairAudioTimestampsAndReprepare", (f.state as PlaybackState.Stalled).step)
     }
 
+    /**
+     * (Owner ruling 2026-11-25, docs/decisions/2026-11-25-tunneling-off-per-visit.md; replaces the 2026-10-17 "remembered
+     * for the channel" rule) The ladder's switch-off is never saved: the next tune of the channel tunnels again.
+     */
     @Test
-    fun tunnelingOffIsRememberedForTheChannelAndAppliedOnTheNextTune() {
+    fun tunnelingOffIsForTheVisitOnlyAndTheNextTuneTriesAgain() {
         f.settings.update { it.copy(tunneling = true) }
         tuneAndFail(LadderDecision.DisableTunnelingAndReprepare)
-        assertEquals(true, f.memory.rows[CH1]?.tunnelingOff)
+        assertTrue("not saved", f.memory.rows[CH1]?.tunnelingOff != true)
         f.controller.stop(app.thebox.player.api.StopReason.USER)
         f.idle()
         f.ladder.script = { _, _ -> LadderDecision.Fail(PlaybackError(PlaybackErrorCode.INTERNAL)) }
         f.controller.tune(TuneTarget.Channel(CH1))
         f.idle()
-        assertFalse("the remembered channel tunes untunneled", f.playerFactory.bundle!!.trackSelector.parameters.tunnelingEnabled)
+        assertTrue("coming back tunnels again", f.playerFactory.bundle!!.trackSelector.parameters.tunnelingEnabled)
     }
 
     @Test

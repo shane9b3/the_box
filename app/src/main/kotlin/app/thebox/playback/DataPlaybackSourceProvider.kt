@@ -7,6 +7,8 @@ import app.thebox.core.playback.ChannelStreamInfo
 import app.thebox.core.playback.PlaylistPlaybackInfo
 import app.thebox.core.playback.StreamCredentials
 import app.thebox.core.playback.XtreamOutput
+import app.thebox.core.playback.resolve.AutoTsRetry
+import app.thebox.core.playback.resolve.LearnedOutput
 import app.thebox.core.refresh.ChannelIdentity
 import app.thebox.core.source.PlaylistType
 import app.thebox.core.xtream.XtreamAccountInfo
@@ -17,6 +19,7 @@ import app.thebox.data.db.dao.PlaylistDao
 import app.thebox.data.db.dao.XtreamAccountDao
 import app.thebox.data.db.entity.PlaylistEntity
 import app.thebox.data.di.IoDispatcher
+import app.thebox.data.player.LearnedOutputStore
 import app.thebox.data.repo.ChannelRepository
 import app.thebox.data.repo.PlaylistRepository
 import app.thebox.player.api.PlaybackSourceProvider
@@ -46,6 +49,7 @@ class DataPlaybackSourceProvider @Inject constructor(
     private val accountDao: XtreamAccountDao,
     private val xtream: XtreamApi,
     @param:IoDispatcher private val io: CoroutineDispatcher,
+    private val learned: LearnedOutputStore,
 ) : PlaybackSourceProvider {
 
     private class Refresh(val atMs: Long, val result: Outcome<XtreamAccountInfo>)
@@ -71,7 +75,11 @@ class DataPlaybackSourceProvider @Inject constructor(
     }
 
     override suspend fun playlist(playlistId: Long): PlaylistPlaybackInfo? = withContext(io) {
-        playlists.get(playlistId)?.let(::toInfo)
+        val p = playlists.get(playlistId) ?: return@withContext null
+        val info = toInfo(p)
+        // (2026-11-25) Auto with HLS learned: is a TS retry due? Only these playlists pay the account read.
+        if (info.xtreamOutput != XtreamOutput.AUTO || info.xtreamOutputLearned != XtreamOutput.HLS) return@withContext info
+        info.copy(autoTsRetryDue = learned.retryDue(p, account(playlistId)))
     }
 
     override suspend fun credentials(playlistId: Long): Outcome<StreamCredentials?> = withContext(io) {
@@ -157,7 +165,11 @@ class DataPlaybackSourceProvider @Inject constructor(
     }
 
     override suspend fun saveLearnedOutput(playlistId: Long, output: XtreamOutput?) = withContext(io) {
-        playlistDao.setXtreamOutputLearned(playlistId, output?.takeIf { it != XtreamOutput.AUTO }?.name)
+        learned.learn(playlistId, output)
+    }
+
+    override suspend fun recordAutoTsRetry(playlistId: Long, result: AutoTsRetry.Result): LearnedOutput? = withContext(io) {
+        learned.record(playlistId, result)
     }
 
     /** v1.1 failover (stream_source): v1 has none. */
@@ -173,7 +185,7 @@ class DataPlaybackSourceProvider @Inject constructor(
             userAgent = p.userAgent?.takeIf { it.isNotBlank() },
             extraHeaders = p.extraHeaders ?: emptyMap(),
             xtreamOutput = output(p.xtreamOutput) ?: XtreamOutput.AUTO,
-            xtreamOutputLearned = p.xtreamOutputLearned?.let(::output)?.takeIf { it != XtreamOutput.AUTO },
+            xtreamOutputLearned = LearnedOutput.parse(p.xtreamOutputLearned)?.output,
             activeBaseIndex = p.activeBaseIndex,
             ignoreTlsErrors = p.ignoreTlsErrors,
             maxConnectionsOverride = p.maxConnectionsOverride?.takeIf { it > 0 },

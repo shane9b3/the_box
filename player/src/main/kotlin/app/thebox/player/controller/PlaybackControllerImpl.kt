@@ -471,6 +471,16 @@ internal class PlaybackControllerImpl @Inject constructor(
         var hdr: HdrKind? = null
         var fpsMilli: Int? = null
 
+        // (2026-11-25, docs/decisions/2026-11-25-auto-format-retries-ts.md) The Auto TS retry.
+        /** Started by tune() or a zap: its first session may try TS once (never a retry, resume or ladder restart). */
+        var userTune = false
+        /** This cycle is a TS retry not yet settled (refused, confirmed or inconclusive). */
+        var tsRetry = false
+        /** The retry fell back to HLS: the flip's SwitchedFormat notice is not shown. */
+        var tsRetryFellBack = false
+        /** (2026-11-25, docs/decisions/2026-11-25-tunneling-off-per-visit.md) The ladder turned tunneling off for this visit. */
+        var tunnelingAutoOff = false
+
         val isArchive: Boolean get() = spec is Spec.Archive
         /** (Sports Hub §6.5) A clip cycle. `NowPlaying.isArchive` stays false for it (ArchivePlayback never takes it). */
         val isClip: Boolean get() = spec is Spec.Clip
@@ -507,13 +517,13 @@ internal class PlaybackControllerImpl @Inject constructor(
         val identity = (target as? TuneTarget.Channel)?.identity
         if (identity != null && refused(identity, isArchive = false)) return
         if (viewport == Viewport.MINI) previewStarted()
-        startCycle(Spec.Live(target))
+        startCycle(Spec.Live(target), userTune = true)
     }
 
     override fun tuneArchive(tune: ArchiveTune) {
         cancelPendingZap()
         if (refused(tune.identity, isArchive = true)) return
-        startCycle(Spec.Archive(tune))
+        startCycle(Spec.Archive(tune), userTune = true)
     }
 
     /**
@@ -588,7 +598,7 @@ internal class PlaybackControllerImpl @Inject constructor(
                 if (plan.immediate) {
                     zapFireJob?.cancel()
                     _pendingZap.value = null
-                    startCycle(Spec.Live(TuneTarget.Channel(next)))
+                    startCycle(Spec.Live(TuneTarget.Channel(next)), userTune = true)
                 } else {
                     _pendingZap.value = next
                     zapFireJob?.cancel()
@@ -597,7 +607,7 @@ internal class PlaybackControllerImpl @Inject constructor(
                         debouncer.onFired()
                         val target = _pendingZap.value ?: return@launch
                         _pendingZap.value = null
-                        startCycle(Spec.Live(TuneTarget.Channel(target)))
+                        startCycle(Spec.Live(TuneTarget.Channel(target)), userTune = true)
                     }
                 }
             }
@@ -746,7 +756,7 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     // ------------------------------------------------------------------ pipeline (§3.1.1)
 
-    private fun startCycle(spec: Spec, refreshAccount: Boolean = false) {
+    private fun startCycle(spec: Spec, refreshAccount: Boolean = false, userTune: Boolean = false) {
         val now = clock.nowMs()
         val identity = when (spec) {
             is Spec.Live -> (spec.target as? TuneTarget.Channel)?.identity
@@ -777,6 +787,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         }
         cancelCycleJobs()
         val c = Cycle(spec, identity, now)
+        c.userTune = userTune
+        carryTunnelingVisit(c, userTune)
         c.cycleId = ++cycleSeq
         if (spec is Spec.Clip) c.title = spec.tune.title
         cycle = c
@@ -923,6 +935,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             }
         }
         if (!current(c, id)) return
+        if (reuse == null && beginTsRetry(c)) early = null
 
         // Step 3: resolve (never reuse a resolved URL across a user request; only RetrySame/Reprepare reuse it).
         val resolved = reuse ?: (if (early != null) handleResolveOutcome(c, early) else resolve(c)) ?: return
@@ -1610,8 +1623,9 @@ internal class PlaybackControllerImpl @Inject constructor(
             if (id != null && c.playlistInfo?.xtreamOutput == XtreamOutput.AUTO) {
                 scope.launch { safeProvider { provider.saveLearnedOutput(id.playlistId, to) } }
             }
-            _notices.tryEmit(PlaybackNotice.SwitchedFormat(if (to == XtreamOutput.HLS) StreamFormat.HLS else StreamFormat.TS))
+            if (!c.tsRetryFellBack) _notices.tryEmit(PlaybackNotice.SwitchedFormat(if (to == XtreamOutput.HLS) StreamFormat.HLS else StreamFormat.TS))
         }
+        if (c.tsRetry) scheduleTsRetryConfirm(c, s)
         val playlist = c.playlistInfo
         if (id != null && playlist != null && s.resolved.baseIndex != playlist.activeBaseIndex) {
             val index = s.resolved.baseIndex
@@ -1838,6 +1852,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         ) {
             decision = LadderDecision.Fail(PlaybackError(eventualCode(signal), ErrorDetail(signal = signal.name)))
         }
+        if (c.tsRetry) decision = settleTsRetryOnFailure(c, decision)
         execute(c, decision, signal, error)
     }
 
@@ -1971,9 +1986,8 @@ internal class PlaybackControllerImpl @Inject constructor(
             }
             LadderDecision.DisableTunnelingAndReprepare -> {
                 c.tunnelingOff = true
-                // Learned for the channel (ChannelPlaybackMemory.tunnelingOff): the next tune starts untunneled.
-                c.memory = c.memory.copy(tunnelingOff = true)
-                c.identity?.let { id -> remember(id) { it.copy(tunnelingOff = true) } }
+                // (2026-11-25) For this visit only: never saved, the next tune of the channel tries tunneling again.
+                tunnelingOffForVisit(c, signal)
                 _notices.tryEmit(PlaybackNotice.TunnelingDisabled)
                 extendSwitchWindow(c)
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
@@ -2572,6 +2586,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             updatedAtElapsedMs = clock.nowMs(),
             serverIndex = s?.resolved?.baseIndex ?: base.serverIndex,
             serverCount = s?.resolved?.baseCount ?: base.serverCount,
+            tunnelingOffForVisit = c?.tunnelingAutoOff == true && !base.tunneling,
         ).let { st -> withRewindStats(c, st) }
     }
 
@@ -3522,6 +3537,125 @@ internal class PlaybackControllerImpl @Inject constructor(
                 BoxLog.w(TAG, "channel memory write failed: ${e.javaClass.simpleName}")
             }
         }
+    }
+
+    // ------------------------------------------------------------------ Auto TS retry (owner ruling 2026-11-25)
+
+    /**
+     * (docs/decisions/2026-11-25-auto-format-retries-ts.md) The first session of a user tune (tune, zap) on an Xtream
+     * playlist set to Auto that learned HLS, once the back-off is over (`PlaylistPlaybackInfo.autoTsRetryDue`): this tune
+     * asks for MPEG-TS. True when the cycle's output changed, so the early resolve (made with HLS) is dropped and the
+     * resolve runs again (local reads only, no request). Never for Retry, a lifecycle resume or a ladder restart.
+     */
+    private fun beginTsRetry(c: Cycle): Boolean {
+        if (!c.userTune) return false
+        c.userTune = false
+        val id = c.identity ?: return false
+        if (c.spec !is Spec.Live || c.output != null || c.playlistInfo?.autoTsRetryDue != true) return false
+        c.output = XtreamOutput.TS
+        c.tsRetry = true
+        eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "ts_retry", "attempt")
+        BoxLog.i(TAG) { "auto format: trying MPEG-TS again on playlist ${id.playlistId} (HLS was learned)" }
+        scope.launch {
+            delay(app.thebox.core.playback.resolve.AutoTsRetry.FIRST_MEDIA_BUDGET_MS)
+            if (cycle !== c || !c.tsRetry || c.firstMediaReached || c.cardShown) return@launch
+            val st = _state.value
+            if (st is PlaybackState.Error || st is PlaybackState.Stopped || st is PlaybackState.Idle) return@launch
+            // Neither refused nor playing yet: this tune goes back to HLS; the retry did not prove anything.
+            c.tsRetry = false
+            recordTsRetry(c, app.thebox.core.playback.resolve.AutoTsRetry.Result.INCONCLUSIVE, "no picture yet")
+            execute(c, tsRetryFallBack(c), c.lastSignal ?: FailureSignal.Network(NetworkFailureKind.TIMEOUT, beforeFirstByte = !c.firstByteSeen), null)
+        }
+        return true
+    }
+
+    /**
+     * A failure of an unsettled TS retry. The ladder's flip to HLS (405/406, L9) is the refusal: it runs as decided (the
+     * existing flip, same tune) and the back-off steps up. Anything else is inconclusive: before first media this tune
+     * falls back to HLS at once (one extra request, then the normal ladder on HLS); after first media TS has played, so
+     * the ladder's decision stands.
+     */
+    private fun settleTsRetryOnFailure(c: Cycle, decision: LadderDecision): LadderDecision {
+        c.tsRetry = false
+        if (decision is LadderDecision.FlipXtreamOutput && decision.to == XtreamOutput.HLS) {
+            c.tsRetryFellBack = true
+            recordTsRetry(c, app.thebox.core.playback.resolve.AutoTsRetry.Result.REFUSED, "")
+            return decision
+        }
+        recordTsRetry(c, app.thebox.core.playback.resolve.AutoTsRetry.Result.INCONCLUSIVE, c.lastSignal?.name.orEmpty())
+        return if (c.firstMediaReached) decision else tsRetryFallBack(c)
+    }
+
+    /** The flip back to HLS for this tune, counted like L9's so a 405 on HLS then ends at L10, with a fresh window. */
+    private fun tsRetryFallBack(c: Cycle): LadderDecision {
+        c.tsRetryFellBack = true
+        c.counters = c.counters.copy(formatFlips = c.counters.formatFlips + 1)
+        extendSwitchWindow(c)
+        return LadderDecision.FlipXtreamOutput(XtreamOutput.HLS)
+    }
+
+    /** First media on the TS retry: [AutoTsRetry.CONFIRM_MS] in the same cycle without a failure confirms it. */
+    private fun scheduleTsRetryConfirm(c: Cycle, s: TuneSession) {
+        if (s.resolved.output != XtreamOutput.TS) return
+        val failures = c.failureCount
+        scope.launch {
+            delay(app.thebox.core.playback.resolve.AutoTsRetry.CONFIRM_MS)
+            if (cycle !== c || !c.tsRetry || c.failureCount != failures) return@launch
+            c.tsRetry = false
+            recordTsRetry(c, app.thebox.core.playback.resolve.AutoTsRetry.Result.CONFIRMED, "")
+        }
+    }
+
+    /** Stores a retry result and writes its one info line (playlist id and numbers only: nothing to redact). */
+    private fun recordTsRetry(c: Cycle, result: app.thebox.core.playback.resolve.AutoTsRetry.Result, why: String) {
+        val playlistId = c.identity?.playlistId ?: return
+        eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "ts_retry", result.name.lowercase())
+        scope.launch {
+            var stored: app.thebox.core.playback.resolve.LearnedOutput? = null
+            safeProvider { stored = provider.recordAutoTsRetry(playlistId, result) }
+            val backoff = app.thebox.core.playback.resolve.AutoTsRetry.BACKOFF_MS
+            BoxLog.i(TAG) {
+                when (result) {
+                    app.thebox.core.playback.resolve.AutoTsRetry.Result.REFUSED ->
+                        "auto format: MPEG-TS refused again on playlist $playlistId, back on HLS; next retry in " +
+                            "${backoff[stored?.step ?: 0] / 86_400_000L} days"
+                    app.thebox.core.playback.resolve.AutoTsRetry.Result.CONFIRMED ->
+                        "auto format: MPEG-TS plays again on playlist $playlistId; learned HLS cleared"
+                    app.thebox.core.playback.resolve.AutoTsRetry.Result.INCONCLUSIVE ->
+                        "auto format: MPEG-TS retry inconclusive on playlist $playlistId ($why); HLS kept, next retry " +
+                            "in ${app.thebox.core.playback.resolve.AutoTsRetry.HOLD_OFF_MS / 60_000L} min at the earliest"
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ tunneling off per visit (owner ruling 2026-11-25)
+
+    /** The channel whose current visit has tunneling off (the ladder's L27/L28), and whether that visit is catch-up. */
+    private var tunnelingVisit: Pair<ChannelIdentity, Boolean>? = null
+
+    /**
+     * (docs/decisions/2026-11-25-tunneling-off-per-visit.md) A visit is the run of cycles on one channel with no user tune
+     * in between: the ladder's own restarts, Retry from the card, a backup-source restart, the resume after leaving the
+     * app. Inside it tunneling stays off once the ladder turned it off (no on → stall → off loop). A user tune (tune,
+     * zap, previous channel, catch-up), another channel, a clip or a live ↔ catch-up change ends it, and that tune
+     * follows the settings again.
+     */
+    private fun carryTunnelingVisit(c: Cycle, userTune: Boolean) {
+        val visit = tunnelingVisit ?: return
+        if (!userTune && c.identity == visit.first && c.isArchive == visit.second) {
+            c.tunnelingOff = true
+            c.tunnelingAutoOff = true
+            return
+        }
+        tunnelingVisit = null
+        if (c.identity == visit.first) BoxLog.i(TAG) { "tunneling: trying it again on this channel (a new tune after a visit with it off)" }
+    }
+
+    private fun tunnelingOffForVisit(c: Cycle, signal: FailureSignal) {
+        c.tunnelingAutoOff = true
+        tunnelingVisit = c.identity?.let { it to c.isArchive }
+        BoxLog.i(TAG) { "tunneling: off until the viewer leaves this channel (${signal.name}); not saved" }
     }
 
     private suspend fun safeProvider(block: suspend () -> Unit) {

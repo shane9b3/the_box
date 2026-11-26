@@ -365,6 +365,8 @@ data class StreamStats(
     val afr: AfrMode = AfrMode.SEAMLESS,
     val displayRefreshHz: Float? = null,
     val tunneling: Boolean = false,
+    /** (2026-11-25) Tunneling is off because the ladder turned it off for this visit (not the settings). */
+    val tunnelingOffForVisit: Boolean = false,
     val updatedAtElapsedMs: Long = 0,
     // (M4, reviewed 2026-10-15, E23)
     /** 0-based base URL in use (ResolvedStream.baseIndex) and the number of bases. */

@@ -72,6 +72,7 @@ object PlayerMappers {
         afr = stats.afr,
         displayRefreshHz = stats.displayRefreshHz,
         tunneling = stats.tunneling,
+        tunnelingOffForVisit = stats.tunnelingOffForVisit,
         serverIndex = stats.serverIndex,
         serverCount = stats.serverCount,
     )

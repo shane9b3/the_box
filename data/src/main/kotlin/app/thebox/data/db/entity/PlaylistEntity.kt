@@ -68,6 +68,8 @@ data class PlaylistEntity(
     /**
      * v2 (docs/design/m2-playback-core.md §2.10): `TS`/`HLS` after a successful 405/406 flip while [xtreamOutput] is
      * `AUTO`. Written only by [PlaylistDao.setXtreamOutputLearned]; cleared by [PlaylistDao.setXtreamOutput].
+     * (2026-11-25) An HLS value may carry the TS-retry back-off after the name, `HLS;t=…;n=…;h=…`: read it only through
+     * `app.thebox.core.playback.resolve.LearnedOutput.parse` (docs/decisions/2026-11-25-auto-format-retries-ts.md).
      */
     @ColumnInfo(name = "xtream_output_learned") val xtreamOutputLearned: String? = null,
     /** v3 (docs/design/m3-guide.md §2.9): channel-name prefix rule, `AUTO` | `OFF` | `CUSTOM`. */
