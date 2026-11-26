@@ -179,8 +179,13 @@ internal object NhlHubUi : HubLeagueUi {
         return listOf(first, HubSlots.forAction(SlotAction.CHANNEL, c), third)
     }
 
-    /** P3: "Recap not posted yet" for a grey Recap soon (§2.3); commit 0 speaks no reason (the panel's line still does). */
-    override fun slotReasons(res: Resources, m: HubPanelModel, slots: List<HubSlot>): List<String?> = slots.map { null } // P3
+    /**
+     * (NFL hub §2.3, UX M4) The grey Recap soon speaks the reason its media caption shows: "Recap not posted yet". The
+     * other NHL slots are grey only while loading (Finding…, a Goals count still 0) or beyond the guide (the panel's line).
+     */
+    override fun slotReasons(res: Resources, m: HubPanelModel, slots: List<HubSlot>): List<String?> = slots.map { s ->
+        if (s.action == SlotAction.WATCH_RECAP && !s.enabled && s.label == SlotLabel.RECAP_SOON) res.getString(R.string.sports_hub_caption_recap_soon) else null
+    }
 
     // ------------------------------------------------------------------ clip lookups (m6-sports-hub §6.3)
 
@@ -204,7 +209,11 @@ internal object NhlHubUi : HubLeagueUi {
 
     // ------------------------------------------------------------------ the Goals sheet (m6-sports-hub §6.4)
 
-    /** P3: today's goal rows as [ScoringRow]s with the same words (§6.6); the sheet still draws [GoalsRow]s in commit 0. */
+    /**
+     * (NFL hub §6.6) Today's Goals sheet rows ([goalsSheetRows]) as [ScoringRow]s with the same words: each goal with its
+     * clip and headshot, the recap and condensed game with today's labels, the catch-up rows. The sheet draws them as it
+     * drew the goal rows, so its pixels do not change.
+     */
     override fun scoringRows(
         res: Resources,
         game: GameSnapshot,
@@ -213,7 +222,24 @@ internal object NhlHubUi : HubLeagueUi {
         catchUp: List<ChannelCandidate>,
         offerNowMs: Long,
         videoOn: Boolean,
-    ): List<ScoringRow> = emptyList() // P3
+    ): List<ScoringRow> = goalsSheetRows(detail, catchUp, game.phase == GamePhase.FINAL, game.media).map { row ->
+        when (row) {
+            is GoalsRow.Goal -> ScoringRow.Event(
+                row.goal, row.key, goalLine1(res, row.goal), goalLine2(res, game, row.goal), "", RowIcon.Headshot(row.goal.headshot),
+                clip = row.goal.clipId?.let { ClipRef(it, ClipKind.GOAL, game.id) },
+            )
+            is GoalsRow.Video -> {
+                val info = infos[row.videoId]
+                val duration = clipDuration(info?.durationMs)
+                val label = when (row.kind) {
+                    ClipKind.RECAP -> res.getString(R.string.sports_hub_row_recap)
+                    else -> duration?.let { res.getString(R.string.sports_hub_row_condensed, it) } ?: res.getString(R.string.sports_hub_row_condensed_plain)
+                }
+                ScoringRow.Video(ClipRef(row.videoId, row.kind, game.id), label, info?.durationMs, info?.thumbnailUrl ?: info?.posterUrl)
+            }
+            is GoalsRow.CatchUp -> ScoringRow.CatchUp(row.candidate, row.n)
+        }
+    }
 }
 
 /**

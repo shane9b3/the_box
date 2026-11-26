@@ -33,6 +33,8 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Path
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -56,6 +58,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.thebox.core.sports.GameMedia
 import app.thebox.core.sports.GamePhase
+import app.thebox.core.sports.LeagueGroup
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.PeriodLabel
@@ -68,6 +71,7 @@ import app.thebox.core.sports.hub.GameDetail
 import app.thebox.core.sports.hub.GoalItem
 import app.thebox.core.sports.hub.ScoringEvent
 import app.thebox.core.sports.hub.Strength
+import app.thebox.core.sports.group
 import app.thebox.ui.R
 import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
@@ -89,6 +93,13 @@ fun hubSheetRowTag(key: String) = "hub_sheet_row:$key"
  * (final) Game recap, Condensed game and the catch-up "Full game from the start" rows. A goal row's queue is that goal and
  * every later goal with a clip; the recap or condensed game is a queue of one. It takes focus on open (live: the latest
  * goal; final: the first) or on [focusVideoId] (the clip just played, U-S14). Back calls [onClose].
+ *
+ * (NFL hub §3.1, §6.6) It is the league-neutral **Scoring sheet**: its rows are the league's [HubLeagueUi.scoringRows]
+ * ([ScoringRow]). The NHL's rows carry today's words and are drawn as before (its pixels do not change). The NFL's are the
+ * scoring plays (team logo, no video mark; OK shows [onPlayNoVideo]'s toast), Game highlights, More videos (every other
+ * offered clip, oldest first), the catch-up rows, and the §3.2 info rows. Header and info rows never take focus; D-pad
+ * focus skips them and the list scrolls the focused row into view. [offerTick] (§4.3): the view model's tick, so an
+ * expiring clip's row leaves at its instant; [nowMs] the wall clock of the check (tests pin it; null = the system clock).
  *
  * [clipInfo] holds the lookups the page already made (durations, thumbnails), by video id. [onMissingClip]: OK on a goal
  * without a clip id (the page shows the §6.4 toast).
@@ -114,19 +125,34 @@ fun GoalsSheet(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     note: String? = null,
+    videoOn: Boolean = true,
+    offerTick: Int = 0,
+    nowMs: Long? = null,
+    onPlayNoVideo: () -> Unit = {},
 ) {
     val res = LocalResources.current
     val final = game.phase == GamePhase.FINAL
-    val rows = remember(detail, catchUp, final, game.media) { goalsSheetRows(detail, catchUp, final, game.media) }
-    val initial = goalsSheetInitialRow(rows, focusVideoId, final)
+    val nfl = game.id.league.group == LeagueGroup.NFL
+    val ui = HubLeagues.of(game.id.league.group)
+    val now = remember(detail, offerTick, nowMs) { nowMs ?: System.currentTimeMillis() }
+    val rows = remember(detail, catchUp, game, clipInfo, videoOn, now) {
+        ui.scoringRows(res, game, detail, clipInfo, catchUp, NflHubUi.offerNow(now, detail), videoOn)
+    }
+    val focusable = remember(rows) { rows.indices.filter { rows[it].focusable } }
+    val initial = scoringInitialRow(rows, focusVideoId, final)
+    val low = lowEnd()
+    val prefix = clipKeyPrefix(game)
     HubSheetFrame(
-        title = res.getString(R.string.sports_hub_sheet_goals, game.away.abbrev, game.home.abbrev),
+        title = res.getString(if (nfl) R.string.sports_hub_sheet_scoring else R.string.sports_hub_sheet_goals, game.away.abbrev, game.home.abbrev),
         rowCount = rows.size,
         initialRow = initial,
         focusKey = focusVideoId,
         onClose = onClose,
         modifier = modifier.testTag(GOALS_SHEET_TAG),
         rowsKey = rows,
+        // (NFL hub §3.1) Header and info rows hold no focus: with none focusable the frame's title holds it (Back works).
+        focusableRows = focusable.size,
+        scrollTo = labelStart(initial) { !rows[it].focusable },
     ) { requesters ->
         if (detail == null && note != null) {
             item(key = "note") {
@@ -135,15 +161,26 @@ fun GoalsSheet(
         }
         rows.forEachIndexed { i, row ->
             item(key = row.key) {
+                val first = focusable.firstOrNull() == i
+                val last = focusable.lastOrNull() == i
                 when (row) {
-                    is GoalsRow.Goal -> GoalRowView(res, game, row.goal, row.key, clipInfo[row.goal.clipId], requesters[i], first = i == 0, last = i == rows.lastIndex) {
-                        val q = goalQueue(game, detail?.goals.orEmpty(), row.index)
-                        if (q.isEmpty()) onMissingClip() else onPlay(q, 0)
+                    is ScoringRow.Event -> EventRowView(game, row, row.clip?.let { clipInfo[it.videoId] }, requesters[i], first, last) {
+                        val q = scoringQueue(rows, i)
+                        when {
+                            q.isNotEmpty() -> onPlay(q, 0)
+                            row.event is GoalItem -> onMissingClip()
+                            else -> onPlayNoVideo()
+                        }
                     }
-                    is GoalsRow.Video -> VideoRowView(res, row, clipInfo[row.videoId], requesters[i], first = i == 0, last = i == rows.lastIndex) {
-                        onPlay(listOf(ClipRef(row.videoId, row.kind, game.id)), 0)
+                    is ScoringRow.Video -> VideoRowView(res, row, prefix, nfl, low, requesters[i], first, last) { onPlay(scoringQueue(rows, i), 0) }
+                    is ScoringRow.Header -> Box(Modifier.fillMaxWidth().height(SECTION_H.dp).padding(start = 16.dp).testTag(hubSheetRowTag(row.key)), contentAlignment = Alignment.BottomStart) {
+                        Line(row.text, GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg55))
                     }
-                    is GoalsRow.CatchUp -> HubSheetRow(requesters[i], first = i == 0, last = i == rows.lastIndex, key = row.key, height = ROW_H, onClick = { onPlayArchive(row.candidate) }) { color ->
+                    is ScoringRow.Info -> Line(
+                        row.text, GuideUi.sans(22, FontWeight.Medium, GuideUi.Fg55),
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag(hubSheetRowTag(row.key)), maxLines = 3,
+                    )
+                    is ScoringRow.CatchUp -> HubSheetRow(requesters[i], first = first, last = last, key = row.key, height = ROW_H, onClick = { onPlayArchive(row.candidate) }) { color ->
                         app.thebox.ui.full.ChannelLogo(row.candidate.channel, 96.dp, 54.dp, 6.dp)
                         Line(res.getString(R.string.sports_hub_catchup_row, row.candidate.channel.displayName), GuideUi.sans(26, FontWeight.SemiBold, color), Modifier.weight(1f), maxLines = 2)
                     }
@@ -223,6 +260,46 @@ internal fun goalsSheetInitialRow(rows: List<GoalsRow>, focusVideoId: Long?, fin
     return if (lastGoal >= 0) lastGoal else 0
 }
 
+/** (NFL hub P3) The first index of the run of label rows ([isLabel]) right above [i], or [i]. */
+internal fun labelStart(i: Int, isLabel: (Int) -> Boolean): Int {
+    var j = i
+    while (j > 0 && isLabel(j - 1)) j--
+    return j
+}
+
+/** (NFL hub §3.1) Header and info rows are not focusable; every other row is. */
+internal val ScoringRow.focusable: Boolean get() = this !is ScoringRow.Header && this !is ScoringRow.Info
+
+/**
+ * (NFL hub §3.1) The scoring sheet's focus on open: the clip just played (U-S14); else, live, the latest scoring row; else
+ * the first focusable row (0 when none is focusable; the frame's title then holds focus).
+ */
+internal fun scoringInitialRow(rows: List<ScoringRow>, focusVideoId: Long?, final: Boolean): Int {
+    val focusable = rows.indices.filter { rows[it].focusable }
+    if (focusable.isEmpty()) return 0
+    if (focusVideoId != null) {
+        val i = rows.indexOfFirst { (it is ScoringRow.Event && it.clip?.videoId == focusVideoId) || (it is ScoringRow.Video && it.ref.videoId == focusVideoId) }
+        if (i >= 0) return i
+    }
+    if (!final) {
+        val last = rows.indexOfLast { it is ScoringRow.Event }
+        if (last >= 0) return last
+    }
+    return focusable.first()
+}
+
+/**
+ * (NFL hub §3.1, §6.6) The queue OK on row [from] plays: a scoring row with a clip, it and every later scoring row's clip
+ * (empty without a clip: the NHL's toast, the NFL's PLAY_NO_VIDEO); a More videos row, it and every later More videos row;
+ * Game highlights, the recap or the condensed game alone.
+ */
+internal fun scoringQueue(rows: List<ScoringRow>, from: Int): List<ClipRef> = when (val row = rows.getOrNull(from)) {
+    is ScoringRow.Event -> if (row.clip == null) emptyList() else rows.drop(from).takeWhile { it is ScoringRow.Event }.mapNotNull { (it as ScoringRow.Event).clip }
+    is ScoringRow.Video -> if (row.ref.kind == ClipKind.PLAY || row.ref.kind == ClipKind.GOAL) {
+        rows.drop(from).takeWhile { it is ScoringRow.Video && it.ref.kind == row.ref.kind }.map { (it as ScoringRow.Video).ref }
+    } else listOf(row.ref)
+    else -> emptyList()
+}
 
 /** "1st" / "2nd" / "3rd" / "OT" / "2OT" / "SO" (row words). */
 internal fun hubPeriodRow(res: Resources, p: PeriodLabel): String = when (p.kind) {
@@ -277,47 +354,92 @@ internal fun clipDuration(ms: Long?): String? = ms?.takeIf { it > 0 }?.let { Spo
 // ------------------------------------------------------------------ rows
 
 private const val ROW_H = 96
+/** (NFL hub §3.1) The More videos header row's height. */
+private const val SECTION_H = 44
 
+/** A scoring row (§3.1): the NHL goal as before (headshot, dimmed without a clip, the duration or ▶); the NFL play with its team logo and no mark. */
 @Composable
-private fun GoalRowView(
-    res: Resources,
+private fun EventRowView(
     game: GameSnapshot,
-    g: GoalItem,
-    key: String,
+    row: ScoringRow.Event,
     info: ClipInfo?,
     requester: FocusRequester,
     first: Boolean,
     last: Boolean,
     onClick: () -> Unit,
 ) {
-    val dim = g.clipId == null
-    HubSheetRow(requester, first, last, key = key, height = ROW_H, dimmed = dim, onClick = onClick) { color ->
-        HubHeadshot(g.headshot, g.scorer, 64.dp)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Line(goalLine1(res, g), GuideUi.sans(26, FontWeight.SemiBold, color))
-            Line(goalLine2(res, game, g), GuideUi.sans(22, FontWeight.Medium, GuideUi.secondary(color, focusedOf(color), 0.70f)))
+    val goal = row.event as? GoalItem
+    val dim = goal != null && row.clip == null
+    HubSheetRow(requester, first, last, key = row.key, height = ROW_H, dimmed = dim, description = row.desc.takeIf { it.isNotEmpty() }, onClick = onClick) { color ->
+        when (val icon = row.icon) {
+            is RowIcon.Headshot -> HubHeadshot(icon.url, goal?.scorer.orEmpty(), 64.dp)
+            is RowIcon.TeamLogo -> HubLogo(
+                if (icon.side == Side.AWAY) game.away else game.home, game.id.league, 64, 64, align = Alignment.Center,
+                codeColor = GuideUi.secondary(color, focusedOf(color), 0.60f),
+            )
+            RowIcon.None -> Unit
         }
-        if (!dim) Line(clipDuration(info?.durationMs) ?: "▶", GuideUi.mono(22, FontWeight.Medium, color))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Line(row.line1, GuideUi.sans(26, FontWeight.SemiBold, color))
+            Line(row.line2, GuideUi.sans(22, FontWeight.Medium, GuideUi.secondary(color, focusedOf(color), 0.70f)))
+        }
+        if (goal != null && !dim) Line(clipDuration(info?.durationMs) ?: "▶", GuideUi.mono(22, FontWeight.Medium, color))
     }
 }
 
+/**
+ * A video row: the recap / Game highlights (thumbnail, label, duration on the right), the NHL's condensed game (thumbnail
+ * and "Condensed game (dur)"), or an NFL More videos clip (a play glyph, the headline on two lines, "▶ 0:31"). [low]:
+ * a low-RAM device, which never decodes ESPN's 1920 thumbnails (a play glyph instead, §4.5).
+ */
 @Composable
-private fun VideoRowView(res: Resources, row: GoalsRow.Video, info: ClipInfo?, requester: FocusRequester, first: Boolean, last: Boolean, onClick: () -> Unit) {
-    val duration = clipDuration(info?.durationMs)
-    HubSheetRow(requester, first, last, key = row.key, height = ROW_H, onClick = onClick) { color ->
-        ClipThumbnail(row.videoId, info?.thumbnailUrl ?: info?.posterUrl, 128.dp, 72.dp)
-        val label = when (row.kind) {
-            ClipKind.RECAP -> res.getString(R.string.sports_hub_row_recap)
-            else -> duration?.let { res.getString(R.string.sports_hub_row_condensed, it) } ?: res.getString(R.string.sports_hub_row_condensed_plain)
+private fun VideoRowView(
+    res: Resources,
+    row: ScoringRow.Video,
+    keyPrefix: String,
+    nfl: Boolean,
+    low: Boolean,
+    requester: FocusRequester,
+    first: Boolean,
+    last: Boolean,
+    onClick: () -> Unit,
+) {
+    val duration = clipDuration(row.durationMs)
+    // (§3.7) "Video, 31 seconds. {headline}"; the NHL rows keep their merged text.
+    val desc = if (nfl) res.getString(R.string.sports_hub_desc_video_row, row.durationMs?.let { SportsText.spokenDuration(res, it) } ?: "", row.label) else null
+    HubSheetRow(requester, first, last, key = row.key, height = ROW_H, description = desc, onClick = onClick) { color ->
+        when (row.ref.kind) {
+            ClipKind.PLAY -> {
+                PlayGlyph(64.dp, color)
+                Line(row.label, GuideUi.sans(26, FontWeight.SemiBold, color), Modifier.weight(1f), maxLines = 2)
+                Line(listOfNotNull("▶", duration).joinToString(" "), GuideUi.mono(22, FontWeight.Medium, color))
+            }
+            else -> {
+                if (nfl && (low || row.thumbUrl == null)) Box(Modifier.size(128.dp, 72.dp), contentAlignment = Alignment.Center) { PlayGlyph(64.dp, color) }
+                else ClipThumbnail(row.ref.videoId, row.thumbUrl, 128.dp, 72.dp, keyPrefix)
+                Line(row.label, GuideUi.sans(26, FontWeight.SemiBold, color), Modifier.weight(1f))
+                if (row.ref.kind == ClipKind.RECAP) duration?.let { Line(it, GuideUi.mono(22, FontWeight.Medium, color)) }
+            }
         }
-        Line(label, GuideUi.sans(26, FontWeight.SemiBold, color), Modifier.weight(1f))
-        if (row.kind == ClipKind.RECAP) duration?.let { Line(it, GuideUi.mono(22, FontWeight.Medium, color)) }
+    }
+}
+
+/** A round play disc (a video row without a picture). */
+@Composable
+private fun PlayGlyph(size: Dp, ink: Color = Color.White) {
+    Box(Modifier.size(size).background(GuideUi.White08, CircleShape), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(size / 3).drawBehind {
+                val p = Path().apply { moveTo(this@drawBehind.size.width * 0.15f, 0f); lineTo(this@drawBehind.size.width, this@drawBehind.size.height / 2f); lineTo(this@drawBehind.size.width * 0.15f, this@drawBehind.size.height); close() }
+                drawPath(p, ink)
+            },
+        )
     }
 }
 
 /** The clip's picture, with the §6.3 cache keys (signed URLs change per lookup). */
 @Composable
-internal fun ClipThumbnail(videoId: Long, url: String?, width: Dp, height: Dp) {
+internal fun ClipThumbnail(videoId: Long, url: String?, width: Dp, height: Dp, keyPrefix: String = "nhl-clip") {
     val loader = LocalShellImageLoader.current
     val shape = RoundedCornerShape(DesignTokens.Radii.Chip)
     Box(Modifier.size(width, height).background(GuideUi.White08, shape)) {
@@ -328,7 +450,7 @@ internal fun ClipThumbnail(videoId: Long, url: String?, width: Dp, height: Dp) {
             val w = with(density) { width.roundToPx() }
             val h = with(density) { height.roundToPx() }
             val request = remember(videoId, url, w, h) {
-                val key = "nhl-clip:$videoId:${w}x$h"
+                val key = "$keyPrefix:$videoId:${w}x$h"
                 ImageRequest.Builder(context).data(url).memoryCacheKey(key).diskCacheKey(key).size(w, h).build()
             }
             AsyncImage(request, contentDescription = null, imageLoader = loader, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().clip(shape))
@@ -384,6 +506,16 @@ internal fun HubSheetFrame(
     rowsKey: Any? = rowCount,
     /** The target after a change of [rowsKey] left the sheet without focus, with the list index to scroll to (null = none). */
     refocus: (() -> Pair<FocusRequester, Int?>?)? = null,
+    /**
+     * (NFL hub §3.1) How many of the rows take focus (the scoring sheet's header and info rows do not); with none, the
+     * frame's title takes focus as for an empty sheet. [initialRow] must then name a focusable row.
+     */
+    focusableRows: Int = rowCount,
+    /**
+     * (NFL hub P3) The list index the open scrolls to (default [initialRow]): the start of the label rows above the initial
+     * row, so a section's header is on screen with its first row.
+     */
+    scrollTo: Int? = null,
     header: (@Composable () -> Unit)? = null,
     footer: LazyListScope.() -> Unit = {},
     content: LazyListScope.(requesters: List<FocusRequester>) -> Unit,
@@ -397,22 +529,22 @@ internal fun HubSheetFrame(
     val rowHadFocus = remember(rowsKey) { focus[1] }
     // (HIGH-1) The frame's own focus target, used only while the sheet has nothing else to focus.
     val frameRequester = remember { FocusRequester() }
-    val selfFocus = rowCount == 0 && refocus == null
+    val selfFocus = focusableRows == 0 && refocus == null
     val target by androidx.compose.runtime.rememberUpdatedState(
-        refocus ?: { if (rowCount == 0) frameRequester to null else initialRow.coerceIn(0, rowCount - 1).let { requesters[it] to it } },
+        refocus ?: { if (focusableRows == 0) frameRequester to null else initialRow.coerceIn(0, rowCount - 1).let { requesters[it] to it } },
     )
     // Composed before the change is applied: the frame's title held focus (an empty sheet whose rows now arrive).
     val frameHadFocus = remember(rowsKey) { focus[2] }
     if (takeInitialFocus) {
         LaunchedEffect(focusKey) {
             if (!focusable) return@LaunchedEffect
-            if (rowCount == 0) {
+            if (focusableRows == 0) {
                 withFrameNanos { }
                 if (refocus == null) runCatching { frameRequester.requestFocus() }
                 return@LaunchedEffect
             }
             val i = initialRow.coerceIn(0, rowCount - 1)
-            listState.scrollToItem(i)
+            listState.scrollToItem((scrollTo ?: i).coerceIn(0, i))
             withFrameNanos { }
             runCatching { requesters[i].requestFocus() }
         }
@@ -426,7 +558,7 @@ internal fun HubSheetFrame(
         withFrameNanos { }
         // Lost: nothing in the sheet has focus, the focused row left (the frame's group then hands focus to its first
         // child, which is not where the user was), or the frame's title held it and rows have arrived.
-        val lost = !focus[0] || (rowHadFocus && !focus[1]) || (frameHadFocus && rowCount > 0) || (focus[2] && rowCount > 0)
+        val lost = !focus[0] || (rowHadFocus && !focus[1]) || (frameHadFocus && focusableRows > 0) || (focus[2] && focusableRows > 0)
         if (!focusable || !lost) return@LaunchedEffect
         val (req, index) = target() ?: return@LaunchedEffect
         if (index != null) listState.scrollToItem(index)

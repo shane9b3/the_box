@@ -19,6 +19,7 @@ import app.thebox.core.sports.hub.MatchReason
 import app.thebox.core.sports.hub.Ranked
 import app.thebox.core.sports.hub.StatKind
 import app.thebox.core.sports.hub.StatRow
+import app.thebox.core.sports.hub.StatRules
 import app.thebox.core.sports.hub.StatValue
 import app.thebox.ui.R
 import java.util.Locale
@@ -180,6 +181,11 @@ class HubPanelModel(
     val videoOff: Boolean = false,
     /** Live, or starting within `HUB_IMMINENT_MIN` (§5.5): the channel line names the reason instead of the start time. */
     val imminent: Boolean = false,
+    /**
+     * (NFL hub §4.3) The view model's offer tick: bumped at each instant a shown clip's offer changes (an expiry or an
+     * embargo), so an otherwise equal model is a new one and every `ClipOffer` check is made again at the new [nowMs].
+     */
+    val offerTick: Int = 0,
 ) {
     /** The index of the first slot OK / Menu on a card enters (§2.2); null = none (the footer shows no OK). */
     val firstEnabled: Int? get() = slots.indexOfFirst { it.usable }.takeIf { it >= 0 }
@@ -188,7 +194,7 @@ class HubPanelModel(
 
     fun copy(slots: List<HubSlot> = this.slots): HubPanelModel = HubPanelModel(
         game, followed, detail, detailKind, failure, stale, failing, statsAtMs, awayScore, homeScore, match, recap, latestGoal,
-        winningGoal, slots, nowMs, videoOff, imminent,
+        winningGoal, slots, nowMs, videoOff, imminent, offerTick,
     )
 
     /**
@@ -200,7 +206,7 @@ class HubPanelModel(
 
     private fun parts(): List<Any?> = listOf(
         game, followed, detail, detailKind, failure, stale, failing, statsAtMs, awayScore, homeScore, match, recap, latestGoal,
-        winningGoal, slots, videoOff, imminent, nowDay,
+        winningGoal, slots, videoOff, imminent, nowDay, offerTick,
     )
 
     override fun equals(other: Any?): Boolean = this === other || (other is HubPanelModel && parts() == other.parts())
@@ -244,7 +250,9 @@ internal object HubSlots {
          * board already carries (and videos are not off): Watch recap stays in slot 1 and the panel body says the stats
          * retry on their own.
          */
-        val detailRetry get() = nhl && failure != null && failure in RETRYABLE && !(final && recapId != null && !videoOff)
+        val detailRetry get() = HubLeagues.of(group).detailed && failure != null && failure in RETRYABLE && !(final && playableRecap && !videoOff)
+        /** (NFL hub §2.3) The NHL: a recap id; the NFL: a highlight offered now (`ClipOffer`, §4.3). */
+        val playableRecap: Boolean get() = if (group == LeagueGroup.NFL) NflHubUi.highlight(game, detail, NflHubUi.offerNow(nowMs, detail)) != null else recapId != null
         /** Live, or starting within `HUB_IMMINENT_MIN` (§5.5): Watch tunes and sheet rows tune. */
         val imminent get() = live || game.startUtcMs - nowMs <= SportsConstants.HUB_IMMINENT_MIN * 60_000L
     }
@@ -258,19 +266,22 @@ internal object HubSlots {
         SlotAction.FOLLOW -> HubSlot(SlotAction.FOLLOW, if (c.followed) SlotLabel.FOLLOWING else SlotLabel.FOLLOW, true)
         SlotAction.RETRY -> if (c.detailRetry) HubSlot(SlotAction.RETRY, SlotLabel.RETRY, true) else HubSlot(SlotAction.FOLLOW, if (c.followed) SlotLabel.FOLLOWING else SlotLabel.FOLLOW, true)
         SlotAction.CHANNEL -> channel(c)
-        SlotAction.GOALS -> if (c.final) {
+        // (NFL hub §2.3) The NFL's Scoring (n), ▶ Highlights / Highlights soon / No highlights and ▶ From start.
+        SlotAction.GOALS -> if (c.group == LeagueGroup.NFL) NflHubUi.scoringSlot(c) else if (c.final) {
             HubSlot(SlotAction.GOALS, if (c.goalCount > 0) SlotLabel.GOALS_N else SlotLabel.GOALS, c.goalCount > 0, c.goalCount)
         } else {
             HubSlot(SlotAction.GOALS, if (c.goalClips > 0) SlotLabel.GOALS_N else SlotLabel.GOALS, c.goalClips > 0 && !c.videoOff, c.goalClips)
         }
         SlotAction.WATCH_RECAP ->
-            if (c.recapId != null) HubSlot(SlotAction.WATCH_RECAP, SlotLabel.WATCH_RECAP, !c.videoOff)
+            if (c.group == LeagueGroup.NFL) NflHubUi.highlightSlot(c)
+            else if (c.recapId != null) HubSlot(SlotAction.WATCH_RECAP, SlotLabel.WATCH_RECAP, !c.videoOff)
             else HubSlot(SlotAction.WATCH_RECAP, SlotLabel.RECAP_SOON, false)
         SlotAction.BOX_SCORE -> HubSlot(SlotAction.BOX_SCORE, SlotLabel.BOX_SCORE, true)
         // (Verification review MED-1) Enabled exactly when the Matchup sheet has rows (a goalie pair with two empty lists
         // draws none).
         SlotAction.MATCHUP -> HubSlot(SlotAction.MATCHUP, SlotLabel.MATCHUP, c.detail != null && hasMatchupRows(c.detail))
-        SlotAction.WATCH_FROM_START -> HubSlot(SlotAction.WATCH_FROM_START, SlotLabel.WATCH_FROM_START, c.catchUp.isNotEmpty())
+        SlotAction.WATCH_FROM_START ->
+            if (c.group == LeagueGroup.NFL) NflHubUi.fromStartSlot(c) else HubSlot(SlotAction.WATCH_FROM_START, SlotLabel.WATCH_FROM_START, c.catchUp.isNotEmpty())
     }
 
     private fun channel(c: Ctx): HubSlot {
@@ -302,9 +313,13 @@ internal object HubSlots {
 @Immutable
 internal data class PanelRow(val label: String, val away: String, val home: String, val better: Side?, val desc: String)
 
-/** [oneLine] (NFL hub §2.4, §6.6): drawn `maxLines = 1` (the NFL's fitted lines); false keeps the NHL's wrap rule. */
+/**
+ * [oneLine] (NFL hub §2.4, §6.6): drawn `maxLines = 1` (the NFL's fitted lines); false keeps the NHL's wrap rule. [desc]
+ * (§3.7): the spoken form when it differs from the words ("Bengals ball, second and 7 at the Commanders 35"); null reads
+ * the text.
+ */
 @Immutable
-internal data class SummaryLine(val label: String, val text: String, val oneLine: Boolean = false)
+internal data class SummaryLine(val label: String, val text: String, val oneLine: Boolean = false, val desc: String? = null)
 
 internal sealed interface MediaSpec {
     /** A clip's poster over the matchup art: [info] is null until its lookup answered. */
@@ -389,6 +404,8 @@ internal object HubPanelContents {
             factor, mandatoryRows = if (error != null) HubPanelPlan.ERROR_ROWS else rows.size, extraRows = extra.size, summaryLines = summary.size,
             hasChannelLine = channelLine != null, hasNote = note != null || moreSoon != null, mediaFloor = floor,
             hasRows = rows.isNotEmpty() || error != null,
+            // (NFL hub §2.6, UX m9) An extra row stays only while a playable poster keeps its play disc.
+            extraFloor = if (mediaSpec is MediaSpec.Poster) HubPanelPlan.POSTER_DISC_MIN_H else floor,
         )
         val kept = rows + extra.take(plan.extraRows)
         val headerAway = away.nickname
@@ -430,12 +447,14 @@ internal object HubPanelContents {
         StatKind.YARDS_ALLOWED_PG -> R.string.sports_hub_stat_yards_allowed_pg
     }
 
-    /** (NFL hub commit 0) The NHL's PIM / GIVEAWAYS rule, unchanged; P3 switches it to `StatRules.better` (§6.1). */
+    /**
+     * (NFL hub §6.1) The highlighted side is `StatRules.better` for every league: the same comparison the panel made
+     * (counts and fractions by made, percentages by value, PIM and giveaways lower), so the NHL rows are unchanged.
+     */
     internal fun statRow(res: Resources, label: String, row: StatRow, away: HubName, home: HubName): PanelRow {
         val a = value(row.away)
         val h = value(row.home)
-        val better = compare(row.away, row.home, higherIsBetter = row.kind != StatKind.PIM && row.kind != StatKind.GIVEAWAYS)
-        return PanelRow(label, a, h, better, res.getString(R.string.sports_hub_desc_stat, label, away.nickname, a, home.nickname, h))
+        return PanelRow(label, a, h, StatRules.better(row), res.getString(R.string.sports_hub_desc_stat, label, away.nickname, a, home.nickname, h))
     }
 
     internal fun value(v: StatValue): String = when (v) {
@@ -446,22 +465,6 @@ internal object HubPanelContents {
         is StatValue.Decimal -> String.format(Locale.US, "%.${v.places.coerceIn(0, 3)}f", v.value)
         is StatValue.Clock -> SportsText.clock(v.seconds)
         is StatValue.Text -> v.text
-    }
-
-    /** The compared number; null for a Text or Clock value (never compared, §6.1). */
-    private fun num(v: StatValue): Double? = when (v) {
-        is StatValue.Count -> v.n.toDouble()
-        is StatValue.Fraction -> v.made.toDouble()
-        is StatValue.Pct -> v.value
-        is StatValue.Decimal -> v.value
-        is StatValue.Clock, is StatValue.Text -> null
-    }
-
-    private fun compare(a: StatValue, h: StatValue, higherIsBetter: Boolean): Side? {
-        val x = num(a) ?: return null
-        val y = num(h) ?: return null
-        if (x == y) return null
-        return if ((x > y) == higherIsBetter) Side.AWAY else Side.HOME
     }
 
     /** A fraction (0.272727) or a percentage (27.2727) as "27.3%". */
@@ -512,8 +515,8 @@ internal object HubPanelContents {
     internal fun channelLine(res: Resources, m: HubPanelModel, g: GameSnapshot, clock24: Boolean, locale: Locale, factor: Float = 1f): ChannelLine? {
         if (g.phase == GamePhase.POSTPONED) return null
         val final = g.phase == GamePhase.FINAL
-        val nhlFinal = final && g.id.league.group == LeagueGroup.NHL
-        if (final && !nhlFinal) return null
+        // (NFL hub §2.1) A final shows its catch-up airing's line in every league with a detail source (NHL, NFL).
+        if (final && !HubLeagues.of(g.id.league.group).detailed) return null
         val sep = res.getString(R.string.sports_hub_summary_sep)
         val budget = lineBudget(factor)
         return when (val match = m.match) {
@@ -608,6 +611,8 @@ internal object HubPanelContents {
         is MediaSpec.Poster -> {
             val ms = spec.info?.durationMs
             if (spec.tag == res.getString(R.string.sports_hub_tag_recap)) res.getString(R.string.sports_hub_desc_media_recap, ms?.let { SportsText.spokenDuration(res, it) } ?: spec.caption.orEmpty())
+            // (NFL hub §3.7) "Game highlights, 1 minute 14 seconds".
+            else if (spec.tag == res.getString(R.string.sports_hub_tag_highlights) && ms != null) res.getString(R.string.sports_hub_desc_media_highlights, SportsText.spokenDuration(res, ms))
             else spec.caption ?: spec.tag
         }
         else -> res.getString(R.string.sports_hub_desc_media_matchup, away.nickname, home.nickname, SportsText.startTime(g.startUtcMs, clock24, locale))
@@ -618,18 +623,21 @@ internal object HubPanelContents {
      * slot → "Select Retry"; else a final game with a usable Watch recap → "Select Watch recap"; else (the slots were frozen
      * before the failure, so slot 1 is still Follow, or Watch recap is off) → Back, then OK, lands on Retry.
      */
-    fun failureText(res: Resources, kind: FailKind?, slots: List<HubSlot>, final: Boolean): String = res.getString(
-        when (kind) {
-            FailKind.HTTP_429, FailKind.REFUSED -> R.string.sports_hub_error_detail_limited
-            FailKind.BAD_BODY -> R.string.sports_hub_error_detail_changed
-            FailKind.OFFLINE -> R.string.sports_hub_error_detail_offline
-            else -> when {
-                slots.any { it.action == SlotAction.RETRY && it.usable } -> R.string.sports_hub_error_detail_retry
-                final && slots.any { it.action == SlotAction.WATCH_RECAP && it.usable } -> R.string.sports_hub_error_detail_auto
-                else -> R.string.sports_hub_error_detail_back
-            }
-        },
-    )
+    fun failureText(res: Resources, kind: FailKind?, slots: List<HubSlot>, final: Boolean, source: HubSource = HubSource.NHL_COM): String {
+        val espn = source == HubSource.ESPN
+        return res.getString(
+            when (kind) {
+                FailKind.HTTP_429, FailKind.REFUSED -> if (espn) R.string.sports_hub_error_detail_limited_espn else R.string.sports_hub_error_detail_limited
+                FailKind.BAD_BODY -> if (espn) R.string.sports_hub_error_detail_changed_espn else R.string.sports_hub_error_detail_changed
+                FailKind.OFFLINE -> R.string.sports_hub_error_detail_offline
+                else -> when {
+                    slots.any { it.action == SlotAction.RETRY && it.usable } -> if (espn) R.string.sports_hub_error_detail_retry_espn else R.string.sports_hub_error_detail_retry
+                    final && slots.any { it.action == SlotAction.WATCH_RECAP && it.usable } -> if (espn) R.string.sports_hub_error_detail_auto_espn else R.string.sports_hub_error_detail_auto
+                    else -> if (espn) R.string.sports_hub_error_detail_back_espn else R.string.sports_hub_error_detail_back
+                }
+            },
+        )
+    }
 }
 
 /** (§6.7) Pure helpers over a detail. */
@@ -757,8 +765,11 @@ internal fun slotText(res: Resources, slot: HubSlot): String = when (slot.label)
     SlotLabel.SCORING_N -> res.getString(R.string.sports_hub_slot_scoring_n, slot.count)
 }
 
-/** The glyph of slot 1 only (U-B3): a plus for Follow, a triangle for a video, a loop for Retry. */
-private fun slotGlyph(slot: HubSlot, index: Int): String? = if (index != 0) null else when (slot.action) {
+/**
+ * The glyph of slot 1 only (U-B3): a plus for Follow, a triangle for a video, a loop for Retry. (NFL hub §2.3, UX B1) A
+ * disabled slot draws none ("Highlights soon", the NHL's "Recap soon"): a ▶ on something that cannot play misleads.
+ */
+internal fun slotGlyph(slot: HubSlot, index: Int): String? = if (index != 0 || !slot.enabled) null else when (slot.action) {
     SlotAction.FOLLOW -> if (slot.label == SlotLabel.FOLLOWING) null else "+"
     SlotAction.WATCH_RECAP, SlotAction.WATCH_FROM_START -> "▶"
     SlotAction.RETRY -> "↻"
@@ -790,7 +801,14 @@ internal fun HubPanel(
     val factor = UiTextScale.factor
     // (NFL hub commit 0, §6.6) The measure first: the build fits the NFL's summary lines with it.
     val measure = rememberHubMeasure()
-    val content = remember(model, clock24, factor, measure) { HubPanelContents.build(res, model, clock24, factor, measure) }
+    // (NFL hub P3) The fitted summary lines compare design px with the 664 px line: the measure answers device px, so it
+    // is divided by the density here (the headline keeps the device-px measure and width).
+    val density = LocalDensity.current.density
+    val designMeasure: Measure = remember(measure, density) { { t, px, w -> measure(t, px, w) / density } }
+    val low = lowEnd()
+    val content = remember(model, clock24, factor, designMeasure, low) { HubPanelContents.build(res, model, clock24, factor, designMeasure, lowEnd = low) }
+    // (NFL hub §2.3, UX M4) The spoken reason of every grey slot: the league's, and the beyond-guide line for Channels.
+    val reasons = remember(model, content) { slotReasonsOf(res, model, content) }
     var focusedSlot by remember { mutableIntStateOf(-1) }
     val shape = RoundedCornerShape(24.dp)
     fun move(delta: Int): Boolean {
@@ -847,7 +865,7 @@ internal fun HubPanel(
             ChannelLineRow(line, factor)
         }
         Spacer(Modifier.height(12.dp))
-        Buttons(model, slotRequesters, focusedSlot, entered, onSlot, greyReason(model, content)) { i ->
+        Buttons(model, slotRequesters, focusedSlot, entered, onSlot, reasons, greyReason(model, content) != null) { i ->
             focusedSlot = i ?: -1
             onSlotFocus(i)
         }
@@ -857,6 +875,54 @@ internal fun HubPanel(
 /** The beyond-guide line while the Channels chip is grey (no team channel to offer), else null. */
 private fun greyReason(model: HubPanelModel, content: PanelContent?): String? =
     content?.channelLine?.takeIf { it.beyond && model.slots.any { s -> s.action == SlotAction.CHANNEL && !s.enabled } }?.text
+
+/**
+ * (NFL hub §2.3, UX M4; generalises event channels §18.3) One entry per slot: the spoken reason of a grey slot, else
+ * null. A grey Channels slot speaks the beyond-guide line; every other grey slot the league's reason
+ * ([HubLeagueUi.slotReasons]: Highlights soon, No highlights, Scoring, the NHL's Recap soon).
+ */
+internal fun slotReasonsOf(res: Resources, model: HubPanelModel, content: PanelContent?): List<String?> {
+    val g = model.game ?: return model.slots.map { null }
+    val league = HubLeagues.of(g.id.league.group).slotReasons(res, model, model.slots)
+    val beyond = greyReason(model, content)
+    return model.slots.mapIndexed { i, s ->
+        if (s.action == SlotAction.CHANNEL && !s.enabled) beyond ?: league.getOrNull(i) else league.getOrNull(i)
+    }
+}
+
+/**
+ * The slot descriptions (§2.3): a grey slot with a reason is "<label>, unavailable. <reason>"; the first usable slot (the
+ * one that takes focus on entering the panel, where accessibility focus follows the D-pad) adds the grey slots' reasons:
+ * "<label>. Channels unavailable: <line>" when only Channels is grey beyond the guide (event channels §18.3, unchanged),
+ * else "<label>. <grey labels> unavailable: <reasons>", joined with "; " for two.
+ */
+internal fun slotDescriptions(res: Resources, slots: List<HubSlot>, reasons: List<String?>, beyondChannels: Boolean): List<String> {
+    val texts = slots.map { if (it.action == null) "" else slotText(res, it) }
+    val grey = slots.indices.filter { slots[it].action != null && !slots[it].enabled && reasons.getOrNull(it) != null }
+    val firstUsable = slots.indexOfFirst { it.usable }
+    fun noun(s: HubSlot, text: String): String = when (s.label) {
+        SlotLabel.HIGHLIGHTS_SOON, SlotLabel.NO_HIGHLIGHTS -> res.getString(R.string.sports_hub_slot_highlights)
+        SlotLabel.RECAP_SOON -> res.getString(R.string.sports_hub_summary_recap)
+        else -> text
+    }
+    return slots.mapIndexed { i, s ->
+        val text = texts[i]
+        when {
+            s.action == null -> text
+            i in grey -> res.getString(R.string.sports_hub_desc_slot_unavailable, text, reasons[i]!!)
+            i == firstUsable && grey.isNotEmpty() -> {
+                val onlyChannels = grey.size == 1 && slots[grey[0]].action == SlotAction.CHANNEL && beyondChannels
+                if (onlyChannels) res.getString(R.string.sports_hub_desc_slot_channels_note, text, reasons[grey[0]]!!)
+                else res.getString(
+                    R.string.sports_hub_desc_slot_note, text,
+                    grey.map { noun(slots[it], texts[it]) }.reduce { a, b -> res.getString(R.string.sports_hub_desc_join, a, b) },
+                    grey.map { reasons[it]!! }.reduce { a, b -> res.getString(R.string.sports_hub_desc_join, a, b) },
+                )
+            }
+            else -> text
+        }
+    }
+}
 
 /**
  * (Event channels §9.1, U-E-N5) The channel line as two texts in a row: the words ellipsize, " · +n more" is never cut.
@@ -972,7 +1038,7 @@ private fun Summary(c: PanelContent, factor: Float) {
             Text(
                 text, style = GuideUi.sans(24, FontWeight.Normal, GuideUi.Fg70), maxLines = if (s.oneLine) 1 else if (i == 0 && lines == 2) 2 else 1, overflow = TextOverflow.Ellipsis,
                 onTextLayout = { if (i == 0) wrapped = it.lineCount > 1 },
-                modifier = Modifier.fillMaxWidth().testTag(HUB_SUMMARY_TAG + i),
+                modifier = Modifier.fillMaxWidth().testTag(HUB_SUMMARY_TAG + i).let { m -> s.desc?.let { d -> m.semantics { contentDescription = d } } ?: m },
             )
         }
     }
@@ -1011,7 +1077,7 @@ private fun HubMedia(c: PanelContent, g: GameSnapshot, modifier: Modifier) {
             if (loader != null && url != null) {
                 val w = with(density) { HubPanelPlan.INNER_W.dp.roundToPx() }
                 val h = with(density) { heightDp.dp.roundToPx() }
-                val key = "nhl-clip:${spec.videoId}:${w}x$h"
+                val key = "${clipKeyPrefix(g)}:${spec.videoId}:${w}x$h"
                 val request = remember(url, key, low) {
                     coil3.request.ImageRequest.Builder(context).data(url).size(w, h)
                         .memoryCacheKey(key).diskCacheKey(key)
@@ -1048,6 +1114,9 @@ private fun HubMedia(c: PanelContent, g: GameSnapshot, modifier: Modifier) {
     }
 }
 
+/** (NFL hub §4.5) The image cache key's prefix: "espn-clip" for the NFL's ESPN pictures, "nhl-clip" otherwise. */
+internal fun clipKeyPrefix(g: GameSnapshot): String = if (g.id.league.group == LeagueGroup.NFL) "espn-clip" else "nhl-clip"
+
 /** The poster tag's inset from the media area's top-left corner (design px). */
 private const val POSTER_TAG_INSET = 12
 internal const val HUB_POSTER_TAG_TAG = "hub_poster_tag"
@@ -1055,7 +1124,7 @@ internal const val HUB_POSTER_CAPTION_TAG = "hub_poster_caption"
 
 /** (A-N3) Low-memory devices take the thumbnail at 16 bits; the app has no per-screen device class, so the system's flag. */
 @Composable
-private fun lowEnd(): Boolean {
+internal fun lowEnd(): Boolean {
     val context = LocalContext.current
     return remember(context) { (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)?.isLowRamDevice == true }
 }
@@ -1069,8 +1138,10 @@ private fun Buttons(
     focusedSlot: Int,
     entered: Boolean,
     onSlot: (Int) -> Unit,
-    /** (Code review 2026-11-25, UI M3) The beyond-guide line: why Channels is grey, spoken by the slots. */
-    beyondLine: String?,
+    /** (NFL hub §2.3, UX M4) Each slot's spoken reason while grey ([slotReasonsOf]). */
+    reasons: List<String?>,
+    /** (Code review 2026-11-25, UI M3) Channels is grey beyond the guide: its reason is the line (§18.3's words). */
+    beyondChannels: Boolean,
     onFocus: (Int?) -> Unit,
 ) {
     val res = LocalResources.current
@@ -1080,20 +1151,15 @@ private fun Buttons(
     val pad = if (large) 20 else 28
     val gap = if (large) 12 else 16
     Row(Modifier.fillMaxWidth().height(HubPanelPlan.buttons(factor).dp), horizontalArrangement = Arrangement.spacedBy(gap.dp), verticalAlignment = Alignment.CenterVertically) {
-        val firstUsable = model.slots.indexOfFirst { it.usable }
+        // (Code review 2026-11-25, UI M3; NFL hub UX M4) A grey slot never takes focus, and on a TV accessibility focus
+        // follows the D-pad: the slot that takes focus on entering the panel also says why the grey ones are grey, and each
+        // grey slot says it for touch.
+        val descs = remember(model.slots, reasons, beyondChannels) { slotDescriptions(res, model.slots, reasons, beyondChannels) }
         model.slots.forEachIndexed { i, slot ->
             if (slot.action == null) return@forEachIndexed
             val focused = focusedSlot == i
             val text = slotText(res, slot)
-            // (Code review 2026-11-25, UI M3) The grey chip never takes focus, and on a TV accessibility focus follows the
-            // D-pad: the slot that takes focus on entering the panel also says why Channels is grey, and the grey slot
-            // says it for touch.
-            val desc = when {
-                beyondLine == null -> text
-                slot.action == SlotAction.CHANNEL && !slot.enabled -> res.getString(R.string.sports_hub_desc_slot_unavailable, text, beyondLine)
-                i == firstUsable -> res.getString(R.string.sports_hub_desc_slot_channels_note, text, beyondLine)
-                else -> text
-            }
+            val desc = descs[i]
             val glyph = slotGlyph(slot, i)
             Box(
                 Modifier

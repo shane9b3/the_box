@@ -1759,3 +1759,31 @@ f0fa6ca7fb703382fbcd0ee00e03e667b157af7f450a38e4cf1823aae7e01034  sports-tab/hub
 925411aef67309ec6e6b61c08afab255b93089005a7e14cc1e4f051d083d056a  sports-tab/hub-panel-live-largest.png
 bec7aaefa6fca8734764a31592c91d8130a3269baa1ef7a2d5082ab876dda360  sports-tab/hub-panel-pre-default.png
 c07a0bdd7d7519d86363b37aa479fdada90036d1f0a9fc6b06a64b83202f75bf  sports-tab/hub-panel-pre-largest.png
+# 2026-11-25 (NFL hub P3): 21 new entries sports-tab/nfl-hub-*.png (NflHubScreenshotTest: the NFL panel pre-game,
+#   live, halftime, end of quarter, delayed, final with the highlight poster, final after the highlight expired, final
+#   "Highlights soon", failed, video off and postponed, at Default and (pre, live, final) Largest; the Scoring sheet with
+#   ESPN videos, the highlight only, video off and live with no score; the Box score NFL tab; the NFL Matchup; the clip
+#   bar's "Video: ESPN" sub-line). Each PNG looked at before recording; two runs hashed equal. Every existing hash is
+#   unchanged (sportsHashGate: all 1700 equal), including the NHL and CHL panels: the disabled-slot rule (no glyph on a grey
+#   slot, its spoken reason) changes no pixel in any existing golden, since none shows a grey Recap soon.
+0448bcc3541922792877f8cf4b2b5fa6c62d7bbbf3d83c045dec3890de40441e  sports-tab/nfl-hub-box-score.png
+48a9b17bac9b8b9460d68b109db8e9d9258ab1ab2ddb740574be40185d69ada4  sports-tab/nfl-hub-clip-bar.png
+c173a534a621d2159ba991365cbdeca7ed735660e8060339c6b579e07fb46df4  sports-tab/nfl-hub-matchup.png
+e3567089e427756299df203b905431abba6ce030fb139d351578d981e40726be  sports-tab/nfl-hub-panel-delayed-default.png
+8a5a82a736adf8b9e8276267cb3eee271dfb6b8fc8df5d0f2ba885570620ce1a  sports-tab/nfl-hub-panel-end-quarter-default.png
+19abd157d1bf00450f41b85205544db1129e6687e8d89e005ffbfc1d3049232d  sports-tab/nfl-hub-panel-failed-default.png
+4b99aa828ff06df333cc20f5ae0ca6169a5f6de98e3cacee1127ac17223da434  sports-tab/nfl-hub-panel-final-expired-default.png
+68d588349e24091a63baa778952088510d4b61301740e3be323adf732261daf6  sports-tab/nfl-hub-panel-final-highlight-default.png
+e41187e343d117d56f293a4c14c4735b3c0e419a9c402803a7b95a277c323146  sports-tab/nfl-hub-panel-final-highlight-largest.png
+dc8fa870f785286d433f24f2be70b2dac0d452ab84ec87c37a7c2fe6a9d6af71  sports-tab/nfl-hub-panel-final-soon-default.png
+6ba07ae170c32563a81327e2e5f12254098c340c0c34e4e66debb5c0205f3c75  sports-tab/nfl-hub-panel-halftime-default.png
+e8a8db1fb5b532ef387a133dcfc2e708ce0a3cdd4a2dc8aa9cccf5aa0ba4e76b  sports-tab/nfl-hub-panel-live-default.png
+d5e77e418390a6ecbee2b0c58ca963e497dba0a2c74eb70c281b2d2a2f23c5e3  sports-tab/nfl-hub-panel-live-largest.png
+63a5e93f67b1c9efb60e23885f88a1a02ed37ab2a045a1cd15dae30b10d61c40  sports-tab/nfl-hub-panel-postponed-default.png
+bfbdde912a33e2689f30c24c0cd809a8e2cadbd3dbc0fa7e9e4fef24538a5a46  sports-tab/nfl-hub-panel-pre-default.png
+e0c2dd7487be59323f5d6961b0027b63ad6123f3ff6ca7808b64c09a67baed3f  sports-tab/nfl-hub-panel-pre-largest.png
+9138fbe6316145eeff763854b184d44a13607508d15b9222731a13c63e4d2eda  sports-tab/nfl-hub-panel-video-off-default.png
+f3942bc456a2116c64a53fc29038841c8257b4f42a623a0b5406fe1155d77834  sports-tab/nfl-hub-scoring-espn.png
+25482624a409df5d923e4e65299824bcee2aef8aab969630a193da934067a4af  sports-tab/nfl-hub-scoring-highlight-only.png
+3f2995a36ef8adbf1c614a51e4511ac504e50c17e86f07375e91ba8a9dc8dee5  sports-tab/nfl-hub-scoring-live-empty.png
+ad51ae962b4376dda4d34541e2543529eb6c4f99355f099bc59cb1860734a946  sports-tab/nfl-hub-scoring-no-video.png

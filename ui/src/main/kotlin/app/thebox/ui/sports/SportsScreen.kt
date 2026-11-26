@@ -127,7 +127,9 @@ fun SportsScreen(
     val sheet by viewModel.sheet.collectAsStateWithLifecycle()
     val panelFocused by viewModel.panelFocused.collectAsStateWithLifecycle()
     val clipInfo by viewModel.clipInfo.collectAsStateWithLifecycle()
-    val videoRefused by viewModel.videoRefused.collectAsStateWithLifecycle()
+    // (NFL hub §6.6) Video off per league; the offer tick (§4.3) re-checks every card chip and the sheet at an expiry.
+    val videoOffLeagues by viewModel.videoOffLeagues.collectAsStateWithLifecycle()
+    val offerTick by viewModel.offerTick.collectAsStateWithLifecycle()
     val toast by viewModel.toast.collectAsStateWithLifecycle()
     val session = viewModel.clipSession
     val clipState by (session?.state ?: remember { kotlinx.coroutines.flow.MutableStateFlow<ClipSession.State>(ClipSession.State.Idle) }).collectAsStateWithLifecycle()
@@ -295,7 +297,7 @@ fun SportsScreen(
     }
 
     val off = body is SportsBody.Off
-    val showHighlights = !videoRefused
+    val videoOffNow = if (app.thebox.core.sports.SportsConstants.ESPN_VIDEO_ENABLED) videoOffLeagues else videoOffLeagues + LeagueGroup.NFL
 
     Box(
         modifier
@@ -369,7 +371,7 @@ fun SportsScreen(
                                     SportsBody.Loading -> Skeletons()
                                     is SportsBody.Games -> GamesGrid(
                                         b.cards, gridState, clock24, cardRequesters, dayChips.getValue(selectedOffsetOf(ui, nfl)),
-                                        panel = panel, panelFocused = panelFocused, showHighlights = showHighlights, focusedId = focusedCardId,
+                                        panel = panel, panelFocused = panelFocused, videoOff = videoOffNow, offerTick = offerTick, focusedId = focusedCardId,
                                         onFocus = { id, on, index ->
                                             // A card focused in passing while the page turns unfocusable (a sheet opening, a
                                             // clip starting) is not the user's move.
@@ -408,7 +410,7 @@ fun SportsScreen(
                     androidx.compose.runtime.CompositionLocalProvider(LocalHubFocusable provides !clipActive) {
                     Box(Modifier.fillMaxSize().testTag(SPORTS_SHEET_TAG)) {
                         SheetHost(
-                            sh, viewModel, panel, clipInfo, sheetFocusVideoId, clock24,
+                            sh, viewModel, panel, clipInfo, sheetFocusVideoId, clock24, offerTick,
                             onPressed = { ref ->
                                 pressedVideoId = ref.videoId
                                 lastAtPress = lastPlayed
@@ -439,6 +441,8 @@ fun SportsScreen(
                 modifier = Modifier.fillMaxSize(),
                 game = clipGame,
                 goals = if (clipGame != null) panel.detail?.goals.orEmpty() else emptyList(),
+                // (NFL hub §3.3) "Video 2 of 4": the More videos list of the panel's game.
+                videos = if (clipGame != null) NflHubUi.moreVideos(panel.detail, NflHubUi.offerNow(panel.nowMs, panel.detail)) else emptyList(),
             )
         }
         toast?.let { t -> ToastBar(t, clock24, onShown = { viewModel.toastShown(t.seq) }) }
@@ -632,7 +636,10 @@ private fun GamesGrid(
     dayChip: FocusRequester,
     panel: HubPanelModel,
     panelFocused: Boolean,
-    showHighlights: Boolean,
+    /** (NFL hub §6.6) The leagues whose video is off: their cards show no "● Highlights" chip. */
+    videoOff: Set<LeagueGroup>,
+    /** (NFL hub §4.3) The view model's offer tick. */
+    offerTick: Int,
     focusedId: String?,
     onFocus: (id: String, focused: Boolean, index: Int) -> Unit,
     onEnter: (String) -> Unit,
@@ -660,12 +667,13 @@ private fun GamesGrid(
                 clock24 = clock24,
                 selected = panelFocused && panel.game?.id == card.game.id,
                 leftColumn = index % 2 == 0,
-                showHighlights = showHighlights,
+                showHighlights = card.game.id.league.group !in videoOff,
                 optionsText = options,
                 onEnter = { onEnter(id) },
                 onFocusChange = { onFocus(id, it, index) },
                 focusRequester = requester,
                 measure = measure,
+                offerTick = offerTick,
                 // Up from the first row goes to the selected day chip, whichever column it is in (§2.2).
                 modifier = Modifier.focusProperties { if (index < 2) up = dayChip },
             )
@@ -742,6 +750,7 @@ private fun SheetHost(
     clipInfo: Map<Long, app.thebox.core.sports.hub.ClipInfo>,
     focusVideoId: Long?,
     clock24: Boolean,
+    offerTick: Int,
     onPressed: (app.thebox.core.sports.hub.ClipRef) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -760,13 +769,24 @@ private fun SheetHost(
     when (sheet) {
         // (HIGH-1) The slot is usable from the board's goal count alone: without a detail the sheet says why the goals
         // are not listed yet and what to do, and its frame holds focus so Back works.
-        is HubSheet.Goals -> GoalsSheet(
-            game = game, detail = d, clipInfo = clipInfo, catchUp = panel.candidates.filter { it.airing != null }, focusVideoId = focusVideoId,
-            onPlay = { q, i -> q.getOrNull(i)?.let(onPressed); vm.playClips(q, i) }, onPlayArchive = vm::playArchive, onMissingClip = vm::missingClip, onClose = onClose, modifier = Modifier.fillMaxSize(),
-            note = if (d != null) null else LocalResources.current.getString(
-                if (panel.detailKind == DetailKind.FAILED) R.string.sports_hub_goals_failed else R.string.sports_hub_goals_loading,
-            ),
-        )
+        is HubSheet.Goals -> {
+            // (NFL hub §3.2) The note names the league's source (NHL.com's goal list, ESPN's scoring plays).
+            val espn = HubLeagues.of(game.id.league.group).source == HubSource.ESPN
+            val failed = panel.detailKind == DetailKind.FAILED
+            GoalsSheet(
+                game = game, detail = d, clipInfo = clipInfo, catchUp = panel.candidates.filter { it.airing != null }, focusVideoId = focusVideoId,
+                onPlay = { q, i -> q.getOrNull(i)?.let(onPressed); vm.playClips(q, i) }, onPlayArchive = vm::playArchive, onMissingClip = vm::missingClip, onClose = onClose, modifier = Modifier.fillMaxSize(),
+                note = if (d != null) null else LocalResources.current.getString(
+                    when {
+                        espn && failed -> R.string.sports_hub_scoring_failed
+                        espn -> R.string.sports_hub_scoring_loading
+                        failed -> R.string.sports_hub_goals_failed
+                        else -> R.string.sports_hub_goals_loading
+                    },
+                ),
+                videoOn = !panel.videoOff, offerTick = offerTick, onPlayNoVideo = vm::playNoVideo,
+            )
+        }
         is HubSheet.Channels -> ChannelSheet(
             game = game, candidates = if (sheet.archiveOnly) panel.candidates.filter { it.airing != null } else panel.candidates,
             tunable = game.phase == GamePhase.LIVE || game.phase == GamePhase.INTERMISSION ||
@@ -783,16 +803,19 @@ private fun SheetHost(
 @Composable
 private fun ToastBar(t: HubToast, clock24: Boolean, onShown: () -> Unit) {
     val res = LocalResources.current
+    // (NFL hub §3.4) ESPN's words for an NFL clip, NHL.com's otherwise; offline, geo and not-playable are shared.
+    val espn = t.league == LeagueGroup.NFL
     val text = when (t.kind) {
-        HubToastKind.VIDEO_UNAVAILABLE -> res.getString(R.string.sports_hub_error_video_unavailable)
-        HubToastKind.VIDEO_LATER -> res.getString(R.string.sports_hub_error_video_later)
+        HubToastKind.VIDEO_UNAVAILABLE -> res.getString(if (espn) R.string.sports_hub_error_video_unavailable_espn else R.string.sports_hub_error_video_unavailable)
+        HubToastKind.VIDEO_LATER -> res.getString(if (espn) R.string.sports_hub_error_video_later_espn else R.string.sports_hub_error_video_later)
         HubToastKind.VIDEO_OFFLINE -> res.getString(R.string.sports_hub_error_video_offline)
-        HubToastKind.VIDEO_REFUSED -> res.getString(R.string.sports_hub_error_video_refused)
+        // ESPN never refuses the app (§4.2: a WAF block is a rate limit), so the NFL reads the service's "didn't answer".
+        HubToastKind.VIDEO_REFUSED -> res.getString(if (espn) R.string.sports_hub_error_video_unavailable_espn else R.string.sports_hub_error_video_refused)
         HubToastKind.VIDEO_GEO -> res.getString(R.string.sports_hub_error_video_geo)
-        HubToastKind.VIDEO_REMOVED -> res.getString(R.string.sports_hub_error_video_removed)
+        HubToastKind.VIDEO_REMOVED -> res.getString(if (espn) R.string.sports_hub_error_video_expired_espn else R.string.sports_hub_error_video_removed)
         HubToastKind.VIDEO_NOT_PLAYABLE -> res.getString(R.string.sports_hub_error_video_not_playable)
         HubToastKind.GOAL_NO_VIDEO -> res.getString(R.string.sports_hub_goal_no_video_toast)
-        // (NFL hub commit 0, §3.4, §3.1) P3 picks the ESPN or NHL.com wording by `t.league` for the other kinds.
+        // An NHL clip is never answered Expired; the ESPN words are the only ones.
         HubToastKind.VIDEO_EXPIRED -> res.getString(R.string.sports_hub_error_video_expired_espn)
         HubToastKind.PLAY_NO_VIDEO -> res.getString(R.string.sports_hub_play_no_video_toast)
         HubToastKind.STARTS_AT -> res.getString(R.string.sports_hub_starts_at_toast, SportsText.startTime(t.startUtcMs ?: 0L, clock24))
