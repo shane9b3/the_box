@@ -95,7 +95,9 @@ class ScoreSheetFailedRowTest {
         for (r in rows) {
             assertTrue("$what: row inside the sheet (${r.boundsInRoot} in $box)", r.boundsInRoot.bottom <= box.bottom + 0.5f)
             val h = r.boundsInRoot.height / scale
-            assertTrue("$what: a row is 64 or the 132 failure row, was $h", kotlin.math.abs(h - PlayerUi.PICKER_ROW_H) < 1f || kotlin.math.abs(h - FAILED_ROW_H) < 1f)
+            // (Score sheet restyle) A settings row 64, a game 84, the failure row 132 (two settings rows and a gap).
+            val allowed = listOf(ScoreSheetMetrics.SETTING_H, ScoreSheetMetrics.GAME_H, ScoreSheetMetrics.FAILED_H)
+            assertTrue("$what: a row is 64, 84 or the 132 failure row, was $h", allowed.any { kotlin.math.abs(h - it) < 1f })
         }
         val failed = rule.onAllNodesWithTag(PICKER_FAILED_TAG, useUnmergedTree = true).fetchSemanticsNodes()
         for (f in failed) assertTrue("$what: failure text inside the sheet", f.boundsInRoot.bottom <= box.bottom + 0.5f)
@@ -145,18 +147,27 @@ class ScoreSheetFailedRowTest {
 
     @Test
     fun theWindowCountsTheFailureRowTwiceAndAlwaysHoldsTheFocus() {
-        // With every row one slot the window is the old focus-centred one.
+        // The other pickers: with every row one slot the window is the old focus-centred one.
         for (rows in listOf(5, 11, 20)) for (f in 0 until rows) {
             val old = (f - 11 / 2).coerceIn(0, (rows - 11).coerceAtLeast(0)).let { it until minOf(rows, it + 11) }
             assertEquals("rows $rows focus $f", old, pickerWindow(rows, f, 11) { 1 })
         }
         // A two-slot row: never more than 11 slots, the focus always shown.
-        val cost = { i: Int -> if (i == 1) FAILED_SLOTS else 1 }
+        val cost = { i: Int -> if (i == 1) 2 else 1 }
         for (rows in listOf(5, 11, 12, 14, 20)) for (f in 0 until rows) {
             val w = pickerWindow(rows, f, 11, cost)
             assertTrue("rows $rows focus $f in $w", f in w)
             assertTrue("rows $rows focus $f within budget", w.sumOf(cost) <= 11)
             if (rows >= 12) assertTrue("rows $rows focus $f fills the sheet", w.sumOf(cost) >= 10)
+        }
+        // (Score sheet restyle) The score sheet windows by height: the 132 px failure row counts as itself.
+        val choices = refusedSheet(League.QMJHL, 0).choices
+        val heights = choices.map { ScoreSheetMetrics.height(it, 1f) }
+        assertEquals(ScoreSheetMetrics.FAILED_H, heights[1])
+        for (f in choices.indices) {
+            val w = scoreWindow(heights, f, ScoreSheetMetrics.budget(1f))
+            assertTrue("focus $f in $w", f in w)
+            assertTrue("focus $f within budget", scoreWindowHeight(heights, w) <= ScoreSheetMetrics.budget(1f))
         }
     }
 }

@@ -143,6 +143,21 @@
     <!-- %1$s = a period ("2nd"), %2$s = the clock ("10:22"). -->
     <string name="sports_picker_live_state">%1$s %2$s</string>
     <string name="sports_picker_followed_desc">Following</string>
+    <!-- (Score sheet restyle) The quick-bar score sheet's title, drawn upper-case. -->
+    <string name="sports_picker_settings_title">Score bug settings</string>
+    <!-- Settings rows: the label on the left; the value (a league, a corner, "Off", "Pill") on the right. -->
+    <string name="sports_picker_league_label">League</string>
+    <string name="sports_picker_chl_label">CHL league</string>
+    <string name="sports_picker_corner_label">Corner</string>
+    <string name="sports_picker_delay_label">Delay</string>
+    <string name="sports_picker_style_label">Style</string>
+    <!-- Section headers over the games, drawn upper-case: the NFL's current week, and today's board. -->
+    <string name="sports_picker_header_this_week">This week\'s matchups</string>
+    <string name="sports_picker_header_today">Today\'s games</string>
+    <!-- Between the teams of a game that has not started: "CHI Bears vs DET Lions". -->
+    <string name="sports_picker_vs">vs</string>
+    <!-- An NFL game's start when it is today. %1$s = the time ("1:00 PM"). -->
+    <string name="sports_picker_today_at">Today %1$s</string>
 
     <!-- ==== Settings: the Sports section (7). Keys: SettingsText.SECTION_SPORTS, SPORTS_* (ResourceSettingsTexts). -->
     <string name="settings_section_sports">Sports</string>

@@ -21,6 +21,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.thebox.core.full.PickerChoice
+import app.thebox.core.full.PickerKind
 import app.thebox.core.full.PickerState
 import app.thebox.core.full.state.selectable
 import app.thebox.ui.R
@@ -43,6 +44,12 @@ const val PICKER_FAILED_TAG = "player_picker_failed"
  */
 @Composable
 fun PickerSheet(state: PickerState, modifier: Modifier = Modifier, clock24: Boolean = true) {
+    // (Score sheet restyle, owner mock-up 2026-11-26) The score sheet and its delay list have their own drawing (same box,
+    // same rows and focus from the state machine); every other picker is drawn below exactly as before.
+    if (state.kind == PickerKind.SCORE_BUG || state.kind == PickerKind.SCORE_DELAY) {
+        ScoreSheet(state, modifier, clock24)
+        return
+    }
     val res = androidx.compose.ui.platform.LocalResources.current
     // (Score bug WP-4b; fix pass U-S5) Upcoming games in the score sheet read "7:00 PM" or "19:00" per the app's clock
     // setting ([clock24], from FullScreenHost like the quick bar), not the device's.
@@ -58,23 +65,13 @@ fun PickerSheet(state: PickerState, modifier: Modifier = Modifier, clock24: Bool
     ) {
         Line(stringResource(PlayerText.pickerTitle(state.kind)), GuideUi.sans(30, FontWeight.SemiBold), Modifier.padding(start = 12.dp, bottom = 12.dp))
         val rows = state.choices.size + if (state.remember != null) 1 else 0
-        // (CHL emulator pass, defect 1) A failure row is two rows tall so its reason and next step wrap instead of
-        // ellipsising; the window counts it twice so the sheet never grows past its 880 px.
-        val window = pickerWindow(rows, state.focused, VISIBLE) { i -> if (i < state.choices.size && state.choices[i] is PickerChoice.ScoreFailed) FAILED_SLOTS else 1 }
+        val window = pickerWindow(rows, state.focused, VISIBLE) { 1 }
         for (i in window) {
             if (i == state.choices.size) {
                 RememberRow(checked = state.remember == true, focused = state.focused == i)
                 continue
             }
             val c = state.choices[i]
-            if (c is PickerChoice.ScoreTodayDivider || c is PickerChoice.ScoreDayDivider) { // (U-N9; U-B1) the non-selectable day divider
-                DividerRow(PlayerText.choice(res, c, i, clock24))
-                continue
-            }
-            if (c is PickerChoice.ScoreFailed) {
-                FailedRow(PlayerText.choice(res, c, i, clock24), focused = i == state.focused)
-                continue
-            }
             val disabled = (c is PickerChoice.Audio && !c.track.supported) || !c.selectable // "Loading games…" reads greyed
             PickerRow(
                 text = PlayerText.choice(res, c, i, clock24),
@@ -85,18 +82,6 @@ fun PickerSheet(state: PickerState, modifier: Modifier = Modifier, clock24: Bool
                 disabled = disabled,
             )
         }
-    }
-}
-
-/** The score sheet's "Today" divider: a small label over a hairline, never focused (skipped by [selectable]). */
-@Composable
-private fun DividerRow(text: String) {
-    Column(
-        Modifier.testTag(PICKER_DIVIDER_TAG).fillMaxWidth().height(DIVIDER_H.dp).padding(horizontal = 14.dp),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Line(text, GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg50))
-        Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(1.dp).background(PlayerUi.Border09))
     }
 }
 
@@ -123,30 +108,6 @@ private fun PickerRow(text: String, note: String?, checked: Boolean, focused: Bo
             Line(text, GuideUi.sans(26, FontWeight.Medium, fg))
             note?.let { Line(it, GuideUi.sans(22, color = fg.copy(alpha = 0.7f))) }
         }
-    }
-}
-
-/**
- * (CHL emulator pass, defect 1) A score failure (the §5.4 day text, or the followed game's refused feed): the whole
- * reason and next step, wrapped at 22/500 in a row [FAILED_SLOTS] rows tall (up to [FAILED_LINES] lines), never
- * ellipsised to "OHL scores stopped letting thi…". Focus and OK work as on any row (OK retries).
- */
-@Composable
-private fun FailedRow(text: String, focused: Boolean) {
-    val fg = if (focused) GuideUi.Canvas else GuideUi.Fg
-    Row(
-        Modifier
-            .testTag(PICKER_ROW_TAG)
-            .height(FAILED_ROW_H.dp)
-            .fillMaxWidth()
-            .then(if (focused) Modifier.border(GuideUi.FocusRing, GuideUi.Accent, RoundedCornerShape(DesignTokens.Radii.Row)) else Modifier)
-            .background(if (focused) GuideUi.Fg else Color.Transparent, RoundedCornerShape(DesignTokens.Radii.Row))
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(Modifier.width(24.dp))
-        Line(text, GuideUi.sans(FAILED_PX, FontWeight.Medium, fg), Modifier.weight(1f).testTag(PICKER_FAILED_TAG), maxLines = FAILED_LINES)
     }
 }
 
@@ -195,14 +156,5 @@ private fun RememberRow(checked: Boolean, focused: Boolean) {
     }
 }
 
-/** The score sheet's divider row height (design px); shorter than a choice row. */
-private const val DIVIDER_H = 40f
-
 /** Rows that fit the 880 px sheet under its title. */
 private const val VISIBLE = 11
-
-/** (CHL emulator pass, defect 1) A failure row takes two row slots: 2 × 64 + the 4 px gap = 132 design px. */
-internal const val FAILED_SLOTS = 2
-internal const val FAILED_ROW_H = FAILED_SLOTS * PlayerUi.PICKER_ROW_H + (FAILED_SLOTS - 1) * 4f
-private const val FAILED_PX = 22
-private const val FAILED_LINES = 4
