@@ -141,6 +141,12 @@ class PlayerStateMachineImpl(
     private var errorFocused = 0
     private var errorCode: PlaybackErrorCode? = null
     private var listJustClosedByBack = false
+    /**
+     * (Settings panel, docs/design/m6-player-settings-panel.md §2.2, S2) The guide's settings-panel flag as last told by
+     * [settingsPanel]. While it stands (and the player is in FULL) the layer is [PlayerLayer.SETTINGS_PANEL], whatever
+     * `syncError`, [enterFull] or `closeAll` would otherwise do.
+     */
+    private var panelOpen = false
 
     // Programmes of one channel (info bar, scrub chips, quick bar's "now"); one cache, merged per answer (§3.2.2).
     private var progHash = 0L
@@ -282,8 +288,7 @@ class PlayerStateMachineImpl(
             PlayerLayer.ERROR -> errorKey(a, justClosed)
             PlayerLayer.NONE -> bareKey(a, justClosed)
             PlayerLayer.PLACE_SCORE -> placeKey(a)
-            // (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.2) Never entered yet; A2 handles PLAY_PAUSE.
-            PlayerLayer.SETTINGS_PANEL -> false
+            PlayerLayer.SETTINGS_PANEL -> panelKey(a)
         }
         if (layer == PlayerLayer.INFO) infoHideAt = curMs + settings.infoBarMs
         if (layer == PlayerLayer.QUICK_BAR) quickHideAt = curMs + QUICK_BAR_IDLE_MS
@@ -343,7 +348,9 @@ class PlayerStateMachineImpl(
         curMs = nowMs
         inFull = true
         closeAll()
-        if (reason == EnterReason.ARCHIVE || inArchive()) showScrubAuto()
+        // (Settings panel §2.2, S2) The panel survives a (re-)entry: no passive info bar or scrub bar under it.
+        if (panelOpen) enterPanelLayer()
+        else if (reason == EnterReason.ARCHIVE || inArchive()) showScrubAuto()
         else showPassive(requireChangeFrom = 0L)
         publish()
     }
@@ -351,11 +358,72 @@ class PlayerStateMachineImpl(
     override fun leaveFull() {
         curMs = nowMs()
         if (layer == PlayerLayer.SCREEN_OFF) effects.setScreenOff(false)
+        // (Settings panel S2) Leaving FULL ends the panel; the guide's publish() tells us false at the end of this dispatch.
+        panelOpen = false
         closeAll()
         if (statsOn) { statsOn = false; effects.setStatsEnabled(false) }
         inFull = false
         errorWasActive = false
         publish()
+    }
+
+    // ================================================================= settings panel (docs/design/m6-player-settings-panel.md §2.2)
+
+    /**
+     * (§2.2, S2, N9) The guide's flag, told at the end of every guide dispatch; idempotent. It may arrive synchronously
+     * from inside [act] (quick bar Settings → `effects.openSettings()` → the guide opens the panel): [act]'s tail then
+     * sees SETTINGS_PANEL and arms no quick-bar timer.
+     */
+    override fun settingsPanel(open: Boolean) {
+        if (open == panelOpen && (!open || !inFull || layer == PlayerLayer.SETTINGS_PANEL)) return
+        curMs = nowMs()
+        panelOpen = open
+        if (open) {
+            if (!inFull) return // enterFull enters the layer
+            enterPanelLayer()
+        } else {
+            if (layer != PlayerLayer.SETTINGS_PANEL) return
+            lastKeyAtMs = curMs // closing is a key: the paused frame's dim timer starts again (§11.5)
+            if (errorActive()) {
+                layer = PlayerLayer.ERROR // the card takes the keys again, on the button it had
+            } else {
+                layer = PlayerLayer.QUICK_BAR
+                quickFocus = QuickItem.SETTINGS
+                quickHideAt = curMs + QUICK_BAR_IDLE_MS
+            }
+        }
+        publish()
+    }
+
+    /**
+     * Enters SETTINGS_PANEL from whatever is showing: the picker, list, scrub bar, place mode and passive bar close (a
+     * place-mode corner is kept, U-N2); stats stay. The quick bar is published on Settings with no hide timer.
+     */
+    private fun enterPanelLayer() {
+        if (layer == PlayerLayer.SETTINGS_PANEL) return
+        val fromQuick = layer == PlayerLayer.QUICK_BAR
+        if (layer == PlayerLayer.SCREEN_OFF) effects.setScreenOff(false)
+        closeAll() // keeps the layer at SETTINGS_PANEL (panelOpen)
+        layer = PlayerLayer.SETTINGS_PANEL
+        quickFocus = QuickItem.SETTINGS
+        quickHideAt = Long.MAX_VALUE
+        lastKeyAtMs = curMs
+        if (!fromQuick) {
+            // Opened from the error card or the Settings key: the bar's favourite and START_OVER items need their answers.
+            favourite = null
+            tunedChannel?.let { ch ->
+                queryFavourite(ch, FavPurpose.QUICK)
+                loadProgrammesFor(ch, force = false)
+            }
+        }
+    }
+
+    /** (§2.2) Passive: the guide sends keys to the settings machine first; only PLAY_PAUSE (PASS_THROUGH) reaches here. */
+    private fun panelKey(a: GuideEvent.Act): Boolean {
+        if (a.action != BoxAction.PLAY_PAUSE) return false
+        // Over an error card PLAY_PAUSE is consumed and does nothing, as on the card itself (errorKey).
+        if (!errorActive()) playPause()
+        return true
     }
 
     // ================================================================= bare video (§3.1.2)
@@ -578,7 +646,8 @@ class PlayerStateMachineImpl(
         atLiveCommitPending = false
         passive = false
         passiveAwait = false
-        layer = PlayerLayer.NONE
+        // (Settings panel §2.2, S2) The panel's layer survives: only the guide's settingsPanel(false) or leaveFull ends it.
+        layer = if (panelOpen && inFull) PlayerLayer.SETTINGS_PANEL else PlayerLayer.NONE
     }
 
     // ================================================================= info bar (§3.2)
@@ -837,7 +906,9 @@ class PlayerStateMachineImpl(
             QuickItem.PREVIOUS_CHANNEL -> { closeLayer(); previousChannel() }
             QuickItem.STREAM_INFO -> toggleStats()
             QuickItem.SCREEN_OFF -> screenOff()
-            QuickItem.SETTINGS -> { closeLayer(); effects.openSettings() }
+            // (Settings panel §2.2, N9) The bar stays (under the PIN prompt and the panel); in FULL the guide answers with
+            // settingsPanel(true), possibly synchronously from inside this call, and the layer becomes SETTINGS_PANEL.
+            QuickItem.SETTINGS -> effects.openSettings()
             QuickItem.SOURCES -> openPicker(PickerKind.SERVER, fromQuickBar = true) // M5 integration (§3.6.2, E23)
             QuickItem.SCORE_BUG -> openScoreSheet()
         }
@@ -867,7 +938,7 @@ class PlayerStateMachineImpl(
         if (token != favToken) return
         val ch = favChannel ?: return
         when (favPurpose) {
-            FavPurpose.QUICK -> if (layer == PlayerLayer.QUICK_BAR) favourite = isFavourite
+            FavPurpose.QUICK -> if (layer == PlayerLayer.QUICK_BAR || layer == PlayerLayer.SETTINGS_PANEL) favourite = isFavourite
             FavPurpose.TOGGLE -> effects.setFavourite(ch, !isFavourite)
             FavPurpose.LIST_MENU -> if (layer == PlayerLayer.CHANNELS && listMenuChannel === ch) {
                 val items = ArrayList<ChannelMenuItem>(3)
@@ -1027,6 +1098,8 @@ class PlayerStateMachineImpl(
         val archiveFailed = status.phase == ArchivePhase.FAILED && status.identityHash == tuned.identityHash
         val variantLeft = archiveError() && status.attempts > 0 && status.attempt < status.attempts
         val c = ErrorCardModel.card(currentError(), tunedChannel, video.decoderOverride, variantLeft, archiveFailed)
+        // (Settings panel §2.2) Under the panel the card shows with no focused button (the panel has the keys).
+        if (layer == PlayerLayer.SETTINGS_PANEL) return c.copy(focused = -1)
         return c.copy(focused = errorFocused.coerceIn(0, c.buttons.size - 1))
     }
 
@@ -1037,6 +1110,9 @@ class PlayerStateMachineImpl(
             if (!errorWasActive || code != errorCode) {
                 errorFocused = 0
                 errorCode = code
+                // (Settings panel §2.2, §5.12) The panel keeps the keys; the card is published unfocused and takes them
+                // (on its first button) when the panel closes.
+                if (layer == PlayerLayer.SETTINGS_PANEL) { errorWasActive = true; return }
                 // The error closes every other layer except stats (§3.1.3).
                 if (layer == PlayerLayer.SCREEN_OFF) effects.setScreenOff(false)
                 closeAllKeepPassive()
@@ -1609,7 +1685,8 @@ class PlayerStateMachineImpl(
 
     /** §11.5: when the paused frame dims (PAUSED_DIM_AFTER_MS after the pause or the last key); MAX when not paused. */
     private fun dimAtMs(): Long {
-        if (localPausedSinceMs == Long.MIN_VALUE || !inFull) return Long.MAX_VALUE
+        // (Settings panel §5.12) Never dimmed while the panel is open: the user is judging the picture.
+        if (localPausedSinceMs == Long.MIN_VALUE || !inFull || layer == PlayerLayer.SETTINGS_PANEL) return Long.MAX_VALUE
         return maxOf(localPausedSinceMs, lastKeyAtMs) + TimeshiftConstants.PAUSED_DIM_AFTER_MS
     }
 
@@ -1886,7 +1963,11 @@ class PlayerStateMachineImpl(
             syncScrubValidity() // leaving archive by a zap closes the scrub bar before the passive bar decision
             if (layer == PlayerLayer.PICKER) closeLayer() // §3.4.3: a picker closes when the tuned identity changes
             favourite = null
-            if (layer == PlayerLayer.QUICK_BAR) tunedChannel?.let { queryFavourite(it, FavPurpose.QUICK) }
+            // (Settings panel §2.2) The quick bar under the panel refreshes its values for the new channel too.
+            if (layer == PlayerLayer.QUICK_BAR || layer == PlayerLayer.SETTINGS_PANEL) tunedChannel?.let {
+                queryFavourite(it, FavPurpose.QUICK)
+                if (layer == PlayerLayer.SETTINGS_PANEL) loadProgrammesFor(it, force = false)
+            }
             if (layer == PlayerLayer.INFO) {
                 infoChannel = tunedChannel
                 infoFocused = -1
@@ -1975,7 +2056,12 @@ class PlayerStateMachineImpl(
         val st = statusForTuned()
         val pill = PillRules.pill(tuned, st, curMs)
         val info = infoState(pill)
-        val quick = if (layer == PlayerLayer.QUICK_BAR) quickState() else null
+        val quick = when (layer) {
+            PlayerLayer.QUICK_BAR -> quickState()
+            // (Settings panel §2.2, §5.8) Visible under the panel, Settings drawn active (not focused); takes no keys.
+            PlayerLayer.SETTINGS_PANEL -> quickState().let { q -> q.copy(focused = q.items.indexOf(QuickItem.SETTINGS).coerceAtLeast(0), panelOpen = true) }
+            else -> null
+        }
         // Demand SCORE_PICKER exactly while a score sheet (or its delay list) is showing (§6).
         val wantScoreDemand = layer == PlayerLayer.PICKER && picker?.kind.let { it == PickerKind.SCORE_BUG || it == PickerKind.SCORE_DELAY }
         if (wantScoreDemand != scoreDemandOn) { scoreDemandOn = wantScoreDemand; effects.scorePicker(wantScoreDemand) }
@@ -2063,7 +2149,7 @@ class PlayerStateMachineImpl(
             val focused = if (at >= 0) at else p.focused.coerceIn(0, (choices.size - 1).coerceAtLeast(0))
             val fixed = if (choices.getOrNull(focused)?.selectable == false) firstSelectable(choices) else focused
             picker = p.copy(choices = choices, current = currentChoice(p.kind, choices), focused = fixed)
-        } else if (layer != PlayerLayer.QUICK_BAR && layer != PlayerLayer.PLACE_SCORE) {
+        } else if (layer != PlayerLayer.QUICK_BAR && layer != PlayerLayer.PLACE_SCORE && layer != PlayerLayer.SETTINGS_PANEL) {
             return // bare video and the rest: the UI state carries no scores, so nothing to publish
         }
         publish()

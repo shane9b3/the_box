@@ -30,6 +30,7 @@ import app.thebox.core.settings.SettingsEffects
 import app.thebox.core.settings.SettingsEvent
 import app.thebox.core.settings.SettingsMachine
 import app.thebox.core.settings.SettingsMachineFactory
+import app.thebox.core.settings.SettingsPresentation
 import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.settings.SettingsRow
 import app.thebox.core.settings.SettingsUiState
@@ -119,6 +120,16 @@ class SettingsMachineImpl(
     private val changed = LinkedHashSet<EffectTiming>()
     private var visitOpen = false
 
+    /** (Settings panel §2.1) The presentation [present] last chose; published in [SettingsUiState.presentation]. */
+    private var presentation = SettingsPresentation.FULL_SCREEN
+    /**
+     * (§2.1, N5) The displayed route whose page [present] asked to rebuild: its old page stays shown until the rebuild
+     * lands, and that rebuild is taken whatever its version (a source may number its pages per build).
+     */
+    private var rebuildForPresentation: SettingsRoute? = null
+    /** (§2.3, N10) [announceOpen] waits for the displayed page's title. */
+    private var announcePending = false
+
     /** A PIN request in flight: what runs when [SettingsEvent.PinResult] grants it. */
     private var pinToken = 0L
     private var pinPending: (() -> Unit)? = null
@@ -200,7 +211,54 @@ class SettingsMachineImpl(
         effects.onClosed(timings)
         // The next visit rebuilds its pages (sources stop observing when Settings closes).
         pages.clear(); listRows.clear(); requested.clear()
+        rebuildForPresentation = null
+        announcePending = false
         publish()
+    }
+
+    /**
+     * (Settings panel §2.1, N5, S10) Switches the presentation. Path, stack, cursors, overlays and the visit are untouched
+     * ([onLeave] is not run, and no [SettingsEffects.onClosed]). The page cache is cleared, so every page on the path is
+     * rebuilt with the new presentation's texts (`PageContext.panel`, read by the effects from [ui]) when it is next shown;
+     * the displayed page is rebuilt now and stays shown until its rebuild lands, so an open option list, menu, confirm
+     * card or move mode keeps its row. Dispatches nothing to the guide. Idempotent.
+     */
+    override fun present(p: SettingsPresentation) {
+        if (p == presentation) return
+        presentation = p
+        val shown = if (visitOpen) displayedRoute() else null
+        val keep = shown?.let { pages[it] }
+        pages.clear(); listRows.clear(); requested.clear()
+        rebuildForPresentation = null
+        if (shown != null) {
+            if (keep != null) {
+                pages[shown] = keep
+                rebuildForPresentation = shown
+            }
+            effects.loadPage(shown)
+        }
+        publish()
+    }
+
+    /**
+     * (§2.3, N10) "Settings, <page title>" once the displayed page is known ("Settings" on the root list), through the
+     * shell link (a shared flow the shell collects: never inside the caller's dispatch).
+     */
+    override fun announceOpen() {
+        announcePending = true
+        flushAnnounce()
+    }
+
+    private fun flushAnnounce() {
+        if (!announcePending) return
+        val text = if (pane == Pane.SECTIONS && currentRoute() == SettingsRoute.Root) {
+            texts[SettingsText.PANEL_ANNOUNCE_OPEN_ROOT]
+        } else {
+            val page = pages[currentRoute()] ?: return
+            if (page.title.isBlank()) texts[SettingsText.PANEL_ANNOUNCE_OPEN_ROOT] else texts[SettingsText.PANEL_ANNOUNCE_OPEN, page.title]
+        }
+        announcePending = false
+        post(SettingsShellEvent.Announce(text))
     }
 
     override fun dispatch(event: SettingsEvent) {
@@ -858,7 +916,9 @@ class SettingsMachineImpl(
         if (!visitOpen) return
         val page = incoming
         val old = pages[page.route]
-        if (old != null && old.version > page.version) return
+        val presentationRebuild = rebuildForPresentation == page.route
+        if (old != null && old.version > page.version && !presentationRebuild) return
+        if (presentationRebuild) rebuildForPresentation = null
         val keepRows = listRows[page.route]
         if (old == null || old.version != page.version || page.list == null) {
             listRows.remove(page.route); requested.remove(page.route)
@@ -898,6 +958,7 @@ class SettingsMachineImpl(
         if (menu != null && findRow(menu!!.row) == null) menu = null
         if (move != null && findRow(move!!.row) == null) move = null
         requestItemsAround(pub)
+        flushAnnounce()
     }
 
     private fun onItems(e: SettingsEvent.Items) {
@@ -1045,6 +1106,7 @@ class SettingsMachineImpl(
             captureButton = if (capture != null) captureFlow.focusedButton else 0,
             captureTest = capture != null && captureFlow.testMode,
             captureReport = if (capture != null) captureFlow.testReport else null,
+            presentation = presentation,
         )
         if (next != _ui.value) _ui.value = next
         val deadline = minOf(noticeUntilMs, captureUntilMs)

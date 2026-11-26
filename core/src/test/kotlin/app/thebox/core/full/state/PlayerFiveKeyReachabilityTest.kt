@@ -123,20 +123,33 @@ class PlayerFiveKeyReachabilityTest {
             val next = ArrayList<List<BoxAction>>()
             for (seq in frontier) for (k in keys) {
                 val w = world(start, s)
-                for (a in seq) w.press(a)
+                for (a in seq) pressAsGuide(w, a)
                 val quickFocus = if (k == SELECT) w.ui.quick?.let { it.items[it.focused] } else null
                 val mark = w.mark()
-                w.press(k)
+                pressAsGuide(w, k)
                 r.effects += w.effectsSince(mark)
                 quickFocus?.let { r.quickSelected += it }
                 if (w.kind(startHash) != startKind) continue // another kind of state: counted, not expanded
                 observe(w, r)
+                // (Settings panel §2.2) The panel's keys belong to the settings machine: reached, not expanded.
+                if (w.ui.layer == PlayerLayer.SETTINGS_PANEL) continue
                 if (seen.add(signature(w))) next += seq + k
             }
             frontier = next
             if (frontier.isEmpty() || seen.size > 20_000) break
         }
         return r
+    }
+
+    /**
+     * (Settings panel, docs/design/m6-player-settings-panel.md §2.2) [k] as the composed host delivers it, with the guide's
+     * answer to the quick bar's Settings in FULL: `settingsPanel(true)` (the guide opens the panel). SETTINGS_PANEL is
+     * thus reached with the five keys (Settings on the quick bar, OK) in every start state.
+     */
+    private fun pressAsGuide(w: PlayerWorld, k: BoxAction) {
+        val mark = w.mark()
+        w.press(k)
+        if ("openSettings" in w.effectsSince(mark)) { w.player.settingsPanel(true); w.flush() }
     }
 
     @ParameterizedTest
@@ -215,9 +228,7 @@ class PlayerFiveKeyReachabilityTest {
     private fun assertReach(start: Start, u: UpDownInPlayer, layers: List<PlayerLayer>, items: List<QuickItem>, scrub: List<ScrubFocus>, effects: List<String>) {
         val r = search(start, PlayerSettings(upDown = u))
         val missing = buildList {
-            // (Settings panel commit 0) SETTINGS_PANEL is entered by the guide (`settingsPanel(true)`), not by the player's
-            // five keys; A2 decides whether this player-only search reaches it.
-            addAll(layers.filter { it !in r.layers && it != PlayerLayer.SETTINGS_PANEL })
+            addAll(layers.filter { it !in r.layers })
             addAll(items.filter { it !in r.quickSelected }.map { "quick:$it" })
             addAll(PickerKind.entries.filter { it !in r.pickers }.map { "picker:$it" }) // M5 integration: SERVER is offered (Sources)
             addAll(scrub.filter { it !in r.scrub }.map { "scrub:$it" })
