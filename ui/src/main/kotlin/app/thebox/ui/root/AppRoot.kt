@@ -153,11 +153,34 @@ fun toastBottomFor(shown: ScreenMode, bar: PlayerBar): Float = when {
 
 fun toastBottomFor(shown: ScreenMode, player: PlayerUiState): Float = toastBottomFor(shown, barOf(player))
 
-/** Right offset (design px) of the reminder card: 64, or 568 while the picker sheet is open in FULL (N8). */
+/**
+ * Right offset (design px) of the reminder card: 64, or 568 while the picker sheet (or the settings panel, which sits in
+ * the picker box: docs/design/m6-player-settings-panel.md §5.11) is open in FULL (N8).
+ */
 fun reminderEndFor(shown: ScreenMode, pickerOpen: Boolean): Float =
     if (shown == ScreenMode.FULL && pickerOpen) PlayerUi.REMINDER_R_BESIDE_PICKER else PlayerUi.REMINDER_R
 
 fun reminderEndFor(shown: ScreenMode, player: PlayerUiState): Float = reminderEndFor(shown, player.picker != null)
+
+/** The settings panel's slot in the key sink (docs/design/m6-player-settings-panel.md §5.13); `SettingsPanel` draws inside. */
+const val SETTINGS_PANEL_SLOT_TAG = "settings_panel_slot"
+
+/**
+ * (Settings panel §2.6, S10) The posted expand check for navigation outside a key (a page source's push, replace, popTo
+ * or pushGated, a PIN grant's step): each time the settings machine shows a route that expands while it is presented as
+ * the PANEL, [dispatch] gets one `GuideEvent.ExpandSettings`. `AppRoot` runs it in a `LaunchedEffect`, so the dispatch is
+ * a later main-thread turn, never inside the machine's own dispatch; the guide's handler is idempotent and checks again.
+ * A key's own expand is the guide's (after `SettingsMachine.act` returns): by the time this collector resumes the
+ * machine is FULL_SCREEN again and the StateFlow has conflated the PANEL value away (and a duplicate would be a no-op).
+ */
+suspend fun collectPanelExpands(
+    ui: kotlinx.coroutines.flow.Flow<app.thebox.core.settings.SettingsUiState>,
+    dispatch: (app.thebox.core.guide.GuideEvent) -> Unit,
+) {
+    ui.map { s ->
+        s.route.takeIf { s.presentation == app.thebox.core.settings.SettingsPresentation.PANEL && app.thebox.core.settings.state.SettingsPanelRules.expands(it) }
+    }.distinctUntilChanged().collect { route -> if (route != null) dispatch(app.thebox.core.guide.GuideEvent.ExpandSettings) }
+}
 
 /**
  * The root tree (docs/design/m3-guide.md §3.13.1, B1, B8; M4 docs/design/m4-player-ux.md §3.6.3):
@@ -168,7 +191,8 @@ fun reminderEndFor(shown: ScreenMode, player: PlayerUiState): Float = reminderEn
  *   HoleChrome                 // corners, ring, letterbox, still, scrim; drawn after the surface
  *   SubtitleLayer              // (M4, FULL; Sports Hub: SPORTS + clip) AndroidView(SubtitleView) on the video rect; a direct child (N11)
  *   Box(key sink) {            // the one key sink (WP-D's KeyRouter.sinkModifier), survives every mode change
- *     GUIDE | FULL | SEARCH | SETTINGS screen (M5: SettingsScreen, in-tree overlays only); reminder card; toast
+ *     GUIDE | FULL | SEARCH | SETTINGS screen (M5: SettingsScreen, in-tree overlays only); settings panel (over FULL,
+ *     docs/design/m6-player-settings-panel.md §5.13); reminder card; PIN pad; toast
  *   }
  * }
  * ```
@@ -386,6 +410,8 @@ fun AppRoot(
     }
     val editorOpen by editorOpenFlow.collectAsState(initial = false)
     LaunchedEffect(editorOpen) { if (!editorOpen) requestSinkFocus(requester) }
+    // (Settings panel §2.6, S10) The posted expand collector: a route that needs the whole canvas, reached outside a key.
+    LaunchedEffect(settingsUiFlow, host.machine) { settingsUiFlow?.let { f -> collectPanelExpands(f, host.machine::dispatch) } }
     // ON_RESUME (B1) re-takes sink focus. U1 (code review 2026-11-09): not in SEARCH, SPORTS or the settings text editor,
     // which are on Compose focus: on the sink they would never see BACK. Compose keeps their focused child across a pause.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -404,7 +430,9 @@ fun AppRoot(
     val anchor = remember(ui.overlay) { if (ui.overlay is Overlay.Menu || ui.overlay is Overlay.Sheet) cellAnchor(host, density) else null }
     val ambientShadowHole = if (holeMode == HoleMode.MINI || holeMode == HoleMode.STILL) rects.hole else null
     val toastBottom = toastBottomFor(shown, playerBar)
-    val reminderEnd = reminderEndFor(shown, pickerOpen)
+    // (Settings panel §5.11) The panel sits in the picker box: the reminder card moves beside it.
+    val panelShown = shown == ScreenMode.FULL && ui.settingsPanel && settingsMachine != null
+    val reminderEnd = reminderEndFor(shown, pickerOpen || panelShown)
     // (Score bug commit 0, docs/design/m6-score-bug.md §4.4, A-B2) What only the root knows: its toast, the reminder card
     // and a modal (the PIN pad, the exit dialog).
     val scoreFacts = app.thebox.core.sports.ScoreBugHostFacts(
@@ -460,6 +488,13 @@ fun AppRoot(
                         } else {
                             // S11: the settings machine is not attached yet; the guide machine waits. Opaque, covers the hole.
                             Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(SETTINGS_TAG))
+                        }
+                    }
+                    // (Settings panel §5.13) Over FULL's overlays, below the reminder card, the PIN pad and the toast. A
+                    // key-sink child, never an ancestor of VideoLayer; no layer or clip on this slot (§6).
+                    if (panelShown && settingsMachine != null) {
+                        Box(Modifier.fillMaxSize().testTag(SETTINGS_PANEL_SLOT_TAG)) {
+                            app.thebox.ui.settings.SettingsPanel(settingsMachine, lowEnd)
                         }
                     }
                     if (shown == ScreenMode.GUIDE || shown == ScreenMode.FULL) {

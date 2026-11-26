@@ -181,10 +181,14 @@ class WpaPages(
             artwork.status.drop(1).map { },
         )
 
-    override suspend fun page(route: SettingsRoute, ctx: PageContext): PageModel = build(route, ctx.advanced)
+    override suspend fun page(route: SettingsRoute, ctx: PageContext): PageModel = build(route, ctx.advanced, ctx.panel)
 
-    /** Builds [route]'s page synchronously (tests and [page]). */
-    fun build(route: SettingsRoute, advanced: Boolean): PageModel {
+    /**
+     * Builds [route]'s page synchronously (tests and [page]). (Settings panel A4, docs/design/m6-player-settings-panel.md
+     * §4.4, S8) With [panel] the rows' descriptions omit the appended timing sentence: the panel's band draws the timing
+     * as its own first line from `row.effect`, so the description would repeat it.
+     */
+    fun build(route: SettingsRoute, advanced: Boolean, panel: Boolean = false): PageModel {
         val id = (route as SettingsRoute.Section).id
         val rows = when (id) {
             SectionId.GUIDE -> guideRows()
@@ -195,6 +199,7 @@ class WpaPages(
             SectionId.SPORTS -> sportsRows()
             else -> emptyList()
         }.filter { advanced || it.visibility == Visibility.SIMPLE }
+            .let { rs -> if (panel) rs.map(::withoutTiming) else rs }
         return PageModel(route = route, title = texts.section(id), rows = rows, version = version.incrementAndGet())
     }
 
@@ -850,6 +855,22 @@ class WpaPages(
         EffectTiming.NEXT_LAUNCH -> t(SettingsText.EFFECT_NEXT_LAUNCH)
         EffectTiming.RESTART -> t(SettingsText.EFFECT_RESTART)
         EffectTiming.LIVE, EffectTiming.NONE, null -> null
+    }
+
+    /**
+     * (Settings panel A4, §4.4) [r] without the timing sentence [row] appended ("<description> · <effect>", or the effect
+     * alone). A description a builder replaced afterwards (text size) is kept as it is.
+     */
+    private fun withoutTiming(r: SettingsRow): SettingsRow {
+        val effect = effectText(r.id) ?: return r
+        val d = r.description ?: return r
+        val tail = t(SettingsText.SEP) + effect
+        val stripped = when {
+            d == effect -> null
+            d.endsWith(tail) -> d.removeSuffix(tail)
+            else -> return r
+        }
+        return r.copy(description = stripped)
     }
 
     private fun row(id: RowId, label: String, kind: RowKind, value: String? = null, description: String? = null): SettingsRow {

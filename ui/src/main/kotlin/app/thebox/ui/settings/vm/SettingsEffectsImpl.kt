@@ -1,17 +1,21 @@
 package app.thebox.ui.settings.vm
 
 import app.thebox.core.catchup.archive.LiveSettingsApplier
+import app.thebox.core.catchup.archive.PanelApplyResult
 import app.thebox.core.common.BoxLog
 import app.thebox.core.settings.EffectTiming
 import app.thebox.core.settings.PageModel
+import app.thebox.core.settings.RowId
 import app.thebox.core.settings.RowIntent
 import app.thebox.core.settings.SettingsEffects
 import app.thebox.core.settings.SettingsEvent
 import app.thebox.core.settings.SettingsMachine
+import app.thebox.core.settings.SettingsPresentation
 import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.settings.SettingsStore
 import app.thebox.core.settings.state.PageContext
 import app.thebox.core.settings.state.SettingsPageSource
+import app.thebox.core.settings.state.SettingsPanelRules
 import app.thebox.core.settings.state.SettingsShellEvent
 import app.thebox.core.settings.state.SettingsShellLink
 import app.thebox.core.settings.state.SettingsText
@@ -22,6 +26,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -36,6 +41,11 @@ import java.util.concurrent.atomic.AtomicLong
  * row changed during the visit and flushes the store.
  *
  * [machine] is set right after construction (the machine needs the effects first).
+ *
+ * In-player panel, stage A (docs/design/m6-player-settings-panel.md §4.2): pages are built with `PageContext.panel` while
+ * the machine's presentation is PANEL; a REPREPARE row changed in the panel is applied [SettingsPanelRules.APPLY_DEBOUNCE_MS]
+ * after the change through [LiveSettingsApplier.applyFromPanel], with an honest notice (never "Applied"); [onClosed] does
+ * not apply again for a change the panel already applied ([skipNextReapply]).
  */
 class SettingsEffectsImpl(
     private val sources: List<SettingsPageSource>,
@@ -53,7 +63,22 @@ class SettingsEffectsImpl(
     private val builds = HashMap<SettingsRoute, Job>()
     private val placeholderVersion = AtomicLong(0)
 
-    private fun ctx() = PageContext(advanced = true, nowMs = nowMs())
+    private fun ctx() = PageContext(advanced = true, nowMs = nowMs(), panel = panelShown())
+
+    private fun panelShown(): Boolean = machine.ui.value.presentation == SettingsPresentation.PANEL
+
+    /** (§4.2) The debounced panel apply waiting to run, if any (main thread). */
+    private var pendingApply: Job? = null
+
+    /**
+     * (§4.2 "Close", R9) True while every REPREPARE change of this visit has been applied by the panel: [onClosed] then
+     * does not re-prepare a second time. Set when a panel apply ran (any result but CARD_SHOWN); cleared by a new
+     * REPREPARE change (in either presentation) until its apply runs, and at the end of each visit.
+     */
+    private var skipNextReapply = false
+
+    /** Counts visits ([onClosed]): an intent still writing when Settings closes schedules nothing into the next one. */
+    private var visit = 0L
 
     private fun sourceFor(route: SettingsRoute): SettingsPageSource? = sources.firstOrNull { it.handles(route) }
 
@@ -118,11 +143,69 @@ class SettingsEffectsImpl(
     override fun onIntent(intent: RowIntent) {
         val route = machine.ui.value.page?.route ?: machine.ui.value.route
         val ctx = ctx()
+        // (§4.2) Read on the main thread when the user made the change: the presentation it was made in, and its timing.
+        val reprepare = effectOf(intent.row) == EffectTiming.REPREPARE
+        // A REPREPARE change not applied yet: leaving Settings must apply it (unless the panel applies it first).
+        if (reprepare) skipNextReapply = false
+        val inVisit = visit
         scope.launch(main) {
             // U-L1: OK twice on a toggle of a suspending source must store the second value, not whichever ends last.
             intents.withLock { runIntent(route, intent, ctx) }
             rebuildDisplayed()
+            // (§4.2) After the write: the re-prepare reads the stored value.
+            if (reprepare && ctx.panel && inVisit == visit) scheduleApply()
         }
+    }
+
+    /**
+     * (§4.2, S4) The registry timing of [id]: its own spec, else the nearest parent row's (`playlist.headers.h.2` →
+     * `playlist.headers`), else the timing the displayed row carries.
+     */
+    private fun effectOf(id: RowId): EffectTiming? {
+        var key = id.key
+        while (true) {
+            SettingsTree.spec(RowId(key))?.let { return it.effect }
+            val dot = key.lastIndexOf('.')
+            if (dot <= 0) break
+            key = key.substring(0, dot)
+        }
+        val page = machine.ui.value.page ?: return null
+        return page.rows.firstOrNull { it.id == id }?.effect
+            ?: page.list?.loaded?.values?.firstNotNullOfOrNull { l -> l.firstOrNull { it.id == id } }?.effect
+    }
+
+    /** (§4.2) One panel apply [SettingsPanelRules.APPLY_DEBOUNCE_MS] after the last REPREPARE change (main thread). */
+    private fun scheduleApply() {
+        pendingApply?.cancel()
+        pendingApply = scope.launch(main) {
+            delay(SettingsPanelRules.APPLY_DEBOUNCE_MS)
+            pendingApply = null
+            // Expanded to full screen meanwhile: the video is covered, so leaving Settings applies it (skip stays clear).
+            if (panelShown()) applyFromPanel(notify = true)
+        }
+    }
+
+    /** Runs [LiveSettingsApplier.applyFromPanel] and shows its notice (§4.2); main thread. */
+    private fun applyFromPanel(notify: Boolean) {
+        val result = try {
+            applier.applyFromPanel()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            BoxLog.e(TAG, "re-prepare from the panel failed", e)
+            return
+        }
+        BoxLog.i(TAG) { "reapply from panel: $result" }
+        // CARD_SHOWN applied nothing: leaving Settings still calls apply(), as today (Retry is the user's).
+        skipNextReapply = result != PanelApplyResult.CARD_SHOWN
+        if (!notify) return
+        val notice = when (result) {
+            PanelApplyResult.REPREPARING -> SettingsText.PANEL_NOTICE_REPREPARING
+            PanelApplyResult.WAITS_FOR_RESUME -> SettingsText.PANEL_NOTICE_WAITS_FOR_RESUME
+            PanelApplyResult.CARD_SHOWN -> SettingsText.PANEL_NOTICE_CARD_SHOWN
+            PanelApplyResult.NOTHING_PLAYING -> null
+        }
+        if (notice != null) machine.dispatch(SettingsEvent.Notice(texts[notice]))
     }
 
     private suspend fun runIntent(route: SettingsRoute, intent: RowIntent, ctx: PageContext) {
@@ -158,7 +241,17 @@ class SettingsEffectsImpl(
         builds.clear()
         staleWhileBuilding.clear()
         for (r in (u.stack + u.route + listOfNotNull(u.page?.route) + loading).toSet()) sourceFor(r)?.closed(r)
-        if (EffectTiming.REPREPARE in changedTimings) {
+        // (§4.2 "Close") A debounced panel apply still waiting runs now, in place of the apply below (no notice: the
+        // panel is closing). One that is waiting while full screen is shown (expanded) is dropped: the apply below runs.
+        pendingApply?.let { job ->
+            job.cancel()
+            pendingApply = null
+            if (u.presentation == SettingsPresentation.PANEL) applyFromPanel(notify = false)
+        }
+        val skip = skipNextReapply
+        skipNextReapply = false
+        visit++
+        if (EffectTiming.REPREPARE in changedTimings && !skip) {
             try {
                 applier.apply()
             } catch (e: Exception) {

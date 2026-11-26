@@ -64,7 +64,9 @@ import app.thebox.core.playback.NextStep
 import app.thebox.core.playback.PlaybackErrorCode
 import app.thebox.core.settings.SettingsEvent
 import app.thebox.core.settings.SettingsMachine
+import app.thebox.core.settings.SettingsPresentation
 import app.thebox.core.settings.SettingsRoute
+import app.thebox.core.settings.state.SettingsPanelRules
 import app.thebox.core.full.PlayerEvent
 import app.thebox.core.parental.ParentalAccess
 import app.thebox.core.parental.ParentalActions
@@ -158,6 +160,8 @@ class GuideStateMachineImpl(
     override var settings: SettingsMachine? = null
         set(value) {
             if (field === value) return
+            // (Settings panel, S2) A machine replaced or detached while the panel is open ends that machine's visit first.
+            if (settingsPanel) external { closePanel() }
             field = value
             value?.pinGate = this
             if (value != null && _ui.value.mode == ScreenMode.SETTINGS) value.open(settingsRoute, settingsFromFull, settingsDetached)
@@ -166,9 +170,13 @@ class GuideStateMachineImpl(
     /** (M5, WP-C) What the PIN layer asks the host for beyond `GuideEffects.verifyPin` (PIN creation, Open anyway). */
     override var parentalActions: ParentalActions? = null
 
-    /** (M5, §2.12 item 5, S3) The settings editor is open: the router hands every key but BACK to Compose. */
+    /**
+     * (M5, §2.12 item 5, S3) The settings editor is open: the router hands every key but BACK to Compose. (Settings panel
+     * §2.2) Also while the in-player settings panel is open.
+     */
     override val textInputActive: Boolean
-        get() = _ui.value.mode == ScreenMode.SETTINGS && settings?.textInputActive == true
+        get() = _ui.value.let { it.mode == ScreenMode.SETTINGS || (it.mode == ScreenMode.FULL && it.settingsPanel) } &&
+            settings?.textInputActive == true
 
     private val limits = GuideLimits(labels)
     private val number = NumberEntryImpl()
@@ -203,6 +211,16 @@ class GuideStateMachineImpl(
     private var settingsDetached = false
     /** (M5 commit 0) The route SETTINGS was opened on (FirstRun: BACK exits while the settings machine is missing, S11). */
     private var settingsRoute: SettingsRoute = SettingsRoute.Root
+    /**
+     * (Settings panel, docs/design/m6-player-settings-panel.md §2.3) The in-player settings panel is open over FULL; mirrored
+     * in [GuideUiState.settingsPanel]. Only [openPanel] sets it; [closePanel] and [expandPanel] clear it.
+     */
+    private var settingsPanel = false
+    /** (Settings panel §2.3) The open panel visit is an error card's detached route: it is never remembered (Q5). */
+    private var panelDetached = false
+    /** (Settings panel §2.3, Q5) Where the last non-detached panel visit was when it closed, and when. */
+    private var lastPanelRoute: SettingsRoute? = null
+    private var panelClosedAtMs = Long.MIN_VALUE
     private var archive: ArchiveStatus? = null
     /** Identity hash of a live channel tuned from Search: FULL on its first active Tuned (§2.13 item 7). */
     private var pendingFullHash = 0L
@@ -339,6 +357,8 @@ class GuideStateMachineImpl(
     override fun handles(action: BoxAction): Boolean {
         val s = _ui.value
         if (s.mode != ScreenMode.FULL || s.overlay != null || s.reminder != null) return true
+        // (Settings panel §2.2) The panel takes every key; only PLAY_PAUSE is passed through to the player.
+        if (s.settingsPanel && action != BoxAction.PLAY_PAUSE) return true
         return full?.handles(action) ?: true
     }
 
@@ -359,6 +379,11 @@ class GuideStateMachineImpl(
 
     /** Publishes [u], the frame version and the deadline (the end of every dispatch, and of an outside [request]). */
     private fun publish() {
+        // (Settings panel §2.3, S2) One source of truth: the panel exists only over FULL with both machines attached, so any
+        // path that changed the mode directly (commitEntry, cancelPin, fullKey, …) ends the visit here; then the player
+        // hears the flag on every dispatch (idempotent).
+        if (settingsPanel && (u.mode != ScreenMode.FULL || full == null || settings == null)) closePanel()
+        full?.settingsPanel(settingsPanel)
         refreshUpdate()
         refreshLeftEdge()
         frame.gridFocused = u.zone == Zone.GRID
@@ -430,8 +455,8 @@ class GuideStateMachineImpl(
                 if (updateCard == null) updateFocused = false
             }
             is GuideEvent.SourceHolding -> onSourceHolding(event.token, event.source)
-            // (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.6) The panel never opens yet; A1 expands it.
-            GuideEvent.ExpandSettings -> Unit
+            // (Settings panel §2.6, S10) Posted by AppRoot after navigation outside a key; idempotent.
+            GuideEvent.ExpandSettings -> if (settingsPanel && settings?.ui?.value?.route?.let(SettingsPanelRules::expands) == true) expandPanel()
         }
     }
 
@@ -488,6 +513,8 @@ class GuideStateMachineImpl(
         // H-S11: a fresh press (repeat 0) of any key ends every hold, so a lost key-up cannot leave a hold stuck.
         if (a.repeat == 0) clearHolds(action)
         endBoot() // a key always ends the boot blank (a cancelled startup PIN, a refused tune)
+        // (Settings panel §2.2) The open panel owns every key before the guide's overlays, the player and the globals.
+        if (u.mode == ScreenMode.FULL && settingsPanel) { panelKey(a); return }
         if (action == BoxAction.PLAY && u.mode == ScreenMode.GUIDE && guidePlay()) return
         if (u.overlay != null && overlayKey(a)) return
         // M4 §3.1.1 step 3: in FULL the player machine takes the action first; false falls through to the guide.
@@ -553,7 +580,7 @@ class GuideStateMachineImpl(
 
     private fun release(action: BoxAction) {
         if (u.mode == ScreenMode.FULL) full?.release(action)
-        if (u.mode == ScreenMode.SETTINGS) settings?.release(action)
+        if (u.mode == ScreenMode.SETTINGS || (u.mode == ScreenMode.FULL && settingsPanel)) settings?.release(action)
         when (action) {
             BoxAction.UP, BoxAction.DOWN, BoxAction.ZAP_UP, BoxAction.ZAP_DOWN, BoxAction.PAGE_UP, BoxAction.PAGE_DOWN -> {
                 if (holdingVertical) {
@@ -878,6 +905,7 @@ class GuideStateMachineImpl(
         when (from) {
             EntryFrom.FULL -> {
                 val wasFull = u.mode == ScreenMode.FULL
+                closePanel() // (Settings panel, S2) before the player leaves FULL; publish() is the backstop
                 u = u.copy(mode = ScreenMode.GUIDE, zone = Zone.GRID, overlay = null, groupCard = null)
                 groupCardUntil = Long.MAX_VALUE
                 effects.setFullScreen(false)
@@ -961,6 +989,7 @@ class GuideStateMachineImpl(
         if (u.mode == mode) return
         leavingSettings(mode)
         val wasFull = u.mode == ScreenMode.FULL
+        if (wasFull) closePanel() // (Settings panel, S2) before the player leaves FULL; publish() is the backstop
         u = u.copy(mode = mode, overlay = if (mode == ScreenMode.FULL) null else u.overlay)
         if (wasFull && mode != ScreenMode.FULL) { effects.setFullScreen(false); full?.leaveFull() }
         if (mode == ScreenMode.GUIDE) settingsFromFull = false
@@ -994,6 +1023,11 @@ class GuideStateMachineImpl(
      * settings machine, when attached, opens on the route (else the `settings` setter opens it on attach, S11).
      */
     private fun openSettings(route: SettingsRoute = SettingsRoute.Root, detached: Boolean = false) {
+        // (Settings panel §2.3, §3) From FULL with both machines attached, a route the panel can show opens the panel.
+        if (u.mode == ScreenMode.FULL && settings != null && full != null && !SettingsPanelRules.expands(route)) {
+            openPanel(route, detached)
+            return
+        }
         // C-S1: a detached route is an error card's from FULL; BACK returns there (settingsFromFull) whatever the mode.
         val fromFull = u.mode == ScreenMode.FULL || detached
         endBoot() // Settings opened during the boot blank (an error card, the debug route): the blank must not outlive it.
@@ -1018,6 +1052,98 @@ class GuideStateMachineImpl(
             return
         }
         openSettings(route)
+    }
+
+    // ---------------------------------------------------------------- settings panel (docs/design/m6-player-settings-panel.md)
+
+    /**
+     * (§2.3) Opens the in-player panel over FULL: the mode stays FULL, the guide's overlays (number entry, exit hint,
+     * group card) close, the machine is switched to PANEL **before** [SettingsMachine.open] so the first page is built
+     * with `ctx.panel`. The player hears the flag at the end of this dispatch ([publish]). A panel already open ends its
+     * visit first (one `onLeave` per visit, S9).
+     */
+    private fun openPanel(route: SettingsRoute, detached: Boolean) {
+        val s = settings ?: return
+        if (settingsPanel) closePanel()
+        endBoot()
+        closeOverlay()
+        if (u.groupCard != null) u = u.copy(groupCard = null)
+        groupCardUntil = Long.MAX_VALUE
+        val target = reopenRoute(route, detached)
+        settingsPanel = true
+        panelDetached = detached
+        u = u.copy(settingsPanel = true)
+        s.present(SettingsPresentation.PANEL)
+        s.open(target, fromFull = true, detached = detached)
+        s.announceOpen() // N10: "Settings, <page title>", posted by the machine once the page is known
+    }
+
+    /**
+     * (Q5, lead ruling) A non-detached Root request reopens the last panel page when the panel closed less than
+     * [SettingsPanelRules.PANEL_REOPEN_MS] ago (`open` rebuilds the parents; cursor memory survives `onLeave`). A remembered
+     * route that expands is not reopened in the panel. Detached visits are never remembered.
+     */
+    private fun reopenRoute(route: SettingsRoute, detached: Boolean): SettingsRoute {
+        if (detached || route != SettingsRoute.Root) return route
+        val last = lastPanelRoute ?: return route
+        if (SettingsPanelRules.expands(last) || curMs - panelClosedAtMs > SettingsPanelRules.PANEL_REOPEN_MS) return route
+        return last
+    }
+
+    /**
+     * (§2.3, S2) Ends the panel visit: `onLeave` once, then back to the FULL_SCREEN presentation. The player is told at
+     * once (before any `leaveFull` that follows in the same dispatch) and again by [publish]. Idempotent.
+     */
+    private fun closePanel() {
+        if (!settingsPanel) return
+        settingsPanel = false
+        u = u.copy(settingsPanel = false)
+        val s = settings
+        if (!panelDetached) { lastPanelRoute = s?.ui?.value?.route; panelClosedAtMs = curMs }
+        s?.onLeave()
+        s?.present(SettingsPresentation.FULL_SCREEN)
+        full?.settingsPanel(false)
+    }
+
+    /**
+     * (§2.3, §2.6, S10) The panel's route needs the whole canvas, or the user asked for it (S11): full-screen Settings on
+     * the same path and cursor. The visit continues (no `onLeave`); BACK at its Root returns to FULL ([settingsFromFull]).
+     * Never called from inside [SettingsMachine.act]: after it returns ([panelKey]) or from a posted [GuideEvent.ExpandSettings].
+     */
+    private fun expandPanel() {
+        if (!settingsPanel) return
+        val s = settings ?: return closePanel()
+        settingsPanel = false // before setMode: neither setMode nor publish() ends this visit
+        u = u.copy(settingsPanel = false)
+        full?.settingsPanel(false)
+        settingsRoute = s.ui.value.route
+        settingsDetached = panelDetached
+        setMode(ScreenMode.SETTINGS) // leaves FULL as the full-screen path does (F2)
+        settingsFromFull = true
+        s.present(SettingsPresentation.FULL_SCREEN) // same path and cursor; the page cache is rebuilt
+        s.announceOpen()
+    }
+
+    /**
+     * (§2.2, S1, S10, S11) Every key while the panel is open (after the PIN prompt and the reminder card). PLAY_PAUSE is
+     * the one key passed through to the player; the Settings key (anywhere) and Menu on the root list expand; the rest go
+     * to the settings machine, and the expand rule is checked after it returns. What it declines: BACK closes the panel
+     * (root list, or a detached bottom page), the Guide key closes it and enters the guide, Exit closes it and runs the
+     * exit step. A held BACK arrives as PLAY (GUIDE key table) and is the settings machine's.
+     */
+    private fun panelKey(a: GuideEvent.Act) {
+        val s = settings ?: return closePanel()
+        if (a.action == BoxAction.PLAY_PAUSE) { full?.act(a); return }
+        if (SettingsPanelRules.expandKey(s.ui.value, a.action)) { expandPanel(); return }
+        val consumed = s.act(a)
+        if (settingsPanel && SettingsPanelRules.expands(s.ui.value.route)) { expandPanel(); return }
+        if (consumed || !settingsPanel) return
+        when (a.action) {
+            BoxAction.BACK -> closePanel()
+            BoxAction.OPEN_GUIDE -> { closePanel(); returnToGuide() }
+            BoxAction.EXIT -> { closePanel(); exitStep() }
+            else -> Unit
+        }
     }
 
     // ---------------------------------------------------------------- PIN layer (M5, WP-C; §0.9, §3.9.2, §3.9.3)

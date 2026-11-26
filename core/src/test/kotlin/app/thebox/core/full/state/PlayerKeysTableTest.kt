@@ -69,12 +69,11 @@ class PlayerKeysTableTest {
         val all = rows()
         val used = all.map { it.pre }.filter { !it.contains('@') }.toSet()
         assertEquals(PRE.keys, used, "unused or missing preconditions")
-        // (Settings panel commit 0) SETTINGS_PANEL is entered only by the guide's `settingsPanel(true)`; A2 adds its rows.
-        for (l in PlayerLayer.entries - PlayerLayer.SETTINGS_PANEL) assertTrue(all.any { it.layer == l }, "a row ending in $l")
+        for (l in PlayerLayer.entries) assertTrue(all.any { it.layer == l }, "a row ending in $l")
         val bare = all.filter { it.section == "bare" || it.section == "archive" }.map { it.action }.toSet()
         for (a in BoxAction.entries) assertTrue(a in bare, "a bare-video row for $a")
         for (u in listOf("D", "Z", "ZI", "L")) assertTrue(all.any { it.updown == u }, "Up/Down setting $u")
-        for (s in listOf("bare", "archive", "quick", "picker", "scorebug", "info", "scrub", "list", "error", "screen", "back")) assertTrue(all.any { it.section == s }, "section $s")
+        for (s in listOf("bare", "archive", "quick", "picker", "scorebug", "info", "scrub", "list", "error", "screen", "back", "panel")) assertTrue(all.any { it.section == s }, "section $s")
     }
 
     private fun run(r: Row) {
@@ -141,6 +140,10 @@ class PlayerKeysTableTest {
             }
             "stats" -> if (v == "on") assertNotNull(ui.stats, "stats") else assertNull(ui.stats, "stats off")
             "button" -> assertEquals(v!!.toInt(), ui.error?.focused, "error focus")
+            // (Settings panel §2.2) the quick bar drawn with the Settings pill active; no scrub bar; no info bar
+            "panel" -> assertTrue(assertNotNull(ui.quick, "quick under the panel").panelOpen, "quick.panelOpen")
+            "noScrub" -> assertNull(ui.scrub, "no scrub bar")
+            "noInfo" -> assertNull(ui.info, "no info bar")
             else -> fail("bad check $c")
         }
     }
@@ -179,6 +182,22 @@ class PlayerKeysTableTest {
             repeat(QuickItem.entries.size) { if (w.ui.quick!!.let { it.items[it.focused] } != QuickItem.SCORE_BUG) w.press(RIGHT) }
             check(w.ui.quick!!.let { it.items[it.focused] } == QuickItem.SCORE_BUG) { "Score bug not in ${w.ui.quick!!.items}" }
             return w.k(SELECT).k(*after)
+        }
+
+        /**
+         * (Settings panel §2.2) [w] with the settings panel open as the guide opens it: from the quick bar's Settings when
+         * the bar can show, else (the error card's Settings route) directly; then the guide's `settingsPanel(true)`.
+         */
+        fun panel(w: PlayerWorld, fromQuick: Boolean = true): PlayerWorld {
+            if (fromQuick) {
+                w.k(BoxAction.QUICK_MENU)
+                repeat(QuickItem.entries.size) { if (w.ui.quick!!.let { it.items[it.focused] } != QuickItem.SETTINGS) w.press(RIGHT) }
+                w.k(SELECT)
+            }
+            w.player.settingsPanel(true)
+            w.flush()
+            check(w.ui.layer == PlayerLayer.SETTINGS_PANEL) { "settings panel: ${w.ui.layer}" }
+            return w
         }
 
         /** `quick@ITEM` / `quickA@ITEM`: the quick bar (live / archive) with ITEM focused. */
@@ -295,6 +314,11 @@ class PlayerKeysTableTest {
             "buf_arch_quick" to { liveWithArchive().buffer().k(UP) },
             "buf_notts" to { liveWithoutArchive().buffer(available = false, off = BufferOff.NOT_TS) },
             "buf_storage" to { liveWithoutArchive().buffer(available = false, off = BufferOff.STORAGE_ERROR) },
+            // Settings panel (docs/design/m6-player-settings-panel.md §2.2)
+            "panel" to { panel(liveWithArchive()) },
+            "panel_plain_paused" to { panel(liveWithoutArchive().k(PLAY_PAUSE)) },
+            "panel_archive" to { panel(archive()) },
+            "panel_error" to { panel(failed(liveWithoutArchive(), PlaybackErrorCode.STREAM_INTERRUPTED), fromQuick = false) },
         )
 
         /** A LOCAL pause of 130 s with a key 30 s ago (so the frame is not dimmed): the zap confirm applies. */

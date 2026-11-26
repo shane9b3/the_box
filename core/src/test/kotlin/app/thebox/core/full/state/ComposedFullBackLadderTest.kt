@@ -51,8 +51,17 @@ class ComposedFullBackLadderTest {
                 w.press(SELECT)
                 w.press(SELECT)
             }
-            // (Settings panel commit 0) Entered only by the guide's settings panel; A1/A2 add its ladder case.
-            PlayerLayer.SETTINGS_PANEL -> return null
+            // (Settings panel A1, docs/design/m6-player-settings-panel.md §2.4) Entered only by the guide: quick bar,
+            // Settings, OK with a settings machine attached opens the panel over FULL. Its BACK at the root list closes it
+            // to the quick bar, whose ladder follows. Until A2's layer lands the player never reports SETTINGS_PANEL and
+            // the `w.ui.layer != layer` check below skips these combinations.
+            PlayerLayer.SETTINGS_PANEL -> {
+                w.guide!!.settings = app.thebox.core.settings.fakes.RecordingSettingsMachine()
+                w.press(UP)
+                repeat(app.thebox.core.full.QuickItem.entries.size) { if (w.ui.quick?.let { it.items[it.focused] } != app.thebox.core.full.QuickItem.SETTINGS) w.press(RIGHT) }
+                w.press(SELECT)
+                if (!w.gui.settingsPanel) return null
+            }
         }
         if (w.ui.layer != layer) return null
         when (o) {
@@ -114,5 +123,25 @@ class ComposedFullBackLadderTest {
         assertEquals(ScreenMode.FULL, w.gui.mode)
         assertEquals(PlayerLayer.NONE, w.ui.layer)
         assertTrue(w.ui.info?.active == false, "re-entered FULL with the passive bar (USER)")
+    }
+
+    /**
+     * (Settings panel A1, §2.4) With a settings machine attached the quick bar's Settings opens the panel over FULL; BACK
+     * at its root list closes it and FULL stays (the player's QUICK_BAR return is A2's `PlayerSettingsPanelLayerTest`).
+     */
+    @Test
+    fun settingsPanelFromTheQuickBarClosesBackToFull() {
+        val w = PlayerWorld(withGuide = true)
+        val s = app.thebox.core.settings.fakes.RecordingSettingsMachine()
+        w.guide!!.settings = s
+        w.press(UP)
+        repeat(20) { if (w.ui.quick?.let { it.items[it.focused] } != app.thebox.core.full.QuickItem.SETTINGS) w.press(RIGHT) }
+        w.press(SELECT)
+        assertEquals(ScreenMode.FULL, w.gui.mode)
+        assertTrue(w.gui.settingsPanel)
+        w.press(BACK)
+        assertEquals(ScreenMode.FULL, w.gui.mode)
+        assertTrue(!w.gui.settingsPanel)
+        assertEquals(1, s.leaves)
     }
 }

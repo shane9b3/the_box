@@ -12,6 +12,7 @@ import app.thebox.core.settings.state.QueueEffects
 import app.thebox.core.settings.state.SettingsMachineImpl
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -21,7 +22,9 @@ class ComposedSettingsGuideTest {
 
     /**
      * C-S1 / U-S8 (adopted from the core reviewer): §3.2.5 / S2: an error-card route opens detached and needs no PIN,
-     * even with "Lock settings" on; BACK returns to FULL.
+     * even with "Lock settings" on; BACK returns to FULL. (Settings panel, docs/design/m6-player-settings-panel.md §3 Q3)
+     * From FULL with both machines attached it opens as the in-player panel (mode stays FULL); BACK at the detached
+     * bottom closes the panel.
      */
     @Test
     fun errorCardRouteIsDetachedAndPinFree() {
@@ -38,11 +41,13 @@ class ComposedSettingsGuideTest {
         // PlayerEffects.openSettings(route) → SettingsNavigatorImpl → SettingsShellLink.openFromFull(route, detached = true)
         s.openFromFull(SettingsRoute.PlaylistSource(1), detached = true)
         assertNull(w.ui.pin, "no PIN for the error card's own route (§3.2.5)")
-        assertEquals(ScreenMode.SETTINGS, w.ui.mode)
+        assertEquals(ScreenMode.FULL, w.ui.mode)
+        assertTrue(w.ui.settingsPanel, "the panel, detached (Q3)")
         assertEquals(SettingsRoute.PlaylistSource(1), s.ui.value.route)
         assertTrue(s.ui.value.sections.isEmpty(), "detached: no sections pane")
         w.press(BoxAction.BACK)
         assertEquals(ScreenMode.FULL, w.ui.mode, "BACK from the detached route returns to FULL")
+        assertFalse(w.ui.settingsPanel)
     }
 
     /**
