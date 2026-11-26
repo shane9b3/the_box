@@ -35,8 +35,9 @@ internal object ScoreSheetMetrics {
     const val HEADER_H = 48
     /** The failure row: two settings rows and the gap between them (132), as before the restyle. */
     const val FAILED_H = 2 * SETTING_H + GAP
-    const val TEAM_LOGO = 44
-    const val LOGO_GAP = 12
+    /** (Owner 2026-11-26: both teams' logos) Each team's logo sits in the title line, right before its own name. */
+    const val TEAM_LOGO = 32
+    const val LOGO_GAP = 8
     const val LEAGUE_LOGO = 32
     const val MARKER_W = 20
     const val MARKER_H = 14
@@ -69,10 +70,11 @@ internal object ScoreSheetMetrics {
     fun budget(factor: Float): Int = PlayerUi.PICKER_H.toInt() - 2 * PAD_V - titleH(factor) - TITLE_GAP
 
     /**
-     * The width of a game row's text column: after the away logo, before the followed marker's slot (reserved on every game
-     * row so the scores line up whether or not the row is followed). A score block, when shown, comes out of this.
+     * The width a game row leaves the title's **text**: the row less the two inline logos with their gaps and the followed
+     * marker's slot (reserved on every game row so the scores line up whether or not the row is followed). A score block,
+     * when shown, comes out of this.
      */
-    fun gameTextW(): Int = PlayerUi.PICKER_W.toInt() - 2 * PAD_H - 2 * ROW_PAD_H - TEAM_LOGO - LOGO_GAP - MARKER_GAP - MARKER_W
+    fun gameTextW(): Int = PlayerUi.PICKER_W.toInt() - 2 * PAD_H - 2 * ROW_PAD_H - 2 * (TEAM_LOGO + LOGO_GAP) - LOGO_GAP - MARKER_GAP - MARKER_W
 }
 
 /**
@@ -192,7 +194,15 @@ internal object ScoreSheetFit {
 
     /** [ask]'s title at the sheet's [step]; when it does not fit there, the first later step that does (the last if none). */
     fun shared(ask: TitleAsk, step: Int, vs: String, measure: Measure): MatchupPlan {
-        for (i in step.coerceIn(0, STEPS.lastIndex)..STEPS.lastIndex) if (fitsAt(ask, i, vs, measure)) return atStep(ask, i)
+        val from = step.coerceIn(0, STEPS.lastIndex)
+        for (i in from..STEPS.lastIndex) {
+            if (!fitsAt(ask, i, vs, measure)) continue
+            val plan = atStep(ask, i)
+            // A row that has to drop to codes keeps the list's text size when the codes fit at it (they are shorter).
+            val px = STEPS[from].second
+            val same = plan.copy(designPx = px)
+            return if (STEPS[i].first == 2 && px < plan.designPx || STEPS[i].first == 2 && ceil(measure(line(same.away, same.home, vs), px, MATCHUP_WEIGHT)) <= ask.maxPx) same else plan
+        }
         return atStep(ask, STEPS.lastIndex)
     }
 

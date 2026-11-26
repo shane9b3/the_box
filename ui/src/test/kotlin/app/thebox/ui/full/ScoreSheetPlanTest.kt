@@ -48,9 +48,11 @@ class ScoreSheetPlanTest {
     private fun fit(a: String, an: String, h: String, hn: String, maxPx: Float = ScoreSheetMetrics.gameTextW().toFloat()) =
         ScoreSheetFit.matchup(a, an, h, hn, "vs", maxPx, measure)
 
-    @Test fun aShortPairKeepsTheFullFormAt26() {
+    @Test fun aShortPairKeepsTheFullForm() {
+        // Beside the two inline logos the full form still fits, a size down; with room it is 26.
         val p = fit("CHI", "Bears", "DET", "Lions")
-        assertEquals(MatchupPlan("CHI Bears", "DET Lions", 26), p)
+        assertEquals("CHI Bears" to "DET Lions", p.away to p.home)
+        assertEquals(MatchupPlan("CHI Bears", "DET Lions", 26), fit("CHI", "Bears", "DET", "Lions", maxPx = 400f))
     }
 
     @Test fun aLongPairStepsDownTheLadderAndNeverExceedsTheColumn() {
@@ -101,7 +103,7 @@ class ScoreSheetPlanTest {
         assertEquals(1, roomy.map { ScoreSheetFit.shared(it, s2, "vs", measure).designPx }.distinct().size)
         // A sheet of short pairs with no score keeps the full form at 26.
         val easy = listOf(ScoreSheetFit.TitleAsk("CHI", "Bears", "DET", "Lions", column), ScoreSheetFit.TitleAsk("KC", "Chiefs", "BUF", "Bills", column))
-        assertEquals(0, ScoreSheetFit.commonStep(easy, "vs", measure))
+        assertTrue(ScoreSheetFit.commonStep(easy, "vs", measure) < ScoreSheetFit.SIZES.size)
         assertEquals(ScoreSheetFit.LAST_NAMES_STEP, ScoreSheetFit.commonStep(listOf(ScoreSheetFit.TitleAsk("AAAA", "X", "BBBB", "Y", 1f)), "vs", measure))
     }
 

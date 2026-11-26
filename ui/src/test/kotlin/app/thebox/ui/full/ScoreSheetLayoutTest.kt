@@ -161,7 +161,7 @@ class ScoreSheetLayoutTest {
             val l = layoutOf(t)
             val text = t.config.getOrNull(SemanticsProperties.Text)?.joinToString().orEmpty()
             assertEquals("$what: '$text' is one line", 1, l.lineCount)
-            assertFalse("$what: '$text' does not overflow", l.hasVisualOverflow)
+            assertFalse("$what: '$text' does not overflow (${t.boundsInRoot}, layout ${l.size}, w ${l.didOverflowWidth} h ${l.didOverflowHeight})", l.hasVisualOverflow)
             assertFalse("$what: '$text' is not ellipsised", l.isLineEllipsized(0))
             val b = t.boundsInRoot
             // The score block on the same row (vertical overlap) starts after the title (the text node is as wide as its text).

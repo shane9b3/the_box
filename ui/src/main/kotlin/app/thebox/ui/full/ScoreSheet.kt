@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -222,9 +223,6 @@ private fun GameRow(c: PickerChoice.ScoreGame, focused: Boolean, clock24: Boolea
         Modifier.scoreRow(focused, heightPx).then(if (c.followed) Modifier.semantics { contentDescription = following } else Modifier),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // The codes are in the title; the logo slot stays empty until the art arrives.
-        HubLogo(g.away.copy(abbrev = ""), league, ScoreSheetMetrics.TEAM_LOGO, ScoreSheetMetrics.TEAM_LOGO, align = Alignment.Center)
-        Spacer(Modifier.width(ScoreSheetMetrics.LOGO_GAP.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
             val columnPx = with(density) { ScoreSheetMetrics.gameTextW().dp.toPx() }
             val gapPx = with(density) { ScoreSheetMetrics.SCORE_GAP.dp.toPx() }
@@ -254,19 +252,25 @@ private fun titleAsk(g: GameSnapshot, maxPx: Float): ScoreSheetFit.TitleAsk {
 private fun MatchupLine(g: GameSnapshot, maxPx: Float, titleStep: Int, measure: Measure) {
     val vs = stringResource(R.string.sports_picker_vs)
     val plan = remember(g.away, g.home, maxPx, titleStep, vs, measure) { ScoreSheetFit.shared(titleAsk(g, maxPx), titleStep, vs, measure) }
-    val text = remember(plan, vs) {
+    val league = g.id.league
+    val style = GuideUi.sans(plan.designPx, FontWeight.SemiBold)
+    val awayText = remember(plan, vs) {
         buildAnnotatedString {
             append(plan.away)
             append(' ')
             withStyle(SpanStyle(color = GuideUi.Fg55, fontWeight = FontWeight.Medium)) { append(vs) }
-            append(' ')
-            append(plan.home)
         }
     }
-    BasicText(
-        text, Modifier.testTag(SCORE_GAME_TITLE_TAG), style = GuideUi.sans(plan.designPx, FontWeight.SemiBold),
-        maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-    )
+    // (Owner 2026-11-26) Both logos, each right before its own team; the slot stays empty until the art arrives.
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        HubLogo(g.away.copy(abbrev = ""), league, ScoreSheetMetrics.TEAM_LOGO, ScoreSheetMetrics.TEAM_LOGO, align = Alignment.Center)
+        Spacer(Modifier.width(ScoreSheetMetrics.LOGO_GAP.dp))
+        BasicText(awayText, Modifier.testTag(SCORE_GAME_TITLE_TAG), style = style, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip)
+        Spacer(Modifier.width(ScoreSheetMetrics.LOGO_GAP.dp))
+        HubLogo(g.home.copy(abbrev = ""), league, ScoreSheetMetrics.TEAM_LOGO, ScoreSheetMetrics.TEAM_LOGO, align = Alignment.Center)
+        Spacer(Modifier.width(ScoreSheetMetrics.LOGO_GAP.dp))
+        BasicText(AnnotatedString(plan.home), Modifier.testTag(SCORE_GAME_TITLE_TAG), style = style, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip)
+    }
 }
 
 /** "14 – 10" (away first) at 30/700 tabular, right-aligned in a fixed block; a final's loser in the dim ink. */
