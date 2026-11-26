@@ -330,6 +330,49 @@ class RootTreeRuleTest {
         assertTrue("the Sports layer is inside the key sink", ancestors(layoutOf(SPORTS_TAG)).contains(layoutOf(KEY_SINK_TAG)))
     }
 
+    /**
+     * (Settings panel A1, docs/design/m6-player-settings-panel.md §5.13, §6) The panel over FULL keeps the rule: the
+     * viewport stays FULL (no track toggle), no layer on any ancestor of the video layer, and the panel's slot is a child
+     * of the key sink that carries no layer itself and is not an ancestor of the video layer. Its posted expand collector
+     * (S10) sends one `ExpandSettings` when the panel's route needs the whole canvas.
+     */
+    @Test
+    fun theSettingsPanelOverFullKeepsTheRule() {
+        val machine = FakeGuideStateMachine(GuideUiState(mode = ScreenMode.FULL, tuned = playing(), settingsPanel = true))
+        val settings = app.thebox.ui.settings.FakeSettingsUiMachine(
+            app.thebox.core.settings.SettingsUiState(presentation = app.thebox.core.settings.SettingsPresentation.PANEL),
+        )
+        machine.settings = settings
+        val host = FakeShellHost(machine, player = app.thebox.ui.shelltest.FakePlayerHost())
+        rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m.graphicsLayer()) }) } }
+        rule.waitForIdle()
+        assertEquals(listOf(Viewport.FULL), host.viewports.distinct())
+        assertEquals(listOf(0, 0, 1920, 1080), windowRect(surfaceView()).toList())
+        val video = layoutOf(VIDEO_LAYER_TAG)
+        for (a in ancestors(video)) {
+            val topLevel = a.parentInfo?.parentInfo == null
+            assertFalse(a.getModifierInfo().any { mi -> LAYER_NAMES.any { mi.modifier::class.java.name.contains(it) } })
+            if (!topLevel) assertFalse(a.getModifierInfo().any { it.extra != null })
+        }
+        val slot = layoutOf(SETTINGS_PANEL_SLOT_TAG)
+        assertTrue("the panel is inside the key sink", ancestors(slot).contains(layoutOf(KEY_SINK_TAG)))
+        assertFalse("the panel is not an ancestor of the video layer", ancestors(video).contains(slot))
+        assertFalse("no layer or clip on the panel's slot", slot.getModifierInfo().any { mi -> LAYER_NAMES.any { mi.modifier::class.java.name.contains(it) } })
+        rule.onNodeWithTag(KEY_SINK_TAG).assertIsFocused()
+        assertTrue(machine.events.none { it == app.thebox.core.guide.GuideEvent.ExpandSettings })
+
+        // A page source pushes an expanding route while the panel is shown: one posted ExpandSettings.
+        rule.runOnIdle { settings.state.value = settings.state.value.copy(route = app.thebox.core.settings.SettingsRoute.AddSource()) }
+        rule.waitForIdle()
+        assertEquals(1, machine.events.count { it == app.thebox.core.guide.GuideEvent.ExpandSettings })
+
+        // Closed: the slot goes.
+        rule.runOnIdle { machine.mutableUi.value = machine.mutableUi.value.copy(settingsPanel = false) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(SETTINGS_PANEL_SLOT_TAG, useUnmergedTree = true).assertDoesNotExist()
+        assertEquals(listOf(Viewport.FULL), host.viewports.distinct())
+    }
+
     private companion object {
         val LAYER_NAMES = listOf("GraphicsLayer", "Clip", "Shadow", "RenderEffect", "Alpha")
     }

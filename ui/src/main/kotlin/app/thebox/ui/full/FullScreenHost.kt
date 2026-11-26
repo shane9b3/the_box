@@ -269,7 +269,8 @@ fun scorePlacementInput(
         // U-S3 (V2): the stats are hidden while the channel list or the group card shows.
         stats = ui.stats != null && ui.channels == null && state.groupCard == null,
         groupCard = state.groupCard != null,
-        picker = ui.picker != null,
+        // (Settings panel §5.9) The settings panel sits in the picker box: the bug avoids it as it avoids the picker.
+        picker = ui.picker != null || state.settingsPanel,
         numberEntry = state.overlay is Overlay.Number,
         probing = if (ui.probing != null) PlayerUi.probingBox else null,
         toast = facts.toast,

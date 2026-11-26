@@ -30,7 +30,8 @@ import android.view.KeyEvent as AndroidKeyEvent
  * Compose `KeyEvent.nativeKeyEvent` → [KeyInput] → [KeyGestureDetector] → [KeyMap] → `GuideEvent.Act`/`Release`,
  * dispatched to the attached machine. Main thread only.
  *
- * - Context PLAYER in `ScreenMode.FULL`, else GUIDE; `hasLong = keyMap.long(context, code) != null`.
+ * - Context from `GuideStateMachine.keyContext` (PLAYER in `ScreenMode.FULL` unless the settings panel is open, else
+ *   GUIDE; settings panel S1); `hasLong = keyMap.long(context, code) != null`.
  * - A key with a long binding arms a [LONG_PRESS_MS] timer on its first DOWN (remotes that never auto-repeat OK);
  *   the UP cancels it.
  * - Returns true for every key it handled including the matching UP; keys with no binding (volume, Home) return
@@ -168,7 +169,9 @@ class KeyRouterImpl(
         } else if (repeatCount == 0) {
             capabilities.record(code)
             val mode = m.ui.value.mode
-            val context = if (mode == ScreenMode.FULL) KeyContext.PLAYER else KeyContext.GUIDE
+            // (Settings panel §2.2, S1) The machine names the table: GUIDE while the settings panel is open over FULL (a held
+            // BACK has its long binding and never repeat-pops; LEFT/RIGHT act on DOWN), PLAYER in FULL, else GUIDE.
+            val context = m.keyContext
             val short = keyMap.short(context, code)
             val dropLong = m.horizontalRepeat && (code == Keys.DPAD_LEFT || code == Keys.DPAD_RIGHT)
             val long = if (dropLong) null else keyMap.long(context, code)
