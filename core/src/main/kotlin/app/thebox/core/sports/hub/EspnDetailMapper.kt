@@ -50,6 +50,7 @@ object EspnDetailMapper {
         val phase = phase(comp.status?.type) ?: return null
         val pre = phase == GamePhase.SCHEDULED || phase == GamePhase.PRE
         val recent = recent(dto.lastFiveGames, sides)
+        val (injuries, injuryCounts) = injuries(dto.injuries, sides)
         return GameDetail(
             id = id,
             fetchedPhase = phase,
@@ -74,13 +75,16 @@ object EspnDetailMapper {
             recapHeadline = dto.article?.takeIf { it.type?.trim().equals(RECAP_ARTICLE, ignoreCase = true) }
                 ?.headline?.trim()?.takeIf { it.isNotEmpty() },
             recent = recent,
-            injuries = injuries(dto.injuries, sides),
+            injuries = injuries,
+            injuryCounts = injuryCounts,
         )
     }
 
     /**
      * The box score (§3.5): per team, the Passing, Rushing and Receiving tables in that order, each present only when
-     * ESPN lists the category, with at most `HUB_NFL_BOX_LINES` athletes in ESPN's order. Sides from the header by team
+     * ESPN lists the category, with at most `HUB_NFL_BOX_LINES` athletes in ESPN's order. [BoxTable.columns] are ESPN's
+     * stat keys (`completions/passingAttempts`, `QBRating`, …), the one representation; the sheet's words are UI
+     * resources (`boxColumnLabel`, integration §18). Sides from the header by team
      * id. Null only when the header has no two sides; a summary without `boxscore.players` (pre-game, the first snap)
      * answers empty tables, not null.
      */
@@ -327,7 +331,9 @@ object EspnDetailMapper {
                 val l = cat.leaders?.firstOrNull() ?: continue
                 val who = l.athlete?.shortName?.trim()?.takeIf { it.isNotEmpty() } ?: continue
                 val line = l.displayValue?.trim()?.takeIf { it.isNotEmpty() }
-                val value = l.value.double()?.let { floor(it) }?.takeIf { it in 0.0..Int.MAX_VALUE.toDouble() }?.toInt()
+                // (Integration §18) Live values can be negative ("3 CAR, - YDS" with value -8.0, recorded 2026-11-25):
+                // kept, not dropped; ESPN's displayValue then has no number, so the value is the only source.
+                val value = l.value.double()?.let { floor(it) }?.takeIf { it in Int.MIN_VALUE.toDouble()..Int.MAX_VALUE.toDouble() }?.toInt()
                     ?: line?.substringBefore(',')?.replace(",", "")?.toDoubleOrNull()?.let { floor(it).toInt() }
                     ?: continue
                 m.putIfAbsent(name, Leader(who, value, l.athlete?.headshot?.href?.trim()?.takeIf { usable(it, httpOk) }, line))
@@ -380,11 +386,12 @@ object EspnDetailMapper {
 
     /**
      * Out, Doubtful and Questionable lines (Injured Reserve and any other status are left out), away first, in ESPN's
-     * order. Each team keeps at most 2 × `HUB_NFL_INJURIES_PER_TEAM` (§5.4's budget), so the sheet can draw
-     * `HUB_NFL_INJURIES_PER_TEAM` and count "+n more" from the rest (§17.1 P1 note 4).
+     * order. Each team keeps the `HUB_NFL_INJURIES_PER_TEAM` lines the sheet draws; the second value counts every
+     * qualifying line per side, for its "+n more" (§5.3 "all counted"; integration §18, replacing §17.1 P1 note 4's floor).
      */
-    private fun injuries(list: List<EspnTeamInjuriesDto>?, sides: Map<String, Side>): List<InjuryLine> {
+    private fun injuries(list: List<EspnTeamInjuriesDto>?, sides: Map<String, Side>): Pair<List<InjuryLine>, Map<Side, Int>> {
         val by = HashMap<Side, List<InjuryLine>>()
+        val counts = HashMap<Side, Int>()
         for (team in list.orEmpty()) {
             val side = sides[team.team?.id.str()] ?: continue
             if (side in by) continue
@@ -402,30 +409,28 @@ object EspnDetailMapper {
                     status,
                     inj.details?.type?.trim()?.takeIf { it.isNotEmpty() },
                 )
-            }.take(INJURIES_KEPT)
+            }.also { counts[side] = it.size }.take(SportsConstants.HUB_NFL_INJURIES_PER_TEAM)
         }
-        return by[Side.AWAY].orEmpty() + by[Side.HOME].orEmpty()
+        return (by[Side.AWAY].orEmpty() + by[Side.HOME].orEmpty()) to counts
     }
 
     // ------------------------------------------------------------------ box tables (§3.5)
 
-    private class BoxSpec(val category: BoxCategory, val espnName: String, val keys: List<String>, val columns: List<String>)
+    /** [keys]: ESPN's stat keys, which are also [BoxTable.columns] (stable keys; the UI words them, integration §18). */
+    private class BoxSpec(val category: BoxCategory, val espnName: String, val keys: List<String>)
 
     private val BOX_SPECS = listOf(
         BoxSpec(
             BoxCategory.PASSING, "passing",
             listOf("completions/passingAttempts", "passingYards", "passingTouchdowns", "interceptions", "QBRating"),
-            listOf("C/ATT", "YDS", "TD", "INT", "RTG"),
         ),
         BoxSpec(
             BoxCategory.RUSHING, "rushing",
             listOf("rushingAttempts", "rushingYards", "yardsPerRushAttempt", "rushingTouchdowns", "longRushing"),
-            listOf("CAR", "YDS", "AVG", "TD", "LONG"),
         ),
         BoxSpec(
             BoxCategory.RECEIVING, "receiving",
             listOf("receptions", "receivingYards", "yardsPerReception", "receivingTouchdowns", "longReception"),
-            listOf("REC", "YDS", "AVG", "TD", "LONG"),
         ),
     )
 
@@ -442,7 +447,7 @@ object EspnDetailMapper {
             val stats = a.stats.orEmpty()
             BoxLine(name, idx.map { i -> stats.getOrNull(i)?.trim()?.takeIf { it.isNotEmpty() } ?: NO_VALUE })
         }.take(SportsConstants.HUB_NFL_BOX_LINES)
-        return BoxTable(spec.category, spec.columns, lines)
+        return BoxTable(spec.category, spec.keys, lines)
     }
 
     // ------------------------------------------------------------------ helpers
@@ -451,7 +456,6 @@ object EspnDetailMapper {
     private const val RECAP_ARTICLE = "Recap"
     private const val TYPE_INTERCEPTION_RETURN_TD = "36"
     private const val RECENT_MAX = 5
-    private const val INJURIES_KEPT = 2 * SportsConstants.HUB_NFL_INJURIES_PER_TEAM
     private val RECORD_TEXT = Regex("\\d{1,2}-\\d{1,2}(-\\d{1,2})?")
 
     private fun usable(url: String, httpOk: Boolean): Boolean =

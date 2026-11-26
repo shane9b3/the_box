@@ -71,7 +71,7 @@ class EspnClipResolver internal constructor(
     private val endpoints: EspnEndpoints by lazy(endpoints)
 
     /** http media only from the debug override origin (§4.3). */
-    private val httpOk: Boolean by lazy { this.endpoints.apiBase != EspnEndpoints.API_BASE }
+    private val httpOk: Boolean by lazy { this.endpoints.httpMediaOk }
 
     override suspend fun info(ref: ClipRef): ClipResult<ClipInfo> =
         catalog.get(ref.videoId)?.let { ClipResult.Ok(infoOf(ref, it)) } ?: ClipResult.NotFound

@@ -255,6 +255,11 @@ class GameDetailRepositoryImpl internal constructor(
     private var retryAfterS: Int? = null
     private var lastFailKind: FailKind? = null
     private var jitter = 0.0
+    /**
+     * (Integration §18) Good answers in a row for the shown game whose phase still lags the board's (ESPN's summary header
+     * behind the board's FINAL); `DetailPollPolicy.nextAt` stops forcing the 15 s re-read after `HUB_NFL_PHASE_LAG_TRIES`.
+     */
+    private var lagTries = 0
 
     private var sportsOn = false
     private var pollPhaseMs = SportsConstants.POLL_PHASE_MIN_MS
@@ -365,6 +370,7 @@ class GameDetailRepositoryImpl internal constructor(
         retryAfterS = null
         lastFailKind = null
         force = false
+        lagTries = 0
         dwellUntil = if (game != null && detailed(game.id.league)) mono.nowMs() + dwellMs else null
     }
 
@@ -431,6 +437,8 @@ class GameDetailRepositoryImpl internal constructor(
                 lastFailKind = null
                 if (f.value.fetchedPhase != GamePhase.FINAL) seenUnfinished += k
                 shown?.let(::noteEnd)
+                val g = shown
+                lagTries = if (g != null && g.id == id && DetailPollPolicy.lagging(phase(g, cache[k]), f.value.fetchedPhase)) lagTries + 1 else 0
             }
             Fetch.NotFound -> failed(FailKind.HTTP_OTHER, mono.nowMs(), null)
             is Fetch.Failed -> failed(f.kind, f.receivedMono, f.retryAfterS)
@@ -525,7 +533,7 @@ class GameDetailRepositoryImpl internal constructor(
         val phase = phase(game, entry)
         return DetailPollPolicy.nextAt(
             cadence(game.id.league), gate(), entry?.ok, phase, entry?.ok?.value?.fetchedPhase, finalFacts(game, entry), failures, lastFailMono,
-            retryAfterS, refused(), pollPhaseMs, jitter, now,
+            retryAfterS, refused(), pollPhaseMs, jitter, now, lagTries,
         )
     }
 

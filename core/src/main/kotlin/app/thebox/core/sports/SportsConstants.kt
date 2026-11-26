@@ -946,6 +946,12 @@ object SportsConstants {
     const val HUB_NFL_LIVE_MS = 60_000L
     /** A phase change is due at once, but no earlier than this after the last good answer (§5.2). */
     const val HUB_NFL_REFETCH_FLOOR_MS = 15_000L
+    /**
+     * (Integration §18) Forced phase-change re-reads in a row whose answer still lags the board (ESPN's summary header
+     * behind the board's FINAL); after this many the phase's normal cadence applies, so a lagging header cannot hold the
+     * 15 s floor indefinitely.
+     */
+    const val HUB_NFL_PHASE_LAG_TRIES = 3
     /** NFL final: re-read every `HUB_DETAIL_IDLE_MS` until a highlight is offered, for this long after the end (§5.2). */
     const val HUB_NFL_HIGHLIGHT_WAIT_MS = 7_200_000L
     /** NFL final: also while the detail lists single-play clips, for this long after the end (§5.2). */

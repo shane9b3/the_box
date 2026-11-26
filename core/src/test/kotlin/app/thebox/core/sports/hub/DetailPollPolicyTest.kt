@@ -139,8 +139,10 @@ class DetailPollPolicyTest {
         retryAfterS: Int? = null,
         refused: Boolean = false,
         now: Long = 1_000_000L,
+        lagTries: Int = 0,
     ) = DetailPollPolicy.nextAt(
         nfl, open, lastOk, phase, fetched, FinalFacts(highlight, playClips, endedAgoMs), failures, lastFail, retryAfterS, refused, 1_500L, 0.0, now,
+        lagTries,
     )
 
     @Test fun nflCadenceValues() {
@@ -185,6 +187,27 @@ class DetailPollPolicyTest {
         assertEquals(r + 15_000L, nflNext(GamePhase.POSTPONED, fetched = GamePhase.PRE, now = r))
         // A detail already further along than the board is not a change (effectivePhase takes the further one).
         assertNull(nflNext(DetailPollPolicy.effectivePhase(GamePhase.LIVE, GamePhase.FINAL), fetched = GamePhase.FINAL, highlight = true, endedAgoMs = 1_000L))
+    }
+
+    /**
+     * (Integration §18, P1 note 1's residual risk) A summary header that lags the board's FINAL is re-read at the 15 s
+     * floor only `HUB_NFL_PHASE_LAG_TRIES` times in a row; then the phase's normal cadence: the final's 5 min (even when
+     * no final wait holds, since the detail never reached FINAL), live's 60 s.
+     */
+    @Test fun nflPhaseLagIsCappedThenTheNormalCadence() {
+        val r = 1_000_000L
+        val cap = SportsConstants.HUB_NFL_PHASE_LAG_TRIES
+        assertEquals(3, cap)
+        for (t in 0 until cap) assertEquals(r + 15_000L, nflNext(GamePhase.FINAL, fetched = GamePhase.LIVE, endedAgoMs = 60_000L, now = r + 1L, lagTries = t), "try $t")
+        assertEquals(r + idle, nflNext(GamePhase.FINAL, fetched = GamePhase.LIVE, endedAgoMs = 60_000L, now = r + 1L, lagTries = cap), "the final cadence")
+        assertEquals(r + idle, nflNext(GamePhase.FINAL, fetched = GamePhase.LIVE, highlight = true, endedAgoMs = 60_000L, now = r + 1L, lagTries = cap + 5),
+            "no final wait holds, but the detail is not final yet: still 5 min, never stuck")
+        assertEquals(r + 60_000L, nflNext(GamePhase.LIVE, fetched = GamePhase.SCHEDULED, now = r + 1L, lagTries = cap), "a lagging pre-game header: the live 60 s")
+        // Back-off still wins over both.
+        assertEquals(500L + 20_000L, nflNext(GamePhase.FINAL, fetched = GamePhase.LIVE, failures = 1, lastFail = 500L, lagTries = cap))
+        assertTrue(DetailPollPolicy.lagging(GamePhase.FINAL, GamePhase.LIVE))
+        assertFalse(DetailPollPolicy.lagging(GamePhase.INTERMISSION, GamePhase.LIVE))
+        assertFalse(DetailPollPolicy.lagging(GamePhase.FINAL, null))
     }
 
     @Test fun nflBackOffWinsOverThePhaseChange() {

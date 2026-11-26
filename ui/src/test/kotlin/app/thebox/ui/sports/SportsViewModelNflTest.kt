@@ -165,6 +165,23 @@ class SportsViewModelNflTest {
         assertEquals(LeagueGroup.NFL, m.toast.value?.league)
     }
 
+    /**
+     * (Integration §18, P2 note 8) A record that cannot play here (no https HLS, no `settop`) is `Failed(BAD_BODY)` from
+     * the resolver: the "can't play on this device" toast (a reason and a next step: the stats still work), NFL's.
+     */
+    @Test fun aClipThatCannotPlayHereSaysSo() {
+        val clip = NflHubTestKit.highlight()
+        board(g)
+        ready(NflHubTestKit.mnfFinalDetail(g, clips = listOf(clip)))
+        resolver.streams[clip.videoId] = ClipResult.Failed(FailKind.BAD_BODY)
+        val m = vm(withSession = true)
+        m.onCardFocused(g.id.id)
+        m.onSlot(0)
+        scheduler.runCurrent()
+        assertEquals(HubToastKind.VIDEO_NOT_PLAYABLE, m.toast.value?.kind)
+        assertEquals(LeagueGroup.NFL, m.toast.value?.league)
+    }
+
     @Test fun videoOffIsPerLeague() {
         // An NHL refusal (its recap lookup) turns NHL video off, never ESPN's.
         val nhl = SportsFixtures.game(id = "X1", phase = GamePhase.FINAL, finalKind = app.thebox.core.sports.PeriodKind.REG, clock = null)

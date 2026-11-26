@@ -820,6 +820,9 @@ class TestSummary(NflCase):
         self.assertEqual([home_id, away_id], [t["team"]["id"] for t in d["leaders"]], "leaders: home first")
         for t in d["leaders"]:
             for cat in t["leaders"]:
+                if "leaders" not in cat:  # a live category nobody leads yet (the real capture's sacks)
+                    self.assertNotEqual("pre", comp["status"]["type"]["state"])
+                    continue
                 lead = cat["leaders"][0]
                 self.assertIsInstance(lead["displayValue"], str)
                 self.assertIsInstance(lead["value"], float)
@@ -831,7 +834,10 @@ class TestSummary(NflCase):
                 self.assertIsInstance(i["athlete"]["position"]["abbreviation"], str)
                 self.assertIsInstance(i["details"]["type"], str)
         self.assertIsInstance(d["gameInfo"]["venue"]["fullName"], str)
-        self.assertIsInstance(d["article"]["headline"], str)
+        if comp["status"]["type"]["state"] == "in":
+            self.assertNotIn("article", d, "no article in play (the real live capture)")
+        else:
+            self.assertIsInstance(d["article"]["headline"], str)
         self.assertIsInstance(d["videos"], list)
         for key in ("odds", "againstTheSpread", "predictor"):
             self.assertNotIn(key, d)

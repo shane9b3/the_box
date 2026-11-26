@@ -71,6 +71,12 @@ data class GameDetail(
     val injuries: List<InjuryLine> = emptyList(),
     /** (NFL) serverDate − wall clock at receive, clamped to ±HUB_CLOCK_SKEW_MAX_MS; 0 without a Date header. */
     val clockSkewMs: Long = 0,
+    /**
+     * (NFL, integration §18) Every qualifying (Out, Doubtful, Questionable) injury ESPN listed per side, of which [injuries]
+     * keeps at most `HUB_NFL_INJURIES_PER_TEAM`; the Matchup sheet's "+n more" is this count minus the lines kept. A side
+     * absent from the map counts its kept lines.
+     */
+    val injuryCounts: Map<Side, Int> = emptyMap(),
 ) {
     /** (NFL hub §6.1) The league-neutral scoring list: the NHL's goals, else the NFL's scoring plays. */
     val scoring: List<ScoringEvent> get() = if (goals.isNotEmpty()) goals else plays
@@ -276,6 +282,10 @@ data class TeamBox(val skaters: List<SkaterLine>, val goalies: List<GoalieLine>,
 
 enum class BoxCategory { PASSING, RUSHING, RECEIVING }
 
+/**
+ * [columns]: ESPN's stat keys (`completions/passingAttempts`, `passingYards`, `QBRating`, …), stable keys, never words;
+ * the Box score sheet words them from its resources (integration §18). [BoxLine.values] follow [columns].
+ */
 data class BoxTable(val category: BoxCategory, val columns: List<String>, val lines: List<BoxLine>)
 
 data class BoxLine(val name: String, val values: List<String>)

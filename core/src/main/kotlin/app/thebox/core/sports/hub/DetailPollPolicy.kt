@@ -79,6 +79,11 @@ object DetailPollPolicy {
      * interval of its own. Within a group (SCHEDULED → PRE, LIVE ↔ a break) nothing is forced: the plain loop already
      * covers it (§17.1 P1 note 1). Back-off is checked first and always wins. The NHL ([DetailCadence.NHL]) ignores
      * [fetchedPhase], as before.
+     *
+     * (Integration §18) [lagTries] counts the good answers in a row that still [lagging] the board (the caller's count).
+     * From `HUB_NFL_PHASE_LAG_TRIES` on, the forced re-read stops and the effective phase's own interval applies (live:
+     * 60 s; FINAL: `HUB_DETAIL_IDLE_MS` even when no final wait holds, because the detail still is not final), so a
+     * summary header that never catches up costs at most a few 15 s reads, then the normal final cadence.
      */
     fun nextAt(
         cadence: DetailCadence,
@@ -94,6 +99,7 @@ object DetailPollPolicy {
         pollPhaseMs: Long,
         jitter: Double,
         nowMono: Long,
+        lagTries: Int = 0,
     ): Long? {
         if (!gate.open) return null
         if (failures > 0 && lastFailMono != null) {
@@ -102,8 +108,10 @@ object DetailPollPolicy {
         }
         lastOk ?: return nowMono
         val floor = cadence.phaseChangeFloorMs
-        if (floor != null && fetchedPhase != null && group(phase) > group(fetchedPhase)) {
-            return maxOf(nowMono, lastOk.receivedMono + floor)
+        if (floor != null && fetchedPhase != null && lagging(phase, fetchedPhase)) {
+            if (lagTries < SportsConstants.HUB_NFL_PHASE_LAG_TRIES) return maxOf(nowMono, lastOk.receivedMono + floor)
+            // Capped: the phase's own cadence; a FINAL the detail has not reached keeps the 5 min re-read.
+            return lastOk.receivedMono + (intervalMs(cadence, phase, final) ?: SportsConstants.HUB_DETAIL_IDLE_MS)
         }
         val interval = intervalMs(cadence, phase, final) ?: return null
         return when (phase) {
@@ -124,6 +132,12 @@ object DetailPollPolicy {
         intervalMs(cadence, phase, final)?.let { fetchedAtMono + STALE_FACTOR * it + 1 }
 
     private const val STALE_FACTOR = 2
+
+    /**
+     * (NFL hub §5.2, integration §18) The detail fetched at [fetchedPhase] lags [phase] (the effective phase): [phase] is
+     * in a later phase group. The repository counts the answers in a row for which this holds (`nextAt`'s `lagTries`).
+     */
+    fun lagging(phase: GamePhase, fetchedPhase: GamePhase?): Boolean = fetchedPhase != null && group(phase) > group(fetchedPhase)
 
     /** The phase-change rule's groups: a break is still the game in play; SCHEDULED and PRE are both before it. */
     private fun group(p: GamePhase): Int = when (p) {

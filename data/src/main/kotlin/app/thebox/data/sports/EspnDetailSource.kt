@@ -55,7 +55,8 @@ class EspnDetailSource internal constructor(
     private val mono: MonoClock,
     endpoints: () -> EspnEndpoints,
     private val catalog: EspnClipCatalog,
-    private val mapDetail: (EspnSummaryDto, GameId, Long?) -> GameDetail? = EspnDetailMapper::detail,
+    /** A stand-in mapper for transport tests; null (production) is `EspnDetailMapper.detail(…, httpOk)` (integration §18). */
+    private val mapDetail: ((EspnSummaryDto, GameId, Long?) -> GameDetail?)? = null,
     private val mapBox: (EspnSummaryDto) -> BoxScore? = EspnDetailMapper::box,
     /** Wall clock (epoch ms), for the skew and the offer check. */
     private val wallNow: () -> Long = System::currentTimeMillis,
@@ -75,8 +76,8 @@ class EspnDetailSource internal constructor(
     /** Resolved on first use (off the main thread: the repository's first request). */
     private val endpoints: EspnEndpoints by lazy(endpoints)
 
-    /** http media and thumbnails only from the debug override origin (§4.3); a release build never has one. */
-    private val httpOk: Boolean by lazy { this.endpoints.apiBase != EspnEndpoints.API_BASE }
+    /** http media and thumbnails only for the debug override (`EspnEndpoints.httpMediaOk`, the one rule; §4.3, §18). */
+    private val httpOk: Boolean by lazy { this.endpoints.httpMediaOk }
 
     override suspend fun detail(id: GameId): Fetch<GameDetail> = detailAnswer(id, null).fetch
 
@@ -105,7 +106,10 @@ class EspnDetailSource internal constructor(
         val out = try {
             withContext(mapDispatcher) {
                 val at = wall + skew
-                val detail = mapDetail(dto, id, at)?.let { it.copy(clockSkewMs = skew, serverDateMs = it.serverDateMs ?: f.serverDateMs) }
+                // (Integration §18) The source owns the skew and the server date; the mapper leaves both at their defaults.
+                val stand = mapDetail
+                val mapped = if (stand != null) stand(dto, id, at) else EspnDetailMapper.detail(dto, id, at, httpOk)
+                val detail = mapped?.copy(clockSkewMs = skew, serverDateMs = f.serverDateMs)
                 val box = if (detail != null) mapBox(dto) else null
                 val entries = if (detail != null) offered(dto, at) else emptyList()
                 Triple(detail, box, entries)

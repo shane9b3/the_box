@@ -23,6 +23,7 @@ import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.SportsDebugOverride
 import app.thebox.core.sports.TeamLine
 import app.thebox.core.sports.YardsResult
+import app.thebox.core.sports.hub.EspnVideoMapper
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.DeserializationStrategy
@@ -58,9 +59,15 @@ data class EspnEndpoints(
      */
     val clipBase: String = CLIP_BASE,
 ) {
+    /**
+     * (Integration §18) Plain-http clip media and images are allowed: only for the debug override (endpoints that are not
+     * ESPN's), by the one rule [EspnVideoMapper.httpOkFor] that the board mapper also applies. Production: false.
+     */
+    val httpMediaOk: Boolean get() = EspnVideoMapper.httpOkFor(logoBase)
+
     companion object {
         const val API_BASE = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
-        const val LOGO_BASE = "https://a.espncdn.com/"
+        const val LOGO_BASE = EspnVideoMapper.PRODUCTION_LOGO_BASE
         const val STATS_BASE = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/"
         const val CLIP_BASE = "https://content.core.api.espn.com/v1/video/clips/"
         val DEFAULT = EspnEndpoints(API_BASE, LOGO_BASE)
@@ -289,10 +296,8 @@ class EspnScoreSource internal constructor(
             .addPathSegment("statistics")
             .build()
         val answer = call(url, EspnStatsDto.serializer(), statsClient) { null }
-        val fetch: Fetch<EspnStatsDto> = when (val f = answer.fetch) {
-            is Fetch.Failed -> if (answer.code == HTTP_FORBIDDEN) Fetch.Failed(FailKind.HTTP_429, f.retryAfterS, f.receivedMono) else f
-            else -> f
-        }
+        // (Integration §18) A 403 is already HTTP_429 from EspnHttp's WAF rule (every ESPN call).
+        val fetch: Fetch<EspnStatsDto> = answer.fetch
         logTransition("competitors/{team}/statistics", fetch, answer)
         return fetch
     }
@@ -349,7 +354,8 @@ class EspnScoreSource internal constructor(
                 }
             }
             Fetch.NotFound -> Fetch.NotFound
-            is Fetch.Failed -> if (answer.code == HTTP_FORBIDDEN) Fetch.Failed(FailKind.HTTP_429, f.retryAfterS, f.receivedMono) else f
+            // (Integration §18) A 403 is already HTTP_429 from EspnHttp's WAF rule.
+            is Fetch.Failed -> f
         }
         logTransition("scoreboard/{event}", fetch, answer)
         val shape = (fetch is Fetch.Failed && fetch.kind == FailKind.BAD_BODY && answer.code == 200) ||
@@ -462,8 +468,8 @@ class EspnScoreSource internal constructor(
             }
             Fetch.NotFound -> GameAnswer.Absent
             // (Fix pass 3) A 403 on the follow's board read is the same WAF slow-down as on per-event: a 429 (the 20 s
-            // back-off base, the 10 s floor and "slowed").
-            is Fetch.Failed -> GameAnswer.Failed(if (answer.code == HTTP_FORBIDDEN) Fetch.Failed(FailKind.HTTP_429, f.retryAfterS, f.receivedMono) else f)
+            // back-off base, the 10 s floor and "slowed"). (Integration §18) EspnHttp's WAF rule already answers it so.
+            is Fetch.Failed -> GameAnswer.Failed(f)
         }
         val logged: Fetch<*> = when (result) {
             is GameAnswer.Found -> result.fetch
@@ -510,7 +516,6 @@ class EspnScoreSource internal constructor(
 
     companion object {
         private const val TAG = "EspnScores"
-        private const val HTTP_FORBIDDEN = 403
 
         /** (Update interval §4.2) The production source: the per-event follow, with the board fallback. */
         fun production(client: OkHttpClient, mono: MonoClock, endpoints: () -> EspnEndpoints): EspnScoreSource =

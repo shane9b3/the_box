@@ -475,6 +475,11 @@ With `--sports --sports-nfl` (no extra flag) the panel also serves what the NFL 
   `summary_pad_kb` (e.g. `2100`: over the app's 2 MiB decoded cap → "ESPN changed how it sends game stats"),
   `summary_stall_ms`; `no_date` and `max_age` apply too.
 - `GET /admin/sports_video` counts `espn_record` and `espn_media` requests beside the NHL ones.
+- The app's contract with these summaries is pinned (docs/design/m6-nfl-hub.md §18): `test_nfl_summary_golden.py`
+  checks that the panel still produces the shape of the three samples in
+  `core/src/testFixtures/resources/sports/nfl/hub/fakepanel-summary-{pre,live,final}.json`, which the app's
+  `NflHubPipelineDataTest` decodes through the real DTO and mapper. After a deliberate change, regenerate them with
+  `FAKEPANEL_WRITE_GOLDEN=1 python3 -m unittest test_nfl_summary_golden` (from `tools/fakepanel`) and rerun the Kotlin test.
 
 ## Sports: the fake HockeyTech CHL feeds (docs/design/m6-chl-leagues.md §7.3)
 

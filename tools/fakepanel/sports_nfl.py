@@ -1096,7 +1096,14 @@ def leaders_section(away, home, ids, s, started):
                     ("52", "701", 5) if not started else (str(3 + pts // 7), str(40 + 3 * pts), pts // 14)))]
         if not started:
             names += [("sacks", DEFENDERS[team][0], "5.5"), ("totalTackles", DEFENDERS[team][1], "67")]
+        else:
+            # (Integration section 18, the real live capture) In play ESPN lists all five categories; one nobody leads yet
+            # (sacks early on) has no `leaders` key at all.
+            names += [("sacks", None, None), ("totalTackles", DEFENDERS[team][1], str(2 + pts // 7))]
         for i, (cat, name, line) in enumerate(names):
+            if name is None:
+                cats.append({"name": cat, "displayName": cat})
+                continue
             m = re.search(r"([\d,]+) YDS", line)
             value = float(m.group(1).replace(",", "")) if m else float(line)
             aid = "8%s%d" % (ids[side], i)
@@ -1122,10 +1129,13 @@ def last_five(away, home, ids):
     return out
 
 
-def injuries(away, home, ids):
+def injuries(away, home, ids, started=False):
+    """Pre-game: the week's report (IR included). In play (the real live capture): the game-day inactives, all Out."""
     out = []
     for side, team in (("home", home), ("away", away)):
         rows = [("Questionable", "G", "Triceps"), ("Out", "WR", "Hamstring"), ("Injured Reserve", "LB", "Knee")]
+        if started:
+            rows = [("Out", "QB", "Coach's Decision"), ("Out", "WR", "Hamstring"), ("Out", "LB", "Coach's Decision")]
         out.append({"team": {"id": ids[side], "abbreviation": team}, "injuries": [
             {"status": st, "athlete": {"displayName": f"{TEAMS[team][2]} Player {i + 1}", "position": {"abbreviation": pos}},
              "details": {"type": d}} for i, (st, pos, d) in enumerate(rows)]})
@@ -1177,16 +1187,17 @@ def summary(sp, game, at, base, pad_kb, h):
     o["leaders"] = leaders_section(away, home, ids, s, started)
     if not started:
         o["lastFiveGames"] = last_five(away, home, ids)
-    o["injuries"] = injuries(away, home, ids)
+    o["injuries"] = injuries(away, home, ids, started)
     o["pickcenter"] = [{"provider": {"name": "fake"}, "details": "none"}]
     if started:
         o["scoringPlays"] = scoring_plays(sp, game, at, ids)
     o["news"] = {"header": "News", "articles": [{"headline": "A fake news item"}]}
     o["winprobability"] = [{"homeWinPercentage": 0.5, "playId": "1"}]
+    # (Integration section 18) The real live summary has no `article` at all: a Preview before, a Recap after.
     if state == "post":
         o["article"] = {"type": "Recap", "headline": f"{TEAMS[away][2]} and {TEAMS[home][2]} trade blows in a game the fake panel made up for the hub",
                         "description": "not read", "story": "<p>not read</p>"}
-    else:
+    elif not started:
         o["article"] = {"type": "Preview", "headline": f"{TEAMS[away][2]} at {TEAMS[home][2]}: what to watch"}
     o["videos"] = sports_video.espn_videos(h, eid) if state == "post" else []
     if not head_first:

@@ -238,9 +238,9 @@ class EspnClipResolverTest {
     // ---------------------------------------------------------------- logs (§4.7, arch M5)
 
     @Test fun noLogLineCarriesAUrlBeyondItsHost() {
-        cataloged("https://cmp-espn.media.dssott.com/secret-path/abc/playlist.m3u8")
+        cataloged("https://media.clips.invalid/secret-path/abc/playlist.m3u8")
         runBlocking { resolver().stream(burrow) }
-        answer = { json(recordWith("https://cmp-espn.media.dssott.com/other-path/def/playlist.m3u8")) }
+        answer = { json(recordWith("https://media.clips.invalid/other-path/def/playlist.m3u8")) }
         runBlocking { resolver().stream(burrow, fresh = true) }
         answer = { json("{}", 503) }
         runBlocking { resolver().stream(burrow, fresh = true) }
@@ -249,6 +249,6 @@ class EspnClipResolverTest {
             assertFalse(line, line.contains("secret-path") || line.contains("other-path") || line.contains("playlist.m3u8"))
             assertFalse("no clip id: $line", line.contains("50578630"))
         }
-        assertTrue(logs.toString(), logs.any { it.contains("cmp-espn.media.dssott.com") })
+        assertTrue(logs.toString(), logs.any { it.contains("media.clips.invalid") })
     }
 }

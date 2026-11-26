@@ -139,7 +139,7 @@ class ScoringRowsTest {
 
     @Test fun theNhlRowsKeepTodaysWords() {
         val live = SportsFixtures.game(id = "L1", phase = GamePhase.LIVE, away = SportsFixtures.team("UTA", "Mammoth"), home = SportsFixtures.team("WPG", "Jets"))
-        fun goal(i: Int, clip: Long?) = GoalItem(PeriodLabel(PeriodKind.REG, 1), "5:1$i", Side.HOME, "G. Vilardi", "Vilardi", 4, listOf("Connor"), Strength.PP, false, 0, i, clip, "https://img.test/h.png")
+        fun goal(i: Int, clip: Long?) = GoalItem(PeriodLabel(PeriodKind.REG, 1), "5:1$i", Side.HOME, "G. Vilardi", "Vilardi", 4, listOf("Connor"), Strength.PP, false, 0, i, clip, "https://img.invalid/h.png")
         val d = GameDetail(live.id, live.phase, null, null, null, null, emptyList(), null, emptyList(), listOf(goal(1, 11), goal(2, null), goal(3, 13)), emptyList(), emptyList(), null, null, 70, 80, emptyList())
         val r = NhlHubUi.scoringRows(res, live, d, emptyMap(), emptyList(), 0L, true)
         assertEquals(listOf("goal:0", "goal:1", "goal:2"), r.map { it.key })
@@ -147,7 +147,7 @@ class ScoringRowsTest {
         assertEquals(goalLine1(res, d.goals[0]), e.line1)
         assertEquals(goalLine2(res, live, d.goals[0]), e.line2)
         assertEquals(ClipRef(11, ClipKind.GOAL, live.id), e.clip)
-        assertEquals(RowIcon.Headshot("https://img.test/h.png"), e.icon)
+        assertEquals(RowIcon.Headshot("https://img.invalid/h.png"), e.icon)
         assertEquals("the goal and every later goal with a clip", listOf(11L, 13L), scoringQueue(r, 0).map { it.videoId })
         assertTrue(scoringQueue(r, 1).isEmpty())
         val fin = NhlHubUi.scoringRows(res, live.copy(phase = GamePhase.FINAL), d, emptyMap(), emptyList(), 0L, true)

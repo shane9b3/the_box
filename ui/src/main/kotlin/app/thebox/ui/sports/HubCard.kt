@@ -137,6 +137,8 @@ internal fun HubCard(
     measure: Measure = rememberHubMeasure(),
     /** (NFL hub §4.3) The view model's offer tick: the chip's clock is read again at each expiry instant. */
     offerTick: Int = 0,
+    /** (NFL hub §4.3, integration §18) The view model's ESPN skew: the chip's offer check runs at `now + skew`. */
+    skewMs: Long = 0L,
 ) {
     val res = LocalResources.current
     val g = card.game
@@ -208,7 +210,7 @@ internal fun HubCard(
                 TeamRow(g.home, home, league, 1, g.phase, winner, SPORTS_HOME_NAME_TAG + g.id.id, measure)
             }
             Spacer(Modifier.weight(1f))
-            BottomRow(pill, g.id.id, card.followed, showHighlights && cardHighlights(g, nowMs))
+            BottomRow(pill, g.id.id, card.followed, showHighlights && cardHighlights(g, nowMs + skewMs))
         }
     }
 }

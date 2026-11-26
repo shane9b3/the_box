@@ -16,6 +16,7 @@ import app.thebox.core.sports.hub.ClipInfo
 import app.thebox.core.sports.hub.ClipKind
 import app.thebox.core.sports.hub.ClipOffer
 import app.thebox.core.sports.hub.ClipRef
+import app.thebox.core.sports.hub.EspnDetailMapper
 import app.thebox.core.sports.hub.GameClip
 import app.thebox.core.sports.hub.GameDetail
 import app.thebox.core.sports.hub.PlayScore
@@ -296,12 +297,11 @@ internal object NflHubUi : HubLeagueUi {
 
     /**
      * (§2.4) ESPN's `shortName` after the first ". ": "J. Cook III" → "Cook III", "C.J. Stroud" → "Stroud", "A. St. Brown" →
-     * "St. Brown"; without ". " the whole name. Never the last word.
+     * "St. Brown"; without ". " the whole name. Never the last word. (Integration §18) The one implementation is
+     * `EspnDetailMapper.leaderSurname`; `Leader.name` holds ESPN's raw `shortName`, and this is the only place it is applied
+     * (the panel's leader lines and the Matchup sheet), so the non-idempotent rule runs exactly once.
      */
-    internal fun shortName(name: String): String {
-        val i = name.indexOf(". ")
-        return if (i < 0) name.trim() else name.substring(i + 2).trim()
-    }
+    internal fun shortName(name: String): String = EspnDetailMapper.leaderSurname(name)
 
     // ------------------------------------------------------------------ highlights and clips (§4.3)
 
@@ -337,9 +337,9 @@ internal object NflHubUi : HubLeagueUi {
     }
 
     /** The next instant an offer of anything [g] shows changes (the view model's one timer, §4.3); null for none. */
-    internal fun nextOfferChange(g: GameSnapshot, d: GameDetail?, nowMs: Long): Long? {
-        val at = offerNow(nowMs, d)
-        val skew = at - nowMs
+    internal fun nextOfferChange(g: GameSnapshot, d: GameDetail?, nowMs: Long, skewMs: Long = d?.clockSkewMs ?: 0L): Long? {
+        val skew = skewMs
+        val at = nowMs + skew
         val fromClips = d?.clips.orEmpty().mapNotNull { ClipOffer.changesAt(it.embargoMs, it.expiresMs, at) }
         val fromBoard = g.media?.recapExpiresMs?.let { ClipOffer.changesAt(null, it, at) }
         // Back from the reference clock to the wall clock the view model waits on.
@@ -449,6 +449,8 @@ internal object NflHubUi : HubLeagueUi {
                 SlotLabel.HIGHLIGHTS_SOON -> res.getString(R.string.sports_hub_caption_highlights_soon)
                 SlotLabel.NO_HIGHLIGHTS -> noHighlightCaption(res, g, m.detail, m.nowMs, m.videoOff)
                 SlotLabel.SCORING, SlotLabel.SCORING_N -> res.getString(R.string.sports_hub_reason_no_points)
+                // (Integration §18, P3 note 16) Grey while the summary loads, or when ESPN lists nothing for the sheet.
+                SlotLabel.MATCHUP -> res.getString(if (m.detail == null) R.string.sports_hub_reason_matchup_loading else R.string.sports_hub_reason_matchup_none)
                 else -> null
             }
         }

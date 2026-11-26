@@ -130,6 +130,7 @@ fun SportsScreen(
     // (NFL hub §6.6) Video off per league; the offer tick (§4.3) re-checks every card chip and the sheet at an expiry.
     val videoOffLeagues by viewModel.videoOffLeagues.collectAsStateWithLifecycle()
     val offerTick by viewModel.offerTick.collectAsStateWithLifecycle()
+    val espnSkewMs by viewModel.espnSkewMs.collectAsStateWithLifecycle()
     val toast by viewModel.toast.collectAsStateWithLifecycle()
     val session = viewModel.clipSession
     val clipState by (session?.state ?: remember { kotlinx.coroutines.flow.MutableStateFlow<ClipSession.State>(ClipSession.State.Idle) }).collectAsStateWithLifecycle()
@@ -371,7 +372,7 @@ fun SportsScreen(
                                     SportsBody.Loading -> Skeletons()
                                     is SportsBody.Games -> GamesGrid(
                                         b.cards, gridState, clock24, cardRequesters, dayChips.getValue(selectedOffsetOf(ui, nfl)),
-                                        panel = panel, panelFocused = panelFocused, videoOff = videoOffNow, offerTick = offerTick, focusedId = focusedCardId,
+                                        panel = panel, panelFocused = panelFocused, videoOff = videoOffNow, offerTick = offerTick, espnSkewMs = espnSkewMs, focusedId = focusedCardId,
                                         onFocus = { id, on, index ->
                                             // A card focused in passing while the page turns unfocusable (a sheet opening, a
                                             // clip starting) is not the user's move.
@@ -640,6 +641,8 @@ private fun GamesGrid(
     videoOff: Set<LeagueGroup>,
     /** (NFL hub §4.3) The view model's offer tick. */
     offerTick: Int,
+    /** (Integration §18) The view model's ESPN skew, for the cards' chip checks. */
+    espnSkewMs: Long,
     focusedId: String?,
     onFocus: (id: String, focused: Boolean, index: Int) -> Unit,
     onEnter: (String) -> Unit,
@@ -674,6 +677,7 @@ private fun GamesGrid(
                 focusRequester = requester,
                 measure = measure,
                 offerTick = offerTick,
+                skewMs = espnSkewMs,
                 // Up from the first row goes to the selected day chip, whichever column it is in (§2.2).
                 modifier = Modifier.focusProperties { if (index < 2) up = dayChip },
             )

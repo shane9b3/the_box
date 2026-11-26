@@ -247,19 +247,20 @@ internal fun boxCategoryTitle(c: BoxCategory): Int = when (c) {
 }
 
 /**
- * (NFL hub §3.5) A column's header: ESPN's stat key ("completions/passingAttempts", "passingYards", "QBRating") read as
- * the sheet's words (C/ATT, YDS, TD, INT, RTG, CAR, AVG, LONG, REC); a column already in words is shown as given.
+ * (NFL hub §3.5; integration §18) A column's header: `BoxTable.columns` are ESPN's stat keys ("completions/passingAttempts",
+ * "passingYards", "QBRating"), the one representation from `:core`; the sheet's words (C/ATT, YDS, TD, INT, RTG, CAR, AVG,
+ * LONG, REC) are these resources. A key the mapper never emits is shown as given.
  */
 internal fun boxColumnLabel(res: Resources, key: String): String = when (key.trim().lowercase(Locale.ROOT)) {
-    "completions/passingattempts", "c/att" -> res.getString(R.string.sports_hub_box_c_att)
-    "passingyards", "rushingyards", "receivingyards", "yds" -> res.getString(R.string.sports_hub_box_yds)
-    "passingtouchdowns", "rushingtouchdowns", "receivingtouchdowns", "td" -> res.getString(R.string.sports_hub_box_td)
-    "interceptions", "int" -> res.getString(R.string.sports_hub_box_int)
-    "qbrating", "adjqbr", "rtg" -> res.getString(R.string.sports_hub_box_rtg)
-    "rushingattempts", "car" -> res.getString(R.string.sports_hub_box_car)
-    "yardsperrushattempt", "yardsperreception", "avg" -> res.getString(R.string.sports_hub_box_avg)
-    "longrushing", "longreception", "long" -> res.getString(R.string.sports_hub_box_long)
-    "receptions", "rec" -> res.getString(R.string.sports_hub_box_rec)
+    "completions/passingattempts" -> res.getString(R.string.sports_hub_box_c_att)
+    "passingyards", "rushingyards", "receivingyards" -> res.getString(R.string.sports_hub_box_yds)
+    "passingtouchdowns", "rushingtouchdowns", "receivingtouchdowns" -> res.getString(R.string.sports_hub_box_td)
+    "interceptions" -> res.getString(R.string.sports_hub_box_int)
+    "qbrating" -> res.getString(R.string.sports_hub_box_rtg)
+    "rushingattempts" -> res.getString(R.string.sports_hub_box_car)
+    "yardsperrushattempt", "yardsperreception" -> res.getString(R.string.sports_hub_box_avg)
+    "longrushing", "longreception" -> res.getString(R.string.sports_hub_box_long)
+    "receptions" -> res.getString(R.string.sports_hub_box_rec)
     else -> key
 }
 

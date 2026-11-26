@@ -148,14 +148,16 @@ internal fun nflMatchupRows(res: Resources, game: app.thebox.core.sports.GameSna
     }
     val max = app.thebox.core.sports.SportsConstants.HUB_NFL_INJURIES_PER_TEAM
     val injuries = listOf(app.thebox.core.sports.Side.AWAY to away, app.thebox.core.sports.Side.HOME to home).mapNotNull { (side, name) ->
-        d.injuries.filter { it.side == side }.takeIf { it.isNotEmpty() }?.let { name to it }
+        d.injuries.filter { it.side == side }.takeIf { it.isNotEmpty() }?.let { Triple(name, it, d.injuryCounts[side] ?: it.size) }
     }
     if (injuries.isNotEmpty()) {
         add(MatchupRow.Header(R.string.sports_hub_matchup_injuries))
-        for ((name, lines) in injuries) {
+        for ((name, lines, total) in injuries) {
             add(MatchupRow.Label(name.nickname))
-            lines.take(max).forEach { add(MatchupRow.Injury(injuryText(res, it), injuryDesc(res, it))) }
-            if (lines.size > max) add(MatchupRow.Label(res.getString(R.string.sports_hub_more_n, lines.size - max)))
+            val shown = lines.take(max)
+            shown.forEach { add(MatchupRow.Injury(injuryText(res, it), injuryDesc(res, it))) }
+            // (Integration §18) "+n more" from ESPN's full count (GameDetail.injuryCounts), not from the lines kept.
+            if (total > shown.size) add(MatchupRow.Label(res.getString(R.string.sports_hub_more_n, total - shown.size)))
         }
     }
 }

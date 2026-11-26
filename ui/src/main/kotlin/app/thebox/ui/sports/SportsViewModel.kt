@@ -289,6 +289,14 @@ class SportsViewModel internal constructor(
      * shown game's clips and the cards' board highlights): the panel, the sheet and the cards check again then.
      */
     val offerTick: StateFlow<Int> = offerTickFlow.asStateFlow()
+
+    private val espnSkewFlow = MutableStateFlow(0L)
+    /**
+     * (NFL hub §4.3, integration §18) The one ESPN skew the page's offer checks use where no detail is at hand (the cards'
+     * board chips and their timer): the newest NFL detail's `clockSkewMs`, which `EspnDetailSource` sets from ESPN's
+     * `Date` (the same skew the resolver's catalog holds). The shown game's checks read its own detail's.
+     */
+    val espnSkewMs: StateFlow<Long> = espnSkewFlow.asStateFlow()
     private var offerJob: Job? = null
     private var offerAt: Long? = null
     private var offerFired = Long.MIN_VALUE
@@ -811,7 +819,7 @@ class SportsViewModel internal constructor(
         if (shown != null && shown.id.league.group == LeagueGroup.NFL) NflHubUi.nextOfferChange(shown, d, now)?.let { candidates += it }
         for (c in currentCards()) {
             val g = c.game
-            if (g.id.league.group == LeagueGroup.NFL && g.media?.recapExpiresMs != null) NflHubUi.nextOfferChange(g, null, now)?.let { candidates += it }
+            if (g.id.league.group == LeagueGroup.NFL && g.media?.recapExpiresMs != null) NflHubUi.nextOfferChange(g, null, now, espnSkewFlow.value)?.let { candidates += it }
         }
         val at = candidates.filter { it > offerFired }.minOrNull()
         if (at == offerAt) return
@@ -1008,6 +1016,7 @@ class SportsViewModel internal constructor(
         when (ds) {
             is DetailState.Ready -> if (ds.detail.id == g.id) {
                 d = ds.detail; kind = DetailKind.READY; stale = ds.stale; failing = ds.failing
+                if (g.id.league.group == LeagueGroup.NFL) espnSkewFlow.value = ds.detail.clockSkewMs
                 // (Review L3) To the minute ("Stats from 8:12 PM"), so two builds a millisecond apart are equal models.
                 statsAt = (now - (nowMono() - ds.fetchedAtMono).coerceAtLeast(0L)) / 60_000L * 60_000L
             }

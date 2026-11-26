@@ -309,8 +309,10 @@ class EspnDetailMapperTest {
             EspnInjuryDto("Doubtful", EspnInjuredAthleteDto(null, null), null)
         val dto = EspnSummaryDto(header = header(), injuries = listOf(EspnTeamInjuriesDto(EspnTeamRefDto(JsonPrimitive("28")), list)))
         val d = EspnDetailMapper.detail(dto, mnfId, null)!!
-        assertEquals(2 * SportsConstants.HUB_NFL_INJURIES_PER_TEAM, d.injuries.size)
+        // (Integration §18) The lines the sheet draws are kept; every qualifying line is counted for "+n more".
+        assertEquals(SportsConstants.HUB_NFL_INJURIES_PER_TEAM, d.injuries.size)
         assertTrue(d.injuries.all { it.side == Side.HOME && it.status == InjuryStatus.OUT })
+        assertEquals(mapOf(Side.HOME to 20), d.injuryCounts, "20 Out lines counted; Day-To-Day and the nameless one are not")
     }
 
     // ------------------------------------------------------------------ the team-order trap (arch m1)
@@ -384,17 +386,18 @@ class EspnDetailMapperTest {
 
     // ------------------------------------------------------------------ box score (§3.5)
 
+    /** (Integration §18) The columns are ESPN's stat keys (stable); the sheet's words are `:ui` resources. */
     @Test fun mnfBoxTablesBySideWithTheDesignColumns() {
         val box = assertNotNull(EspnDetailMapper.box(NflHubFixtures.summary(NflHubFixtures.FINAL_MNF)))
         assertEquals(listOf(BoxCategory.PASSING, BoxCategory.RUSHING, BoxCategory.RECEIVING), box.away.tables.map { it.category })
         val pass = box.away.tables[0]
-        assertEquals(listOf("C/ATT", "YDS", "TD", "INT", "RTG"), pass.columns)
+        assertEquals(listOf("completions/passingAttempts", "passingYards", "passingTouchdowns", "interceptions", "QBRating"), pass.columns)
         assertEquals(BoxLine("Joe Burrow", listOf("28/40", "300", "2", "0", "108.3")), pass.lines.single())
         val rush = box.away.tables[1]
-        assertEquals(listOf("CAR", "YDS", "AVG", "TD", "LONG"), rush.columns)
+        assertEquals(listOf("rushingAttempts", "rushingYards", "yardsPerRushAttempt", "rushingTouchdowns", "longRushing"), rush.columns)
         assertEquals(BoxLine("Samaje Perine", listOf("6", "26", "4.3", "0", "11")), rush.lines[0])
         val rec = box.away.tables[2]
-        assertEquals(listOf("REC", "YDS", "AVG", "TD", "LONG"), rec.columns)
+        assertEquals(listOf("receptions", "receivingYards", "yardsPerReception", "receivingTouchdowns", "longReception"), rec.columns)
         assertEquals(BoxLine("Mike Gesicki", listOf("5", "77", "15.4", "0", "32")), rec.lines[0])
         assertTrue(box.home.tables.isNotEmpty())
         assertTrue(box.home.tables[0].lines.none { it.name == "Joe Burrow" }, "WSH's table is WSH's")
@@ -424,39 +427,67 @@ class EspnDetailMapperTest {
         assertEquals("J.", EspnDetailMapper.leaderSurname("J. "), "nothing after the dot: the name as is")
     }
 
-    // ------------------------------------------------------------------ live (PROVISIONAL, §8.1)
+    // ------------------------------------------------------------------ live (§8.1)
     //
-    // The three `summary-live-401873079-*.json` fixtures are hand-built from the final and pre-game shapes (no live capture
-    // existed when P1 ran). Every test here is named `…_provisional` and is replaced with the first real capture.
+    // `summary-live-401873079-1.json` is the **real** capture of GB @ LAR at 02:04Z on 2026-11-26 (Q2 11:29), reduced
+    // with `tools/espn/reduce_summary.py` (integration §18). `-2` (halftime with a clip) and `-3` (Q4) are still P1's
+    // hand-built bodies: their tests stay named `…_provisional` until a later capture replaces them.
 
     private fun live(n: Int, atMs: Long? = ms("2026-11-26T03:00:00Z")): GameDetail =
         assertNotNull(EspnDetailMapper.detail(NflHubFixtures.summary("sports/nfl/hub/summary-live-401873079-$n.json"), id("401873079"), atMs))
 
-    @Test fun liveFirstQuarter_provisional() {
-        val d = live(1)
+    @Test fun liveSecondQuarterFromTheRealCapture() {
+        val d = live(1, atMs = ms("2026-11-26T02:04:30Z"))
         assertEquals(GamePhase.LIVE, d.fetchedPhase)
         assertTrue(d.seasonStats.isEmpty(), "no season rows once the game is on")
-        assertTrue(d.recent.isEmpty())
+        assertTrue(d.recent.isEmpty(), "no lastFiveGames key live")
         assertEquals(
             listOf(StatKind.TOTAL_YARDS, StatKind.PASS_YARDS, StatKind.RUSH_YARDS, StatKind.FIRST_DOWNS, StatKind.THIRD_DOWN, StatKind.TURNOVERS, StatKind.POSSESSION),
             d.gameStats.map { it.kind },
         )
-        assertEquals(StatRow(StatKind.TOTAL_YARDS, StatValue.Count(88), StatValue.Count(31)), d.gameStats[0], "away GB first")
-        assertEquals(StatRow(StatKind.THIRD_DOWN, StatValue.Fraction(1, 3, true), StatValue.Fraction(0, 2, true)), d.gameStats[4])
-        assertEquals(StatValue.Clock(6 * 60 + 12), d.gameStats[6].away)
+        assertEquals(StatRow(StatKind.TOTAL_YARDS, StatValue.Count(62), StatValue.Count(124)), d.gameStats[0], "away GB first")
+        assertEquals(StatRow(StatKind.RUSH_YARDS, StatValue.Count(-8), StatValue.Count(37)), d.gameStats[2], "negative rushing")
+        assertEquals(StatRow(StatKind.THIRD_DOWN, StatValue.Fraction(0, 2, true), StatValue.Fraction(2, 4, true)), d.gameStats[4])
+        assertEquals(StatValue.Clock(5 * 60 + 34), d.gameStats[6].away, "ESPN sends \" 5:34\" with a leading space")
+        assertEquals(StatValue.Clock(12 * 60 + 57), d.gameStats[6].home)
         assertEquals(
-            listOf(ScoringPlay("4018730791101", PeriodLabel(PeriodKind.REG, 1), "6:41", Side.AWAY, PlayScore.FG, "Brandon McManus 44 Yd Field Goal", 3, 0)),
+            listOf(
+                ScoringPlay("401873079344", PeriodLabel(PeriodKind.REG, 1), "9:55", Side.HOME, PlayScore.FG, "Brandon McManus 43 Yd Field Goal", 0, 3),
+                ScoringPlay("401873079764", PeriodLabel(PeriodKind.REG, 1), "3:12", Side.HOME, PlayScore.FG, "Brandon McManus 41 Yd Field Goal", 0, 6),
+                ScoringPlay("401873079947", PeriodLabel(PeriodKind.REG, 1), "1:28", Side.AWAY, PlayScore.FG, "Trey Smack 54 Yd Field Goal", 3, 6),
+                ScoringPlay("4018730791209", PeriodLabel(PeriodKind.REG, 2), "11:29", Side.HOME, PlayScore.TD, "Kyren Williams 7 Yd Rush (Brandon McManus Kick)", 3, 13),
+            ),
             d.plays,
+            "play ids are event id + sequence, of varying length",
         )
-        assertNull(d.recapHeadline, "the Preview article stays up during the game")
+        assertNull(d.recapHeadline, "no article key at all during the game")
+        assertTrue(d.clips.isEmpty(), "no in-game videos in Q2 of a non-ESPN game")
+        // Live leaders: every category is listed, but sacks has no `leaders` key until someone has one.
+        assertTrue(d.leaders.none { it.category == "sacks" })
+        val rush = d.leaders.first { it.category == "rushingYards" }
+        assertEquals("K. Johnson", rush.away?.name)
+        assertEquals(-8, rush.away?.value, "negative yards kept from value (displayValue \"3 CAR, - YDS\")")
+        assertEquals("2", d.leaders.first { it.category == "totalTackles" }.home?.line)
+        // The injury report live is the game-day inactives: every line Out, mostly "Coach's Decision".
+        assertTrue(d.injuries.all { it.status == InjuryStatus.OUT })
+        assertEquals("SoFi Stadium", d.venue)
+    }
+
+    /** The real halftime capture (02:44Z): `STATUS_HALFTIME` with state "in" is INTERMISSION; still no video, no article. */
+    @Test fun liveHalftimeFromTheRealCapture() {
+        val d = assertNotNull(EspnDetailMapper.detail(NflHubFixtures.summary(NflHubFixtures.LIVE_GB_LAR_HALF), id("401873079"), ms("2026-11-26T02:44:30Z")))
+        assertEquals(GamePhase.INTERMISSION, d.fetchedPhase)
+        assertEquals(listOf(PlayScore.FG, PlayScore.FG, PlayScore.FG, PlayScore.TD, PlayScore.TD, PlayScore.FG), d.plays.map { it.kind })
+        assertEquals(13 to 13, d.plays.last().away to d.plays.last().home)
+        assertEquals(Side.AWAY, d.plays.last().side)
+        assertEquals(StatRow(StatKind.TOTAL_YARDS, StatValue.Count(189), StatValue.Count(136)), d.gameStats[0])
+        assertEquals(StatValue.Clock(16 * 60 + 55), d.gameStats.first { it.kind == StatKind.POSSESSION }.home)
         assertTrue(d.clips.isEmpty())
-        // Game leaders: the categories ESPN lists; one side may be missing (GB has no sacks leader yet).
+        assertNull(d.recapHeadline)
+        // LAR (home) has no sacks leader yet (no `leaders` key); GB (away) has one.
         val sacks = d.leaders.first { it.category == "sacks" }
-        assertNull(sacks.away)
-        assertEquals(0, sacks.home?.value)
-        assertEquals("0.5", sacks.home?.line)
-        assertTrue(d.leaders.none { it.category == "totalTackles" })
-        assertEquals(4, d.injuries.size, "the pre-game report is still listed")
+        assertNotNull(sacks.away)
+        assertNull(sacks.home)
     }
 
     @Test fun liveHalftimeWithAnInGameClip_provisional() {

@@ -34,6 +34,18 @@ object EspnVideoMapper {
     const val COVERAGE_ONE_PLAY = "OnePlay"
     private const val SETTOP = "settop"
 
+    /** ESPN's own logo base (production). `EspnEndpoints.LOGO_BASE` is this constant. */
+    const val PRODUCTION_LOGO_BASE = "https://a.espncdn.com/"
+
+    /**
+     * (Integration §18) **The one rule for plain-http clip media and images**: allowed only when the ESPN endpoints are not
+     * ESPN's own, i.e. the debug endpoint override (the fake panel), which only a debuggable build can load. Production
+     * never offers an http clip. Every caller decides by this function from the endpoints' logo base: the board's
+     * highlight (`EspnMapper`), the detail's clips and headshots (`EspnDetailSource` → `EspnDetailMapper.detail(…,
+     * httpOk)`), the catalog, and the clip records (`EspnClipResolver`).
+     */
+    fun httpOkFor(logoBase: String): Boolean = logoBase.trim() != PRODUCTION_LOGO_BASE
+
     fun entry(dto: EspnVideoDto, atMs: Long?, httpOk: Boolean): VideoEntry? {
         val id = wholeNumber(dto.id)?.takeIf { it > 0 } ?: return null
         val kind = when (dto.tracking?.coverageType?.trim()) {

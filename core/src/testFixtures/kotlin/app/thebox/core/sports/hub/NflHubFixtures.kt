@@ -33,6 +33,19 @@ object NflHubFixtures {
     /** Week 11's board, two events (PIT @ PHI, CIN @ WSH), each with one `highlights[]` entry and `broadcasts`. */
     const val BOARD_WK11 = DIR + "scoreboard-highlights-wk11.json"
 
+    /**
+     * GB @ LAR live, `summary-live-401873079-{1,2,3}.json`. `-1` is the **real** capture of 2026-11-26T02:04Z (Q2 11:29,
+     * LAR 13–3; integration §18); `-2` (halftime with a clip) and `-3` (Q4) are still P1's provisional hand-built bodies.
+     */
+    const val LIVE_GB_LAR_1 = DIR + "summary-live-401873079-1.json"
+    const val LIVE_GB_LAR_2 = DIR + "summary-live-401873079-2.json"
+    const val LIVE_GB_LAR_3 = DIR + "summary-live-401873079-3.json"
+    /** The **real** halftime capture of 2026-11-26T02:44Z (`STATUS_HALFTIME`, 13–13), and its board event. */
+    const val LIVE_GB_LAR_HALF = DIR + "summary-live-401873079-half.json"
+    const val BOARD_EVENT_HALF = DIR + "scoreboard-event-half-401873079.json"
+    /** The board's own event (`scoreboard/{id}`, wrapped as `{events: [ … ]}`) at the same instant as [LIVE_GB_LAR_1]. */
+    const val BOARD_EVENT_LIVE = DIR + "scoreboard-event-live-401873079.json"
+
     val SUMMARIES = listOf(FINAL_MIA_BUF, FINAL_PIT_PHI, FINAL_MNF, FINAL_SAFETY, FINAL_DEF_TD, PRE_GB_LAR)
 
     /** The decoder the app uses (`EspnHttp`): unknown keys skipped. */

@@ -198,7 +198,7 @@ object EspnMapper {
             detail = detail(sit, away, home, ::sideOfId, breakKind, lastPlay, delayed = name?.uppercase()?.contains(DELAY) == true),
             broadcasts = if (boardFacts) broadcasts(comp.broadcasts) else emptyList(),
             extras = if (boardFacts) extras(comp, awayC, homeC, state, ::sideOfId) else null,
-            media = highlight(comp.highlights, serverDateMs, httpOk = logoBase.startsWith("http://", ignoreCase = true)),
+            media = highlight(comp.highlights, serverDateMs, httpOk = EspnVideoMapper.httpOkFor(logoBase)),
         )
     }
 
@@ -209,7 +209,7 @@ object EspnMapper {
      * recapExpiresMs)`: the first entry [EspnVideoMapper] maps to a [ClipKind.RECAP], offered at the board's own
      * [serverDateMs] (so this pure mapper needs no wall clock; without a date the time check is skipped and the UI's
      * `ClipOffer` check at draw time decides). An expired, embargoed, non-settop or non-https highlight gives no media.
-     * [httpOk]: the logo base is plain http, which only the debug override origin (the fake panel) is.
+     * [httpOk]: `EspnVideoMapper.httpOkFor(logoBase)`, the one http rule (the debug override origin only; integration §18).
      */
     private fun highlight(list: List<EspnVideoDto>?, serverDateMs: Long?, httpOk: Boolean): GameMedia? {
         val clip = list.orEmpty().firstNotNullOfOrNull { dto ->

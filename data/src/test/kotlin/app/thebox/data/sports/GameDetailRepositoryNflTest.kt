@@ -240,8 +240,8 @@ class GameDetailRepositoryNflTest {
     }
 
     /**
-     * LIVE → FINAL on the board: the effective phase is FINAL at once, so the final detail is read within the final
-     * cadence (P1's phase-change rule tightens this to 15 s after the last answer; this bound holds either way), then
+     * LIVE → FINAL on the board: the effective phase is FINAL at once, and P1's phase-change rule reads the final detail
+     * at once, no earlier than 15 s after the last answer (integration §18 tightened P2 note 15's loose bound), then
      * every 5 min while no highlight.
      */
     @Test fun liveToFinalSwitchesTheCadence() = runTest {
@@ -252,12 +252,52 @@ class GameDetailRepositoryNflTest {
         h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.FINAL), now), false, okBox(now)) }
         h.repo.show(nfl(phase = GamePhase.FINAL))
         runCurrent()
+        assertEquals("read at once (30 s after the live answer, past the 15 s floor)", listOf(600L, 30_600L), times(h))
         settle(SportsConstants.HUB_DETAIL_IDLE_MS - 30_000)
         assertEquals("the final read came", 2, h.fetcher.calls.size)
         assertEquals(GamePhase.FINAL, h.ready.detail.fetchedPhase)
         val at = h.fetcher.calls.last().second
         settle(SportsConstants.HUB_DETAIL_IDLE_MS)
         assertEquals(at + SportsConstants.HUB_DETAIL_IDLE_MS, h.fetcher.calls.last().second)
+    }
+
+    /** The floor itself: a board FINAL 5 s after the live answer is read at 15 s, not at once and not 5 min later. */
+    @Test fun aPhaseChangeSoonAfterAnAnswerWaitsForTheFloor() = runTest {
+        val h = harness()
+        h.repo.show(nfl(phase = GamePhase.LIVE))
+        settle(600 + 5_000)
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.FINAL), now), false, okBox(now)) }
+        h.repo.show(nfl(phase = GamePhase.FINAL))
+        settle(SportsConstants.HUB_NFL_REFETCH_FLOOR_MS)
+        assertEquals(listOf(600L, 600L + SportsConstants.HUB_NFL_REFETCH_FLOOR_MS), times(h))
+    }
+
+    /**
+     * (Integration §18, P1 note 1's residual risk) ESPN's summary header lags the board's FINAL: the live answer keeps
+     * coming back. The 15 s floor is used `HUB_NFL_PHASE_LAG_TRIES` times, then the final's 5 min cadence; it never polls
+     * every 15 s indefinitely. When the header catches up, the normal final rules apply.
+     */
+    @Test fun aSummaryLaggingTheBoardsFinalIsCappedThenTheFinalCadence() = runTest {
+        val h = harness()
+        h.repo.show(nfl(phase = GamePhase.LIVE))
+        settle(600 + 30_000)
+        h.repo.show(nfl(phase = GamePhase.FINAL)) // the fetcher still answers LIVE
+        settle(10 * 60_000L)
+        val floor = SportsConstants.HUB_NFL_REFETCH_FLOOR_MS
+        val idle = SportsConstants.HUB_DETAIL_IDLE_MS
+        val t = times(h)
+        assertEquals(listOf(600L, 30_600L, 30_600L + floor, 30_600L + 2 * floor, 30_600L + 2 * floor + idle), t.take(5))
+        assertTrue("then every 5 min: ${t}", t.zipWithNext().drop(3).all { (a, b) -> b - a == idle })
+        // The header catches up: final, no highlight, ended just now → the final wait (5 min), still no 15 s loop.
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.FINAL), now), false, okBox(now)) }
+        settle(idle)
+        assertEquals(GamePhase.FINAL, h.ready.detail.fetchedPhase)
+        val caught = h.fetcher.calls.size
+        val last = h.fetcher.calls.last().second
+        settle(last + idle - testScheduler.currentTime - 1)
+        assertEquals(caught, h.fetcher.calls.size)
+        settle(1)
+        assertEquals(caught + 1, h.fetcher.calls.size)
     }
 
     @Test fun backOffWinsOverThePhaseChangeAndTheBox() = runTest {

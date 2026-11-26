@@ -157,8 +157,11 @@ def leaders(ls):
         cats = []
         for c in t.get("leaders", []):
             cc = pick(c, ["name", "displayName"])
-            cc["leaders"] = [{**pick(l, ["displayValue", "value"]), "athlete": headshot(l.get("athlete", {}))}
-                             for l in c.get("leaders", [])[:1]]
+            # (Integration section 18) A live category with no leader yet (sacks early in a game) has no `leaders` key
+            # at all; keep it absent, as recorded, rather than writing an empty list.
+            if "leaders" in c:
+                cc["leaders"] = [{**pick(l, ["displayValue", "value"]), "athlete": headshot(l.get("athlete", {}))}
+                                 for l in c.get("leaders", [])[:1]]
             cats.append(cc)
         out.append({"team": team(t.get("team", {})), "leaders": cats})
     return out
