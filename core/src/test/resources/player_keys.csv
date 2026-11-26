@@ -145,7 +145,9 @@ quick,quick@PREVIOUS_CHANNEL,D,SELECT,0,0,NONE,T,previousChannel,-,passive
 quick,quick@STREAM_INFO,D,SELECT,0,0,QUICK_BAR,T,setStatsEnabled=true,-,stats:on
 quick,quick@VIDEO_DECODER,D,SELECT,0,0,PICKER,T,-,-,picker:VIDEO_DECODER;fromQuick
 quick,quick@SCREEN_OFF,D,SELECT,0,0,SCREEN_OFF,T,setScreenOff=true,-,-
-quick,quick@SETTINGS,D,SELECT,0,0,NONE,T,openSettings,-,-
+# (Settings panel §2.2, N9) Settings keeps the bar (under the PIN prompt and the panel); the guide answers with
+# settingsPanel(true). Alone here (no guide), the bar stays on Settings.
+quick,quick@SETTINGS,D,SELECT,0,0,QUICK_BAR,T,openSettings,-,quick:SETTINGS
 quick,quickA@JUMP_TO_LIVE,D,SELECT,0,0,NONE,T,jumpToLive,-,-
 quick,quick_error,D,BACK,0,0,ERROR,T,-,-,-
 quick,quick_error,D,DOWN,0,0,ERROR,T,-,-,-
@@ -402,3 +404,28 @@ scorebug,score_place_bl,D,DOWN,0,0,PLACE_SCORE,T,-,-,place:BOTTOM_LEFT
 scorebug,score_place_bl,D,UP,0,0,PLACE_SCORE,T,-,-,place:TOP_LEFT
 scorebug,score_place_bl,D,RIGHT,0,0,PLACE_SCORE,T,-,-,place:BOTTOM_RIGHT
 scorebug,score_place_bl,D,SELECT,0,0,QUICK_BAR,T,setScoreCorner=BOTTOM_LEFT,-,quick:SCORE_BUG
+# ---- SETTINGS_PANEL (docs/design/m6-player-settings-panel.md §2.2): passive; the guide sends keys to the settings
+# machine first, so only PLAY_PAUSE (PASS_THROUGH) is handled here. The quick bar stays on Settings, drawn active.
+panel,panel,D,UP,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,D,DOWN,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel;noInfo
+panel,panel,D,LEFT,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,D,RIGHT,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,D,SELECT,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,D,BACK,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,D,ZAP_UP,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,D,CONTEXT_MENU,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,D,STATS_OVERLAY,0,0,SETTINGS_PANEL,F,-,-,stats:off
+panel,panel,D,SCREEN_OFF,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,D,OPEN_SETTINGS,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,D,OPEN_GUIDE,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,D,PLAY,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,Z,UP,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+panel,panel,L,DOWN,0,0,SETTINGS_PANEL,F,-,-,quick:SETTINGS;panel
+# PLAY_PAUSE as on bare video, but no scrub bar or passive bar is shown under the panel
+panel,panel,D,PLAY_PAUSE,0,0,SETTINGS_PANEL,T,pauseLive,-,quick:SETTINGS;panel;noScrub;noInfo
+panel,panel_plain_paused,D,PLAY_PAUSE,0,0,SETTINGS_PANEL,T,resumePlain,-,quick:SETTINGS;panel
+panel,panel_archive,D,PLAY_PAUSE,0,0,SETTINGS_PANEL,T,archivePause,-,quick:SETTINGS;panel;noScrub
+# over an error card (opened from the card): the card is unfocused; PLAY_PAUSE does nothing, as on the card
+panel,panel_error,D,SELECT,0,0,SETTINGS_PANEL,F,-,-,button:-1;panel
+panel,panel_error,D,LEFT,0,0,SETTINGS_PANEL,F,-,-,button:-1;panel
+panel,panel_error,D,PLAY_PAUSE,0,0,SETTINGS_PANEL,T,-,-,button:-1;panel
