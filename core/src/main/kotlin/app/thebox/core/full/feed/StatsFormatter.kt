@@ -45,7 +45,8 @@ object StatsFormatter {
             mode + SEP + "start " + seconds(p.startMs.toLong())
         })
         add(StatLabel.DISPLAY, facts.displayRefreshHz?.takeIf { it > 0f }?.let { number(it) + " Hz" })
-        add(StatLabel.TUNNELING, if (facts.tunneling) "on" else "off")
+        // (2026-11-25) Three states: on; off by the settings (global or this channel's option); off for this visit.
+        add(StatLabel.TUNNELING, if (facts.tunneling) "on" else if (facts.tunnelingOffForVisit) "off for now (stalled)" else "off (setting)")
         return out
     }
 

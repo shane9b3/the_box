@@ -129,7 +129,7 @@
     <!-- M5 integration (B2): appended while "Always passthrough" is on -->
     <string name="player_notice_passthrough_forced">. To stop forcing it: Settings → Playback → Audio output → Auto</string>
     <string name="player_notice_video_software">Using the software video decoder for this channel</string>
-    <string name="player_notice_tunneling_off">Tunneled playback turned off for this channel</string>
+    <string name="player_notice_tunneling_off">Tunneling is off until you leave this channel (the picture stalled)</string>
     <string name="player_notice_user_agent">Playing with a different user agent (%1$s)</string>
     <string name="player_notice_buffer">Buffer increased to %1$s s for smoother playback</string>
     <string name="player_notice_buffer_generic">Buffer increased for smoother playback</string>

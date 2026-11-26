@@ -405,7 +405,7 @@ class SourceSetupImpl @Inject constructor(
         val secret = (playlists.secret(p) as? Outcome.Ok)?.value ?: return null
         register(secret.username, secret.password)
         val base = secret.urls.getOrNull(p.activeBaseIndex) ?: secret.urls.firstOrNull()
-        val ext = if (p.xtreamOutput == "HLS" || p.xtreamOutputLearned == "HLS") "m3u8" else "ts"
+        val ext = if (p.xtreamOutput == "HLS" || app.thebox.core.playback.resolve.LearnedOutput.parse(p.xtreamOutputLearned)?.output == app.thebox.core.playback.XtreamOutput.HLS) "m3u8" else "ts"
         val url = expander.expandCredentials(expander.expandNonSecret(target, base, ext), secret.username, secret.password)
         val headers = LinkedHashMap<String, String>().apply { p.extraHeaders?.let { putAll(it) }; putAll(secret.headers) }
         val first = probe.probe(playlistId, url, headers, p.userAgent)

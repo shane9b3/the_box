@@ -52,6 +52,13 @@ enum class SetupText {
     FORMAT_TS,
     FORMAT_HLS,
     FORMAT_LEARNED_HLS,
+    /** (2026-11-25) Auto + learned HLS with a TS retry ahead: at the next tune, later today, tomorrow, in %1$s days. */
+    FORMAT_LEARNED_HLS_RETRY_NEXT,
+    FORMAT_LEARNED_HLS_RETRY_TODAY,
+    FORMAT_LEARNED_HLS_RETRY_TOMORROW,
+    FORMAT_LEARNED_HLS_RETRY_DAYS,
+    /** The Auto option's detail while HLS is learned: picking it again forgets HLS. */
+    FORMAT_AUTO_RESET_DETAIL,
     UA_THE_BOX,
     UA_VLC,
     UA_BROWSER,

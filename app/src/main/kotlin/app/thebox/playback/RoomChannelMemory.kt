@@ -50,7 +50,14 @@ class RoomChannelMemory @Inject constructor(private val prefs: ChannelPrefsRepos
     companion object {
         const val TS_COMPAT_MASK = 0b011
         const val KNOWN_HDR_BIT = 0b100
-        const val TUNNELING_OFF_BIT = 0b1000
+        /**
+         * Retired (2026-11-25, docs/decisions/2026-11-25-tunneling-off-per-visit.md): written by the ladder and by the
+         * channel options alike, so the two cannot be told apart. Never read and never written again; a row's next
+         * flags write drops it. Do not reuse this bit.
+         */
+        const val LEGACY_TUNNELING_OFF_BIT = 0b1000
+        /** Channel options "Tunneled playback: Off for this channel": the user's choice only (the ladder never writes it). */
+        const val TUNNELING_OFF_BIT = 0b100000
         /** (Smooth playback, 2026-11-23) Channel options "Match frame rate: Always for this channel". */
         const val AFR_ALWAYS_BIT = 0b10000
 

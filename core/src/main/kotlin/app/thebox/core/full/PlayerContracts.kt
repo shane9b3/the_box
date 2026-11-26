@@ -127,6 +127,8 @@ data class StatsFacts(
     val afr: AfrMode = AfrMode.SEAMLESS,
     val displayRefreshHz: Float? = null,
     val tunneling: Boolean = false,
+    /** (2026-11-25) Off for this visit after a stall ("off for now"), not by the settings ("off (setting)"). */
+    val tunnelingOffForVisit: Boolean = false,
     /** (reviewed 2026-10-15, E23) 0-based base URL in use and the number of bases (backup servers); "Server: n of m". */
     val serverIndex: Int = 0,
     val serverCount: Int = 1,

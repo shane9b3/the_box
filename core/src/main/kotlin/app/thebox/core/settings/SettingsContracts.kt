@@ -85,7 +85,15 @@ enum class EffectTiming { LIVE, NEXT_TUNE, REPREPARE, NEXT_REFRESH, NEXT_EPG_IMP
  * [needsPin] (C-B2, code review 2026-10-16; additive): as a menu option, choosing it asks for the PIN first when one is
  * set (`PinPurpose.SettingsAction`), like `RowKind.Action.needsPin`; the intent is emitted only once the PIN is granted.
  */
-data class ChoiceOption(val id: String, val label: String, val detail: String? = null, val enabled: Boolean = true, val needsPin: Boolean = false)
+data class ChoiceOption(
+    val id: String,
+    val label: String,
+    val detail: String? = null,
+    val enabled: Boolean = true,
+    val needsPin: Boolean = false,
+    /** (2026-11-25; additive) Choosing it while it is already selected still emits the intent (Auto resets a learned format). */
+    val reselectable: Boolean = false,
+)
 
 sealed interface RowKind {
     data class Toggle(val on: Boolean) : RowKind

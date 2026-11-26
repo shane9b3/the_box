@@ -109,6 +109,26 @@ class StreamUrlBuilderTest {
         assertEquals(expected.extension, s.xtream!!.extension)
     }
 
+    /**
+     * (docs/decisions/2026-11-25-auto-format-retries-ts.md) The Auto TS retry is the controller's TS override on a
+     * playlist that learned HLS: the URL asks for `.ts`; without the override the learned HLS stands. The builder never
+     * starts a retry itself (whether one is due is AutoTsRetry's call, which also keeps a TS-less account away).
+     */
+    @Test
+    fun theTsRetryIsATsOverrideOnALearnedHlsPlaylist() {
+        val learned = xtreamPlaylist.copy(xtreamOutput = XtreamOutput.AUTO, xtreamOutputLearned = XtreamOutput.HLS, autoTsRetryDue = true)
+        val retry = ok(input(playlist = learned, output = XtreamOutput.TS))
+        assertEquals("http://a.example:8080/live/user/p@ss%2Fw%23rd/123.ts", retry.url)
+        assertEquals(XtreamOutput.TS, retry.output)
+        assertEquals(StreamFormat.TS, retry.formatHint)
+        val plain = ok(input(playlist = learned))
+        assertTrue(plain.url.endsWith("/123.m3u8"), "the due flag alone changes nothing")
+        assertEquals(XtreamOutput.HLS, plain.output)
+        // After a confirmed retry the learned value is gone: plain Auto asks for TS again.
+        assertEquals(XtreamOutput.TS, ok(input(playlist = learned.copy(xtreamOutputLearned = null, autoTsRetryDue = false))).output)
+        assertEquals(XtreamOutput.HLS, ok(input(playlist = learned.copy(xtreamOutputLearned = null), account = account("m3u8"))).output)
+    }
+
     @Test
     fun xtreamWithoutCredentialsFails() {
         assertFailed(PlaybackErrorCode.NEEDS_REAUTH, builder.build(input(credentials = null)))

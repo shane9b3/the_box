@@ -47,7 +47,17 @@ class StatsFormatterTest {
         assertEquals("1/2", v[StatLabel.CONNECTIONS])
         assertEquals("Auto L1 · start 1.0 s", v[StatLabel.BUFFER_PROFILE])
         assertEquals("50 Hz", v[StatLabel.DISPLAY])
-        assertEquals("off", v[StatLabel.TUNNELING])
+        assertEquals("off (setting)", v[StatLabel.TUNNELING])
+    }
+
+    /** (2026-11-25, docs/decisions/2026-11-25-tunneling-off-per-visit.md) On, off by the settings, off for this visit. */
+    @Test
+    fun theTunnelingLineHasThreeStates() {
+        fun line(f: StatsFacts) = StatsFormatter.lines(f).first { it.label == StatLabel.TUNNELING }.value
+        assertEquals("on", line(StatsFacts(tunneling = true)))
+        assertEquals("off (setting)", line(StatsFacts(tunneling = false)))
+        assertEquals("off for now (stalled)", line(StatsFacts(tunneling = false, tunnelingOffForVisit = true)))
+        assertEquals("on", line(StatsFacts(tunneling = true, tunnelingOffForVisit = true)), "on wins over a stale flag")
     }
 
     @Test
@@ -55,7 +65,7 @@ class StatsFormatterTest {
         val lines = StatsFormatter.lines(StatsFacts())
         // Only facts that are meaningful at zero remain: the buffer, dropped frames and the tunneling switch.
         assertEquals(listOf(StatLabel.BUFFER, StatLabel.DROPPED, StatLabel.TUNNELING), lines.map { it.label })
-        assertEquals(listOf(StatLine(StatLabel.BUFFER, "0.0 s"), StatLine(StatLabel.DROPPED, "0"), StatLine(StatLabel.TUNNELING, "off")), lines)
+        assertEquals(listOf(StatLine(StatLabel.BUFFER, "0.0 s"), StatLine(StatLabel.DROPPED, "0"), StatLine(StatLabel.TUNNELING, "off (setting)")), lines)
         assertTrue(lines.none { it.value.isBlank() })
     }
 

@@ -194,6 +194,31 @@ class ErrorLadderRulesTest {
         assertEquals("L10", t2.row)
     }
 
+    /**
+     * (docs/decisions/2026-11-25-auto-format-retries-ts.md) The Auto TS retry adds no row: its refusal is L9's flip to
+     * HLS on a TS request; any other failure of the retry is not a flip (the controller then calls it inconclusive); and
+     * the controller's own fall-back flip counts like L9, so a 405 on HLS afterwards ends at L10 instead of flipping back.
+     */
+    @Test
+    fun theTsRetrysRefusalIsL9AndNothingElseFlips() {
+        for (status in listOf(405, 406)) {
+            val t = ladder.trace(FailureSignal.Http(status, LoadOrigin.PROGRESSIVE), ctx(mapOf("output" to "TS")))
+            assertEquals("L9", t.row)
+            assertEquals(LadderDecision.FlipXtreamOutput(app.thebox.core.playback.XtreamOutput.HLS), t.decision)
+        }
+        val unrelated = listOf(
+            FailureSignal.Http(403, LoadOrigin.PROGRESSIVE), FailureSignal.Http(404, LoadOrigin.PROGRESSIVE),
+            FailureSignal.Network(app.thebox.core.playback.NetworkFailureKind.TIMEOUT, beforeFirstByte = true),
+            FailureSignal.Stall(StallKind.NO_BYTES), FailureSignal.ReconnectExhausted(null, noBytes = true),
+        )
+        for (signal in unrelated) {
+            val d = ladder.decide(signal, ctx(mapOf("output" to "TS"))).first
+            assertTrue(d !is LadderDecision.FlipXtreamOutput, "$signal is not a refusal: $d")
+        }
+        val afterFallBack = ladder.trace(FailureSignal.Http(405, LoadOrigin.HLS_MANIFEST), ctx(mapOf("output" to "HLS", "formatFlips" to "1")))
+        assertEquals("L10", afterFallBack.row)
+    }
+
     @Test
     fun audioFallbacksWalkPassthroughSoftwareDrop() {
         val stall = FailureSignal.Stall(StallKind.AUDIO_NOT_STARTED)
