@@ -110,6 +110,8 @@ class GameDetailRepositoryImpl internal constructor(
     private val dwellMs: Long = SportsConstants.HUB_FETCH_DWELL_MS,
     /** (NFL hub §5.4) Extra memory to drop on [trim] (the ESPN clip catalog, except the playing clip). */
     private val onTrim: () -> Unit = {},
+    /** (NFL hub code review 2026-11-26, data #6) `SportsConstants.ESPN_VIDEO_ENABLED`: off, no NFL final waits for a video. */
+    private val espnVideo: Boolean = SportsConstants.ESPN_VIDEO_ENABLED,
 ) : GameDetailRepository {
     /** (NFL hub) Built with both sources; [DetailFetcher.of] routes by league. */
     @Inject constructor(
@@ -242,6 +244,14 @@ class GameDetailRepositoryImpl internal constructor(
         },
     )
 
+    /**
+     * (NFL hub code review 2026-11-26, data #7) NFL game id → the last wall ms it was seen unfinished (board or detail), so
+     * a game whose end this process did not watch is not "ended" at the moment it is next seen. Same bound as [endedAt].
+     */
+    private val lastUnfinishedAt = object : LinkedHashMap<String, Long>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean = size > SportsConstants.HUB_DETAIL_LRU
+    }
+
     /** For tests (L7): the size of [seenUnfinished]. Read on the loop's thread only. */
     internal val seenUnfinishedCount: Int get() = seenUnfinished.size
 
@@ -338,6 +348,7 @@ class GameDetailRepositoryImpl internal constructor(
                 cache.keys.retainAll { it == keep }
                 endedAt.keys.retainAll { it == keep }
                 seenUnfinished.retainAll { it == keep }
+                lastUnfinishedAt.keys.retainAll { it == keep }
                 if (boxSlot?.first != keep) boxSlot = null
                 onTrim()
             }
@@ -435,7 +446,10 @@ class GameDetailRepositoryImpl internal constructor(
                 lastFailMono = null
                 retryAfterS = null
                 lastFailKind = null
-                if (f.value.fetchedPhase != GamePhase.FINAL) seenUnfinished += k
+                if (f.value.fetchedPhase != GamePhase.FINAL) {
+                    seenUnfinished += k
+                    if (id.league == League.NFL) lastUnfinishedAt[k] = wallNow()
+                }
                 shown?.let(::noteEnd)
                 val g = shown
                 lagTries = if (g != null && g.id == id && DetailPollPolicy.lagging(phase(g, cache[k]), f.value.fetchedPhase)) lagTries + 1 else 0
@@ -604,6 +618,8 @@ class GameDetailRepositoryImpl internal constructor(
     private fun recapPosted(game: GameSnapshot, entry: Entry?): Boolean {
         val d = entry?.ok?.value
         if (game.id.league != League.NFL) return d?.recapId != null || game.media?.recapId != null
+        // (Code review 2026-11-26, data #6) The kill switch: the app offers no ESPN video, so there is nothing to wait for.
+        if (!espnVideo) return true
         val at = wallNow() + (d?.clockSkewMs ?: 0L)
         if (d != null && d.clips.any { it.kind == ClipKind.RECAP && ClipOffer.offered(it.embargoMs, it.expiresMs, at) }) return true
         val m = game.media ?: return false
@@ -614,7 +630,7 @@ class GameDetailRepositoryImpl internal constructor(
     /** The policy's FINAL facts; (NFL hub §5.2) [FinalFacts.playClips]: the NFL detail lists a PLAY clip. */
     private fun finalFacts(game: GameSnapshot, entry: Entry?): FinalFacts = FinalFacts(
         recapPosted(game, entry),
-        playClips = entry?.ok?.value?.clips?.any { it.kind == ClipKind.PLAY } == true,
+        playClips = (game.id.league != League.NFL || espnVideo) && entry?.ok?.value?.clips?.any { it.kind == ClipKind.PLAY } == true,
         endedAgoMs = endedAgoMs(game),
     )
 
@@ -625,9 +641,24 @@ class GameDetailRepositoryImpl internal constructor(
         val final = game.phase == GamePhase.FINAL || detailPhase == GamePhase.FINAL
         if (!final) {
             seenUnfinished += id
+            if (game.id.league == League.NFL) lastUnfinishedAt[id] = wallNow()
         } else if (id in seenUnfinished && id !in endedAt) {
-            endedAt[id] = wallNow()
+            endedAt[id] = endInstant(game, id)
         }
+    }
+
+    /**
+     * When the game seen turning FINAL ended. The NHL (unchanged): now. (NFL hub code review 2026-11-26, data #7) The
+     * NFL: now, unless the last unfinished sighting is more than `HUB_NFL_END_SIGHTING_GAP_MS` old (the viewer left the
+     * page during the game); then the start + game-length estimate, kept between that sighting and now.
+     */
+    private fun endInstant(game: GameSnapshot, id: String): Long {
+        val now = wallNow()
+        if (game.id.league != League.NFL) return now
+        val last = lastUnfinishedAt[id] ?: return now
+        if (now - last <= SportsConstants.HUB_NFL_END_SIGHTING_GAP_MS) return now
+        val estimate = game.startUtcMs.takeIf { it > 0 }?.plus(cadence(League.NFL).gameLengthMs) ?: return now
+        return estimate.coerceIn(last, now)
     }
 
     /**

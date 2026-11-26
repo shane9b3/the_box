@@ -934,6 +934,31 @@ class TestSummary(NflCase):
         self.assertEqual([], d["videos"])
         self.assertEqual((22, 16), (d["scoringPlays"][-1]["awayScore"], d["scoringPlays"][-1]["homeScore"]))
 
+    def test_odd_scores_never_make_a_one_point_safety(self):
+        # (NFL hub code review 2026-11-26, data #9) 8 = TD + two-point conversion, 15 = 7 + 8, 4 = two safeties; the
+        # only safety value is 2.
+        for n in range(0, 61):
+            parts = sports_nfl.split_score(n)
+            self.assertEqual(n, sum(parts), n)
+            if n != 1:
+                self.assertNotIn(1, parts, n)
+            self.assertTrue(set(parts) <= {1, 2, 3, 7, 8}, (n, parts))
+        self.assertEqual([8], sports_nfl.split_score(8))
+        self.assertEqual([8, 7], sports_nfl.split_score(15))
+        self.assertEqual([2, 2], sports_nfl.split_score(4))
+        # Through the summary: a scripted final at 15–22 lists no 1-point play and no "Safety" worth 1.
+        self.admin("/admin/config", {"sports_nfl_script": {"401899002": {"away": 15, "home": 22, "state": "post", "name": "STATUS_FINAL", "period": 4, "clock": 0}}})
+        plays = self.doc("401899002")["scoringPlays"]
+        prev = {"away": 0, "home": 0}
+        for p in plays:
+            delta = (p["awayScore"] - prev["away"]) + (p["homeScore"] - prev["home"])
+            prev = {"away": p["awayScore"], "home": p["homeScore"]}
+            self.assertNotEqual(1, delta, p["text"])
+            if p["type"]["abbreviation"] == "SF":
+                self.assertEqual(2, delta, p["text"])
+        self.assertEqual((15, 22), (plays[-1]["awayScore"], plays[-1]["homeScore"]))
+        self.assertTrue(any("Two-Point" in p["text"] for p in plays))
+
     def test_key_order_differs_by_event(self):
         odd = list(self.doc("401899003").keys())
         even = list(self.doc("401899002").keys())

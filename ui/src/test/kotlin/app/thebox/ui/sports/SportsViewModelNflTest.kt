@@ -102,9 +102,10 @@ class SportsViewModelNflTest {
         assertEquals("the highlight is no longer offered", SlotLabel.NO_HIGHLIGHTS, m.panel.value.slots[0].label)
         assertFalse(m.panel.value.slots[0].enabled)
         assertTrue((m.panel.value.slots[1]).usable)
-        // Nothing else changes: the timer does not spin.
+        // (Code review 2026-11-26, UI m1) Then only the two caption windows of a final without a highlight (ended + 2 h,
+        // ended + 48 h), and nothing after: the timer does not spin.
         scheduler.advanceUntilIdle()
-        assertEquals(1, m.offerTick.value)
+        assertEquals(3, m.offerTick.value)
     }
 
     @Test fun theOfferTimerAlsoWatchesTheCardsBoardHighlights() {

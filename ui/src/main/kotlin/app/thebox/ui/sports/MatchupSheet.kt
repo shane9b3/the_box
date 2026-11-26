@@ -84,7 +84,9 @@ fun MatchupSheet(
                         NflLeaderCell(res, row.category, row.away, c, Modifier.weight(1f))
                         NflLeaderCell(res, row.category, row.home, c, Modifier.weight(1f))
                     }
-                    is MatchupRow.Recent -> HubSheetRow(reqs[i], first, last, key = "recent:$i", height = 96, onClick = {}) { c ->
+                    // (Code review 2026-11-26, UI m9) The team line and two lines of results need more than 96 px from
+                    // Larger up (Largest: 34 + 2 + 2 × 34): the row grows with the text size (96 at Default).
+                    is MatchupRow.Recent -> HubSheetRow(reqs[i], first, last, key = "recent:$i", height = recentRowHeight(), onClick = {}) { c ->
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Line(row.team, GuideUi.sans(22, FontWeight.SemiBold, GuideUi.secondary(c, focusedOf(c), 0.70f)))
                             Line(row.text, GuideUi.sans(22, FontWeight.Medium, c), maxLines = 2)
@@ -98,6 +100,9 @@ fun MatchupSheet(
         }
     }
 }
+
+/** (UI m9) The Last 5 row's height in design px: 96 at Default, scaled with the text size above it (never below 96). */
+internal fun recentRowHeight(): Int = kotlin.math.ceil(96f * app.thebox.core.settings.UiTextScale.factor.coerceAtLeast(1f)).toInt()
 
 internal sealed interface MatchupRow {
     val focusable: Boolean get() = true
@@ -123,13 +128,24 @@ private val NFL_LEADER_CATEGORIES = listOf(
     "totalTackles" to R.string.sports_hub_matchup_tackles,
 )
 
+/** (§3.6) The Season leaders the sheet draws: the five categories in order, each with at least one side. */
+private fun nflLeaders(d: GameDetail): List<Triple<String, Int, LeaderPair>> = NFL_LEADER_CATEGORIES.mapNotNull { (cat, label) ->
+    d.leaders.firstOrNull { it.category.equals(cat, ignoreCase = true) }?.takeIf { it.away != null || it.home != null }?.let { Triple(cat, label, it) }
+}
+
+/**
+ * (Code review 2026-11-26, UI m5) Whether the NFL Matchup sheet has a focusable row ([nflMatchupRows]`.any { it.focusable }`
+ * without building the words): a drawn leader pair, a team's last five, or an injury line. The NFL MATCHUP slot is enabled
+ * exactly then, so the sheet never opens with nothing to focus.
+ */
+internal fun nflMatchupHasRows(d: GameDetail): Boolean =
+    nflLeaders(d).isNotEmpty() || d.recent.isNotEmpty() || d.injuries.isNotEmpty()
+
 /** (NFL hub §3.6) The NFL sections: Season leaders, Last 5 games, Injury report; a section without rows is left out. */
 internal fun nflMatchupRows(res: Resources, game: app.thebox.core.sports.GameSnapshot, d: GameDetail): List<MatchupRow> = buildList {
     val away = HubNames.of(game.id.league, game.away)
     val home = HubNames.of(game.id.league, game.home)
-    val leaders = NFL_LEADER_CATEGORIES.mapNotNull { (cat, label) ->
-        d.leaders.firstOrNull { it.category.equals(cat, ignoreCase = true) }?.takeIf { it.away != null || it.home != null }?.let { Triple(cat, label, it) }
-    }
+    val leaders = nflLeaders(d)
     if (leaders.isNotEmpty()) {
         add(MatchupRow.Header(R.string.sports_hub_matchup_season_leaders))
         for ((cat, label, p) in leaders) {
@@ -241,13 +257,18 @@ internal fun positionName(res: Resources, abbr: String): String = when (abbr.tri
  */
 internal fun nflLeaderLine(res: Resources, category: String, l: Leader): String {
     val raw = l.line?.trim().orEmpty().ifEmpty { l.value.toString() }
+    // (Code review 2026-11-26, UI M1) A part whose number has no digit (ESPN's live "3 CAR, - YDS" for −8 yards) is never
+    // drawn; with nothing left the line is "–".
+    val none = res.getString(R.string.sports_hub_stat_none)
+    fun hasDigit(t: String) = t.any { it.isDigit() }
     when (category.lowercase(Locale.ROOT)) {
-        "sacks" -> return res.getString(R.string.sports_hub_unit_sacks, raw.substringBefore(' '))
-        "totaltackles" -> return res.getString(R.string.sports_hub_unit_tackles, raw.substringBefore(' '))
+        "sacks" -> return raw.substringBefore(' ').takeIf(::hasDigit)?.let { res.getString(R.string.sports_hub_unit_sacks, it) } ?: none
+        "totaltackles" -> return raw.substringBefore(' ').takeIf(::hasDigit)?.let { res.getString(R.string.sports_hub_unit_tackles, it) } ?: none
     }
     val sep = res.getString(R.string.sports_hub_summary_sep)
     val parts = raw.split(", ").map { it.trim() }.filter { it.isNotEmpty() }.mapNotNull { part ->
         val num = part.substringBefore(' ')
+        if (!hasDigit(num)) return@mapNotNull null
         when (part.substringAfter(' ', "").uppercase(Locale.ROOT)) {
             "YDS" -> res.getString(R.string.sports_hub_unit_yds, num)
             "TD" -> res.getString(R.string.sports_hub_unit_td, num)
@@ -258,7 +279,7 @@ internal fun nflLeaderLine(res: Resources, category: String, l: Leader): String 
             else -> part
         }
     }
-    return parts.joinToString(sep)
+    return parts.joinToString(sep).ifEmpty { none }
 }
 
 /** §6.4: the three leader rows (Points, Goals, Assists, in that order when present), then up to two goalies per team. */

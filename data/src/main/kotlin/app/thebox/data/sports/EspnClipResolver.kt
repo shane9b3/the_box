@@ -31,9 +31,12 @@ import javax.inject.Singleton
  *
  * - [info] is **catalog-only** (arch M2): a hit, or `NotFound`; never a request.
  * - [stream] with `fresh = false`: the catalog entry, else **one** record lookup. With `fresh = true` (the expired-link
- *   re-resolve and Try again, arch M3): one record lookup, bypassing the catalog; a 404 is `NotFound`, the same HLS URL as
- *   the catalog's is `Failed(HTTP_OTHER)` (never a replay of the dead URL), a new URL replaces the entry and plays. There
- *   is never a second lookup inside one call, and the resolver never reads a summary.
+ *   re-resolve and Try again, arch M3): one record lookup, bypassing the catalog; a 404 is `NotFound`, a new URL replaces
+ *   the entry and plays, and the **same** HLS URL plays too (code review 2026-11-26, data #1): ESPN's URLs are unsigned
+ *   and stable, so the same answer is normal after a transient failure (Try again). A URL that is really dead 403s once
+ *   more, which is `CLIP_EXPIRED` again, and `ClipSession`'s one-re-resolve-per-clip rule then shows the error card: no
+ *   loop, at most one extra master request. There is never a second lookup inside one call, and the resolver never reads
+ *   a summary.
  * - Then `ClipOffer` at `now + skew` (the catalog's last ESPN `Date` skew): embargoed or within the expiry margin is
  *   [ClipResult.Expired]. HLS only (`links.source.HLS.href`), https (http only from the debug override origin); a record
  *   that maps to nothing playable (no https HLS, a device list without `settop`, an unknown coverage type) is
@@ -83,11 +86,7 @@ class EspnClipResolver internal constructor(
         } else {
             when (val r = lookup(ref.videoId)) {
                 is Looked.Found -> {
-                    if (fresh && known != null && r.entry.hlsUrl == known.hlsUrl) {
-                        // The master failed with this very URL: replaying it would fail again (arch M3).
-                        log("stream (fresh)", "same link")
-                        return ClipResult.Failed(FailKind.HTTP_OTHER)
-                    }
+                    if (fresh && known != null && r.entry.hlsUrl == known.hlsUrl) BoxLog.i(TAG) { "stream (fresh): same link" }
                     catalog.put(listOf(r.entry))
                     r.entry
                 }

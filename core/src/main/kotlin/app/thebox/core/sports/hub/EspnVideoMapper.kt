@@ -38,13 +38,14 @@ object EspnVideoMapper {
     const val PRODUCTION_LOGO_BASE = "https://a.espncdn.com/"
 
     /**
-     * (Integration §18) **The one rule for plain-http clip media and images**: allowed only when the ESPN endpoints are not
-     * ESPN's own, i.e. the debug endpoint override (the fake panel), which only a debuggable build can load. Production
-     * never offers an http clip. Every caller decides by this function from the endpoints' logo base: the board's
-     * highlight (`EspnMapper`), the detail's clips and headshots (`EspnDetailSource` → `EspnDetailMapper.detail(…,
-     * httpOk)`), the catalog, and the clip records (`EspnClipResolver`).
+     * (Integration §18; code review 2026-11-26, data #4: **fails closed**) The pure half of the rule for plain-http clip
+     * media and images: true only when the logo base is itself plain http, which only the debug endpoint override (the
+     * fake panel) produces. ESPN's own base, or any https base that differs from it (a CDN change, a missing slash), is
+     * false, so a production endpoint can never turn http media on by being slightly different. The board's highlight
+     * (`EspnMapper`, which sees only the logo base) uses this alone; `:data`'s `EspnEndpoints.httpMediaOk` (the detail's
+     * clips and headshots, the catalog, the clip records) also requires the endpoints to have come from the override.
      */
-    fun httpOkFor(logoBase: String): Boolean = logoBase.trim() != PRODUCTION_LOGO_BASE
+    fun httpOkFor(logoBase: String): Boolean = logoBase.trim().startsWith("http://", ignoreCase = true)
 
     fun entry(dto: EspnVideoDto, atMs: Long?, httpOk: Boolean): VideoEntry? {
         val id = wholeNumber(dto.id)?.takeIf { it > 0 } ?: return null

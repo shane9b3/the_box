@@ -952,6 +952,32 @@ def short_name(full):
     return first[0] + ". " + rest
 
 
+def split_score(n):
+    """A team's [n] points as real NFL scores: touchdowns with the kick (7), field goals (3) and safeties (2). (NFL hub
+    code review 2026-11-26, data #9) A greedy split that would leave a single point never does: one 7 becomes a touchdown
+    with a two-point conversion (8, so 8 = TD + 2-pt and 15 = 7 + 8), or, without a 7, one 3 becomes two safeties (4 = 2 +
+    2). Only a total of 1 (not a real NFL score) is left as it is."""
+    parts = []
+    left = max(int(n), 0)
+    while left >= 7:
+        parts.append(7)
+        left -= 7
+    while left >= 3:
+        parts.append(3)
+        left -= 3
+    if left == 2:
+        parts.append(2)
+    elif left == 1:
+        if 7 in parts:
+            parts[parts.index(7)] = 8
+        elif 3 in parts:
+            parts.remove(3)
+            parts += [2, 2]
+        else:
+            parts.append(1)
+    return parts
+
+
 def scoring_changes(sp, game, at):
     """[(state at the change, side, points)] for every score change up to [at], in game order. The featured game replays its
     timeline window by window (the timeline is a pure function of time); any other (or scripted) game splits its score
@@ -974,12 +1000,9 @@ def scoring_changes(sp, game, at):
     out = []
     period = max(int(s_now.get("period") or 4), 1)
     for side in ("away", "home"):
-        left = int(s_now.get(side) or 0)
         q = 1
-        while left > 0:
-            pts = 7 if left >= 7 else 3 if left >= 3 else left
+        for pts in split_score(int(s_now.get(side) or 0)):
             out.append(({"period": min(q, period), "clock": 300 + 60 * len(out)}, side, pts))
-            left -= pts
             q = q % period + 1
     out.sort(key=lambda c: (c[0]["period"], -c[0]["clock"]))
     return out

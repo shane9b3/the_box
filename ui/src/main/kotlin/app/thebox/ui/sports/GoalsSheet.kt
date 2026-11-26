@@ -25,6 +25,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Path
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusRequester
@@ -140,6 +144,10 @@ fun GoalsSheet(
     }
     val focusable = remember(rows) { rows.indices.filter { rows[it].focusable } }
     val initial = scoringInitialRow(rows, focusVideoId, final)
+    // (Code review 2026-11-26, UI m7) The row that held focus (its index in the rows of that moment), so a row that leaves
+    // while focused (an expiring video) hands focus to its neighbour, not to the initial row.
+    val lastFocused = remember { intArrayOf(-1) }
+    val rowsNow by androidx.compose.runtime.rememberUpdatedState(rows)
     val low = lowEnd()
     val prefix = clipKeyPrefix(game)
     HubSheetFrame(
@@ -153,6 +161,7 @@ fun GoalsSheet(
         // (NFL hub §3.1) Header and info rows hold no focus: with none focusable the frame's title holds it (Back works).
         focusableRows = focusable.size,
         scrollTo = labelStart(initial) { !rows[it].focusable },
+        refocusIndex = { scoringNeighbour(rowsNow, lastFocused[0]) },
     ) { requesters ->
         if (detail == null && note != null) {
             item(key = "note") {
@@ -163,6 +172,7 @@ fun GoalsSheet(
             item(key = row.key) {
                 val first = focusable.firstOrNull() == i
                 val last = focusable.lastOrNull() == i
+                Box(Modifier.onFocusChanged { if (it.hasFocus) lastFocused[0] = i }) {
                 when (row) {
                     is ScoringRow.Event -> EventRowView(game, row, row.clip?.let { clipInfo[it.videoId] }, requesters[i], first, last) {
                         val q = scoringQueue(rows, i)
@@ -184,6 +194,7 @@ fun GoalsSheet(
                         app.thebox.ui.full.ChannelLogo(row.candidate.channel, 96.dp, 54.dp, 6.dp)
                         Line(res.getString(R.string.sports_hub_catchup_row, row.candidate.channel.displayName), GuideUi.sans(26, FontWeight.SemiBold, color), Modifier.weight(1f), maxLines = 2)
                     }
+                }
                 }
             }
         }
@@ -258,6 +269,17 @@ internal fun goalsSheetInitialRow(rows: List<GoalsRow>, focusVideoId: Long?, fin
     if (final) return 0
     val lastGoal = rows.indexOfLast { it is GoalsRow.Goal }
     return if (lastGoal >= 0) lastGoal else 0
+}
+
+/**
+ * (Code review 2026-11-26, UI m7) After the focused row at [old] left the list, the focusable row now nearest to it: the
+ * row that moved up into its place (or the next one after it), else the one before; null when there was no focused row
+ * or nothing is focusable (the frame's default target then).
+ */
+internal fun scoringNeighbour(rows: List<ScoringRow>, old: Int): Int? {
+    if (old < 0) return null
+    val focusable = rows.indices.filter { rows[it].focusable }
+    return focusable.firstOrNull { it >= old } ?: focusable.lastOrNull()
 }
 
 /** (NFL hub P3) The first index of the run of label rows ([isLabel]) right above [i], or [i]. */
@@ -428,10 +450,11 @@ private fun VideoRowView(
 @Composable
 private fun PlayGlyph(size: Dp, ink: Color = Color.White) {
     Box(Modifier.size(size).background(GuideUi.White08, CircleShape), contentAlignment = Alignment.Center) {
+        // (Code review 2026-11-26, UI m10) The triangle is built once per size, never on each draw.
         Box(
-            Modifier.size(size / 3).drawBehind {
-                val p = Path().apply { moveTo(this@drawBehind.size.width * 0.15f, 0f); lineTo(this@drawBehind.size.width, this@drawBehind.size.height / 2f); lineTo(this@drawBehind.size.width * 0.15f, this@drawBehind.size.height); close() }
-                drawPath(p, ink)
+            Modifier.size(size / 3).drawWithCache {
+                val p = Path().apply { moveTo(this@drawWithCache.size.width * 0.15f, 0f); lineTo(this@drawWithCache.size.width, this@drawWithCache.size.height / 2f); lineTo(this@drawWithCache.size.width * 0.15f, this@drawWithCache.size.height); close() }
+                onDrawBehind { drawPath(p, ink) }
             },
         )
     }
@@ -471,6 +494,12 @@ internal fun HubHeadshot(url: String?, name: String, size: Dp) {
 
 // ------------------------------------------------------------------ the shared sheet frame (§6.4)
 
+/**
+ * (Code review 2026-11-26, UI m6) Provided by [HubSheetFrame] to its rows: scroll the list back to its top (the label rows
+ * above the first focusable row), when it is not there. Null outside a frame.
+ */
+internal val LocalSheetRevealTop = androidx.compose.runtime.staticCompositionLocalOf<(() -> Unit)?> { null }
+
 /** Whether the row's content colour is the focused one (dark on the FG fill). */
 internal fun focusedOf(color: Color): Boolean = color == GuideUi.Canvas
 
@@ -507,6 +536,11 @@ internal fun HubSheetFrame(
     /** The target after a change of [rowsKey] left the sheet without focus, with the list index to scroll to (null = none). */
     refocus: (() -> Pair<FocusRequester, Int?>?)? = null,
     /**
+     * (Code review 2026-11-26, UI m7) With rows to focus and no [refocus], the row index the default target takes after a
+     * change of [rowsKey] lost focus; null (or answering null) = [initialRow].
+     */
+    refocusIndex: (() -> Int?)? = null,
+    /**
      * (NFL hub §3.1) How many of the rows take focus (the scoring sheet's header and info rows do not); with none, the
      * frame's title takes focus as for an empty sheet. [initialRow] must then name a focusable row.
      */
@@ -531,7 +565,7 @@ internal fun HubSheetFrame(
     val frameRequester = remember { FocusRequester() }
     val selfFocus = focusableRows == 0 && refocus == null
     val target by androidx.compose.runtime.rememberUpdatedState(
-        refocus ?: { if (focusableRows == 0) frameRequester to null else initialRow.coerceIn(0, rowCount - 1).let { requesters[it] to it } },
+        refocus ?: { if (focusableRows == 0) frameRequester to null else (refocusIndex?.invoke() ?: initialRow).coerceIn(0, rowCount - 1).let { requesters[it] to it } },
     )
     // Composed before the change is applied: the frame's title held focus (an empty sheet whose rows now arrive).
     val frameHadFocus = remember(rowsKey) { focus[2] }
@@ -600,14 +634,28 @@ internal fun HubSheetFrame(
                 Line(title, GuideUi.sans(32, FontWeight.SemiBold))
             }
             header?.invoke()
-            LazyColumn(
-                Modifier.fillMaxWidth().weight(1f).onFocusChanged { focus[1] = it.hasFocus },
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(top = 4.dp, bottom = 4.dp),
-            ) {
-                content(requesters)
-                footer()
+            // (Code review 2026-11-26, UI m6) Moving up onto the first focusable row brings only that row into view, so the
+            // section and column headers above it stayed off screen; the list then scrolls back to its top.
+            val scope = rememberCoroutineScope()
+            val revealTop = remember(listState) {
+                {
+                    scope.launch {
+                        withFrameNanos { }
+                        if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) listState.scrollToItem(0)
+                    }
+                    Unit
+                }
+            }
+            CompositionLocalProvider(LocalSheetRevealTop provides revealTop) {
+                LazyColumn(
+                    Modifier.fillMaxWidth().weight(1f).onFocusChanged { focus[1] = it.hasFocus },
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 4.dp),
+                ) {
+                    content(requesters)
+                    footer()
+                }
             }
         }
     }
@@ -634,6 +682,7 @@ internal fun HubSheetRow(
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(DesignTokens.Radii.Row)
     val focusable = LocalHubFocusable.current
+    val revealTop = LocalSheetRevealTop.current
     var m = Modifier
         .testTag(hubSheetRowTag(key))
         .fillMaxWidth()
@@ -651,7 +700,11 @@ internal fun HubSheetRow(
                 else -> false
             }
         }
-        .onFocusChanged { focused = it.isFocused }
+        .onFocusChanged {
+            // (UI m6) Only the labels and notes can sit above the first focusable row: show them with it.
+            if (it.isFocused && !focused && first) revealTop?.invoke()
+            focused = it.isFocused
+        }
         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
     if (description != null) m = m.semantics(mergeDescendants = true) { contentDescription = description }
     if (focused) m = m.border(GuideUi.FocusRing, GuideUi.Accent, shape)

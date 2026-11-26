@@ -39,6 +39,47 @@ internal object NflHubUi : HubLeagueUi {
     override val detailed: Boolean get() = true
     override val source: HubSource get() = HubSource.ESPN
 
+    // ---- (Code review 2026-11-26, UI open defect #1 rows 1–4, 7, 9–11, 13, 14) the NFL's slot and offer branches
+
+    override fun slotFor(action: SlotAction, c: HubSlots.Ctx): HubSlot? = when (action) {
+        SlotAction.GOALS -> scoringSlot(c)
+        SlotAction.WATCH_RECAP -> highlightSlot(c)
+        SlotAction.WATCH_FROM_START -> fromStartSlot(c)
+        SlotAction.MATCHUP -> matchupSlot(c)
+        else -> null
+    }
+
+    override fun playableRecap(c: HubSlots.Ctx): Boolean = highlight(c.game, c.detail, offerNow(c.nowMs, c.detail)) != null
+
+    /** Only a highlight offered now plays (the slot may be a frozen one whose clip just expired: then [recapGoneToast]). */
+    override fun recapRef(game: GameSnapshot, detail: GameDetail?, nowMs: Long): ClipRef? =
+        highlight(game, detail, offerNow(nowMs, detail))?.let { ClipRef(it.videoId, ClipKind.RECAP, game.id) }
+
+    /** (UI m3) "ESPN removed this video; …" (§3.4). */
+    override val recapGoneToast: HubToastKind get() = HubToastKind.VIDEO_EXPIRED
+
+    override fun cardHighlights(game: GameSnapshot, nowMs: Long): Boolean = game.media != null && highlight(game, null, nowMs) != null
+
+    override val videoKilled: Boolean get() = !SportsConstants.ESPN_VIDEO_ENABLED
+
+    /** (§2.1, arch m7) The NFL detail carries no score: the headline is always the board's. */
+    override val detailCarriesScore: Boolean get() = false
+
+    /** (UI M1) Pre-game → live re-freezes `[Follow, Channels, Matchup]` to `[Follow, Channels, Scoring]`. */
+    override val refreezeOnPhaseChange: Boolean get() = true
+
+    /** (UI M1) The Matchup sheet is pre-game only (season leaders, the week's injury report); it closes at kick-off. */
+    override fun matchupOpen(game: GameSnapshot): Boolean = pre(game)
+
+    private fun pre(g: GameSnapshot) = g.phase == GamePhase.SCHEDULED || g.phase == GamePhase.PRE
+
+    /**
+     * (UI M1, m5) Matchup: pre-game only (a live summary's leaders are tonight's game numbers and its injuries the
+     * game-day inactives), and enabled exactly when the sheet has a focusable row ([nflMatchupHasRows]).
+     */
+    internal fun matchupSlot(c: HubSlots.Ctx): HubSlot =
+        HubSlot(SlotAction.MATCHUP, SlotLabel.MATCHUP, c.pre && c.detail?.let(::nflMatchupHasRows) == true)
+
     private val PRE_KINDS = listOf(StatKind.RECORD, StatKind.LAST_FIVE, StatKind.POINTS_PG, StatKind.POINTS_ALLOWED_PG, StatKind.YARDS_PG, StatKind.YARDS_ALLOWED_PG)
     private val LIVE_KINDS = listOf(StatKind.TOTAL_YARDS, StatKind.PASS_YARDS, StatKind.RUSH_YARDS, StatKind.THIRD_DOWN, StatKind.TURNOVERS)
     private val FINAL_KINDS = listOf(StatKind.TOTAL_YARDS, StatKind.PASS_YARDS, StatKind.RUSH_YARDS, StatKind.FIRST_DOWNS, StatKind.THIRD_DOWN, StatKind.TURNOVERS)
@@ -329,21 +370,37 @@ internal object NflHubUi : HubLeagueUi {
         d?.clips.orEmpty().filter { it.kind == ClipKind.PLAY && offered(it, offerNowMs) }.sortedWith(compareBy<GameClip> { it.publishedMs ?: Long.MAX_VALUE }.thenBy { it.videoId })
 
     /** Whether [ref] may be played now (the view model's WATCH_RECAP and the clip session's auto-advance). */
-    internal fun offeredRef(ref: ClipRef, g: GameSnapshot?, d: GameDetail?, nowMs: Long): Boolean {
+    override fun offeredRef(ref: ClipRef, game: GameSnapshot?, detail: GameDetail?, nowMs: Long): Boolean {
+        val g = game
+        val d = detail
         val at = offerNow(nowMs, d)
         d?.clips?.firstOrNull { it.videoId == ref.videoId }?.let { return offered(it, at) }
         if (g != null && g.media?.recapId == ref.videoId) return highlight(g, d, at)?.videoId == ref.videoId
         return true
     }
 
-    /** The next instant an offer of anything [g] shows changes (the view model's one timer, §4.3); null for none. */
-    internal fun nextOfferChange(g: GameSnapshot, d: GameDetail?, nowMs: Long, skewMs: Long = d?.clockSkewMs ?: 0L): Long? {
+    /**
+     * The next instant anything [g] shows changes with time alone (the view model's one timer, §4.3); null for none: an
+     * offer changing (an expiry, an embargo lifting) and, (code review 2026-11-26, UI m1) on a final without an offered
+     * highlight, the caption windows at "ended + `HUB_NFL_HIGHLIGHT_WAIT_MS`" (Highlights soon → No highlights) and
+     * "ended + `HUB_CLIP_DEFAULT_LIFE_MS`" (→ "ESPN removes videos…"), on the wall clock as [noHighlightCaption] reads them.
+     */
+    override fun nextOfferChange(game: GameSnapshot, detail: GameDetail?, nowMs: Long, skewMs: Long): Long? {
+        val g = game
+        val d = detail
         val skew = skewMs
         val at = nowMs + skew
         val fromClips = d?.clips.orEmpty().mapNotNull { ClipOffer.changesAt(it.embargoMs, it.expiresMs, at) }
         val fromBoard = g.media?.recapExpiresMs?.let { ClipOffer.changesAt(null, it, at) }
         // Back from the reference clock to the wall clock the view model waits on.
-        return (fromClips + listOfNotNull(fromBoard)).minOrNull()?.let { it - skew }
+        val offers = (fromClips + listOfNotNull(fromBoard)).map { it - skew }
+        val windows = if (g.phase == GamePhase.FINAL && highlight(g, d, at) == null) {
+            val ended = g.startUtcMs + SportsConstants.HUB_NFL_GAME_LENGTH_MS
+            listOf(ended + SportsConstants.HUB_NFL_HIGHLIGHT_WAIT_MS, ended + SportsConstants.HUB_CLIP_DEFAULT_LIFE_MS).filter { it > nowMs }
+        } else {
+            emptyList()
+        }
+        return (offers + windows).minOrNull()
     }
 
     /** The game's estimated end (no source gives it; §5.2's game length), for the "Highlights soon" window (§2.3). */
@@ -353,10 +410,13 @@ internal object NflHubUi : HubLeagueUi {
     private fun highlightSoon(g: GameSnapshot, d: GameDetail?, nowMs: Long): Boolean =
         !anyExpired(g, d, nowMs) && endedAgoMs(g, nowMs) < SportsConstants.HUB_NFL_HIGHLIGHT_WAIT_MS
 
-    /** A highlight was listed (detail or board) but is no longer offered: it expired (§2.4 "removes videos"). */
+    /**
+     * A highlight was listed (detail or board) and is past its expiry: ESPN removed it (§2.4 "removes videos"). (Code
+     * review 2026-11-26, UI m2) A highlight still under embargo is not "removed": it reads Highlights soon until it lifts.
+     */
     private fun anyExpired(g: GameSnapshot, d: GameDetail?, nowMs: Long): Boolean {
         val at = offerNow(nowMs, d)
-        if (d?.clips?.any { it.kind == ClipKind.RECAP && !offered(it, at) } == true) return true
+        if (d?.clips?.any { it.kind == ClipKind.RECAP && !ClipOffer.listed(it.expiresMs, at) } == true) return true
         val media = g.media ?: return false
         return media.recapId != null && media.recapExpiresMs != null && !ClipOffer.offered(null, media.recapExpiresMs!!, at)
     }
@@ -450,7 +510,15 @@ internal object NflHubUi : HubLeagueUi {
                 SlotLabel.NO_HIGHLIGHTS -> noHighlightCaption(res, g, m.detail, m.nowMs, m.videoOff)
                 SlotLabel.SCORING, SlotLabel.SCORING_N -> res.getString(R.string.sports_hub_reason_no_points)
                 // (Integration §18, P3 note 16) Grey while the summary loads, or when ESPN lists nothing for the sheet.
-                SlotLabel.MATCHUP -> res.getString(if (m.detail == null) R.string.sports_hub_reason_matchup_loading else R.string.sports_hub_reason_matchup_none)
+                // (Code review 2026-11-26, UI m4) A failed summary is not "still loading"; (M1) after kick-off it is not offered.
+                SlotLabel.MATCHUP -> res.getString(
+                    when {
+                        !pre(g) -> R.string.sports_hub_reason_matchup_after_kickoff
+                        m.detail == null && m.detailKind == DetailKind.FAILED -> R.string.sports_hub_reason_matchup_failed
+                        m.detail == null -> R.string.sports_hub_reason_matchup_loading
+                        else -> R.string.sports_hub_reason_matchup_none
+                    },
+                )
                 else -> null
             }
         }

@@ -256,11 +256,8 @@ internal fun rememberHubMeasure(): Measure {
  * Whether the card's "● Highlights" chip lights (§1.2): the NHL with any board video; (NFL hub §2.1, §4.3) the NFL only
  * while the board's highlight is offered at [nowMs] (`ClipOffer`); the CHL never has one.
  */
-internal fun cardHighlights(g: app.thebox.core.sports.GameSnapshot, nowMs: Long): Boolean {
-    val m = g.media ?: return false
-    return if (g.id.league.group == app.thebox.core.sports.LeagueGroup.NFL) NflHubUi.highlight(g, null, nowMs) != null
-    else m.recapId != null || m.condensedId != null || m.goalClips > 0
-}
+internal fun cardHighlights(g: app.thebox.core.sports.GameSnapshot, nowMs: Long): Boolean =
+    HubLeagues.of(g.id.league.group).cardHighlights(g, nowMs)
 
 /** The bottom row: the status pill, then at most one chip (§1.2); the chip is hidden when both do not fit, never the pill. */
 @Composable

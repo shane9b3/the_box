@@ -95,13 +95,13 @@ class GameDetailRepositoryNflTest {
     private var wall = 1_795_489_210_000L
     private var trims = 0
 
-    private fun TestScope.harness(signals: Signals = Signals()): H {
+    private fun TestScope.harness(signals: Signals = Signals(), espnVideo: Boolean = true): H {
         val mono = MonoClock { testScheduler.currentTime }
         val store = FakeSettingsStore()
         store.update(SportsDomain) { SportsPrefs() }
         store.update(SportsFollowDomain) { SportsFollowDoc(pollPhaseMs = 1_500L) }
         val fetcher = FakeFetcher(mono)
-        val repo = GameDetailRepositoryImpl(fetcher, store, Awake(), signals, backgroundScope, mono, { wall }, Random(3), onTrim = { trims++ })
+        val repo = GameDetailRepositoryImpl(fetcher, store, Awake(), signals, backgroundScope, mono, { wall }, Random(3), onTrim = { trims++ }, espnVideo = espnVideo)
         runCurrent()
         return H(repo, fetcher, store, signals)
     }
@@ -227,6 +227,47 @@ class GameDetailRepositoryNflTest {
         wall += SportsConstants.HUB_NFL_HIGHLIGHT_WAIT_MS
         settle(SportsConstants.HUB_DETAIL_IDLE_MS * 3)
         assertEquals("the wait is over", n0, h.fetcher.calls.size)
+    }
+
+    /** (Code review 2026-11-26, data #6) With the kill switch off, a final waits for no highlight and no single plays. */
+    @Test fun theKillSwitchSkipsTheFinalWaits() = runTest {
+        val play = GameClip(50578630L, ClipKind.PLAY, "TD", 23_000L, null, null, wall + 86_400_000L, null)
+        for (video in listOf(true, false)) {
+            val h = harness(espnVideo = video)
+            h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.FINAL, clips = listOf(play)), now), false, okBox(now)) }
+            h.repo.show(nfl(phase = GamePhase.LIVE))
+            settle(600)
+            h.repo.show(nfl(phase = GamePhase.FINAL))
+            runCurrent()
+            val n0 = h.fetcher.calls.size
+            settle(SportsConstants.HUB_DETAIL_IDLE_MS * 3)
+            if (video) assertEquals("video on: the 5 min final reads", n0 + 3, h.fetcher.calls.size)
+            else assertEquals("video off: no final wait", n0, h.fetcher.calls.size)
+            h.repo.show(null)
+            runCurrent()
+        }
+    }
+
+    /**
+     * (Code review 2026-11-26, data #7) Seen live, the viewer leaves the page, and comes back long after the end: the
+     * wait runs from the start + game-length estimate, not from the moment it was next seen. A game watched turning
+     * final (the sighting is recent) still starts the wait at once.
+     */
+    @Test fun aFinalSeenLongAfterTheLastLiveSightingUsesTheEndEstimate() = runTest {
+        val h = harness()
+        val start = wall - 3_600_000L
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.LIVE), now), false, okBox(now)) }
+        h.repo.show(nfl(phase = GamePhase.LIVE, startUtcMs = start))
+        settle(600)
+        assertEquals(1, h.fetcher.calls.size)
+        h.repo.show(null) // the viewer leaves the Sports page
+        runCurrent()
+        // Back 5 h later: the estimate (start + 3 h 15) is 2 h 15 min ago, past the 2 h wait; first-seen would be "now".
+        wall += 5 * 3_600_000L
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.FINAL), now), false, okBox(now)) }
+        h.repo.show(nfl(phase = GamePhase.FINAL, startUtcMs = start))
+        settle(SportsConstants.HUB_FETCH_DWELL_MS + SportsConstants.HUB_DETAIL_IDLE_MS * 3)
+        assertEquals("one read on return, then no 5 min reads", 2, h.fetcher.calls.size)
     }
 
     /** A game first seen final is "ended" at start + 3 h 15 min (the NFL's length), not the NHL's 2 h 30 min. */

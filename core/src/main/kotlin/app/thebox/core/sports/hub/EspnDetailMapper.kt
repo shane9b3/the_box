@@ -32,7 +32,8 @@ import kotlin.math.floor
  */
 object EspnDetailMapper {
     /**
-     * The detail of [id] from [dto]; clips are offered at [atMs] (`now + skew`; null skips the time check, §4.3). Null
+     * The detail of [id] from [dto]; clips are listed while not expired at [atMs] (`now + skew`; null skips the time
+     * check, §4.3; an embargoed clip is kept, [videoEntries]). Null
      * when the summary is not usable (no header, no two sides by team id, no status state, or a header naming another
      * event). Media hosts must be https (the production rule); see the overload for the debug origin.
      */
@@ -350,17 +351,27 @@ object EspnDetailMapper {
     // ------------------------------------------------------------------ clips (§4.2, §4.3)
 
     /**
-     * The offered RECAP and PLAY clips through [EspnVideoMapper] at [atMs] (an expired, embargoed, non-settop or non-https
-     * clip is never offered), one per video id: the highlight first, then the single plays oldest first
-     * (`originalPublishDate`), at most `HUB_NFL_MAX_CLIPS`.
+     * The RECAP and PLAY clips through [EspnVideoMapper], one per video id: the highlight first, then the single plays
+     * oldest first (`originalPublishDate`), at most `HUB_NFL_MAX_CLIPS`. (Code review 2026-11-26, data #3) At [atMs] only
+     * the **expiry** is checked ([ClipOffer.listed]): a clip still under embargo is kept, so the view model's offer tick
+     * can reveal it the moment the embargo lifts; every UI use and the resolver check [ClipOffer.offered] (embargo too).
+     * An expired, non-settop or non-https clip is never listed. (Data #5) `EspnDetailSource` fills the catalog from this
+     * same selection, so the highlight is always in both.
      */
-    private fun clips(list: List<EspnVideoDto>?, atMs: Long?, httpOk: Boolean): List<GameClip> {
+    fun videoEntries(list: List<EspnVideoDto>?, atMs: Long?, httpOk: Boolean): List<VideoEntry> {
         val seen = HashSet<Long>()
-        val all = list.orEmpty().mapNotNull { EspnVideoMapper.entry(it, atMs, httpOk)?.clip }.filter { seen.add(it.videoId) }
-        val ordered = all.filter { it.kind == ClipKind.RECAP } +
-            all.filter { it.kind != ClipKind.RECAP }.sortedBy { it.publishedMs ?: Long.MAX_VALUE }
+        val all = list.orEmpty().asSequence()
+            .mapNotNull { EspnVideoMapper.entry(it, null, httpOk) }
+            .filter { atMs == null || ClipOffer.listed(it.clip.expiresMs, atMs) }
+            .filter { seen.add(it.clip.videoId) }
+            .toList()
+        val ordered = all.filter { it.clip.kind == ClipKind.RECAP } +
+            all.filter { it.clip.kind != ClipKind.RECAP }.sortedBy { it.clip.publishedMs ?: Long.MAX_VALUE }
         return ordered.take(SportsConstants.HUB_NFL_MAX_CLIPS)
     }
+
+    private fun clips(list: List<EspnVideoDto>?, atMs: Long?, httpOk: Boolean): List<GameClip> =
+        videoEntries(list, atMs, httpOk).map { it.clip }
 
     // ------------------------------------------------------------------ pre-game: last five, injuries (§3.6)
 

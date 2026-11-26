@@ -86,6 +86,32 @@ class EspnSummaryDecodeTest {
         assertTrue("stopped just past the cap: $read", read in cap..cap + 64 * 1024)
     }
 
+    /**
+     * (Code review 2026-11-26, data #11) The live capture's other top-level sections (§18.4: `odds`, `againstTheSpread`,
+     * `standings`, `format`, `meta`, `broadcasts`, `wallclockAvailable`), in the blanked shape `reduce_summary.py` now
+     * writes for the odds ones (no odds value), before and after `header`: skipped, and the DTO equals the plain one.
+     */
+    @Test fun theLiveCapturesOtherTopLevelSectionsAreSkipped() {
+        val tree = Json.parseToJsonElement(text(NflHubFixtures.LIVE_GB_LAR_1)).jsonObject
+        val extra = Json.parseToJsonElement(
+            """{"odds":[{"provider":{"id":"x","name":"x"},"details":"x","overUnder":0,"spread":0}],
+               "againstTheSpread":[{"team":{"id":"x","abbreviation":"x"},"records":[{"id":"x","summary":"x"}]}],
+               "standings":{"groups":[{"standings":{"entries":[]}}]},"format":{"regulation":{"periods":4}},
+               "meta":{"gp_topic":"x","lastPlayWallClock":"x"},"broadcasts":[{"media":{"shortName":"x"}}],"wallclockAvailable":true}""",
+        ).jsonObject
+        val before = JsonObject(extra + tree).toString()
+        val after = JsonObject(tree + extra).toString()
+        val id = app.thebox.core.sports.GameId(app.thebox.core.sports.League.NFL, "401873079")
+        fun mapped(dto: EspnSummaryDto) = app.thebox.core.sports.hub.EspnDetailMapper.detail(dto, id, null)
+        val plain = mapped(ok(tree.toString()))
+        assertTrue(plain != null)
+        assertEquals(plain, mapped(ok(before)))
+        assertEquals(plain, mapped(ok(after)))
+        assertEquals(boxOf(ok(tree.toString())), boxOf(ok(after)))
+    }
+
+    private fun boxOf(dto: EspnSummaryDto) = app.thebox.core.sports.hub.EspnDetailMapper.box(dto)
+
     @Test fun headerFirstOrLastDecodesEqually() {
         val tree = Json.parseToJsonElement(text(NflHubFixtures.FINAL_PIT_PHI)).jsonObject
         val header = tree["header"]!!

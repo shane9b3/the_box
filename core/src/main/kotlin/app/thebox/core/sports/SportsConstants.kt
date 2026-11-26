@@ -958,6 +958,11 @@ object SportsConstants {
     const val HUB_NFL_PLAYS_WAIT_MS = 1_800_000L
     /** The end estimate of an NFL game first seen final: start + 3 h 15 min (§5.2). */
     const val HUB_NFL_GAME_LENGTH_MS = 11_700_000L
+    /**
+     * (NFL hub code review 2026-11-26, data #7) A game seen unfinished longer ago than this before it is seen FINAL did not
+     * end "now": the final wait starts from the start + game-length estimate instead (kept between the two sightings).
+     */
+    const val HUB_NFL_END_SIGHTING_GAP_MS = 600_000L
     /** A clip this close to its expiry is never offered (§4.3). */
     const val HUB_CLIP_EXPIRY_MARGIN_MS = 300_000L
     /** The effective expiry of a clip without `expirationDate`: 48 h after it was published (§4.3). */

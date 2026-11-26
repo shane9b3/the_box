@@ -462,8 +462,8 @@ With `--sports --sports-nfl` (no extra flag) the panel also serves what the NFL 
   with an expired highlight: week 8's DEN @ SEA (`401898001`).
 - `sports_nfl_clips` (config / `POST /admin/config`): NYJ @ NE's clips. `espn` a Final Game Highlight + 3 OnePlay clips;
   `single` the highlight; `none`; `expired` (expired 1 h ago: never offered); `expiring` (2 min from now: inside the
-  5 min margin, never offered); `gone` (listed, but master and record answer 404: play from the catalog → master 404 →
-  one fresh record lookup → the "removed" toast); `slow_records` (records answer after 8 s). The board's `highlights[]`
+  5 min margin, never offered); `gone` (listed, but the media answer 403 and the record 404: play from the catalog →
+  master 403 = CLIP_EXPIRED → one fresh record lookup → 404 → the "removed" toast); `slow_records` (records answer after 8 s). The board's `highlights[]`
   carries each final's highlight (the card chip and slot 1 before the summary loads).
 - `GET /espn-core/v1/video/clips/{id}` (`sports_video.handle_espn`): ESPN's one-item `{resultsCount, …, videos: [ … ]}`
   wrapper. `GET /espn-media/{id}/master.m3u8`: 4 variants (360p / 480p / 720p declared 29.97 fps from the 25 fps `std`

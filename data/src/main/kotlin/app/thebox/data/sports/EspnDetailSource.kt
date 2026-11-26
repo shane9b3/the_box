@@ -11,7 +11,6 @@ import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.hub.BoxScore
 import app.thebox.core.sports.hub.EspnDetailMapper
 import app.thebox.core.sports.hub.EspnSummaryDto
-import app.thebox.core.sports.hub.EspnVideoMapper
 import app.thebox.core.sports.hub.GameDetail
 import app.thebox.core.sports.hub.GameDetailSource
 import app.thebox.core.sports.hub.VideoEntry
@@ -41,8 +40,8 @@ import kotlin.coroutines.cancellation.CancellationException
  * - **The answer** ([DetailAnswer]): the detail with `clockSkewMs` (`Date` − wall clock at receive, clamped to
  *   ±`HUB_CLOCK_SKEW_MAX_MS`, 0 without a `Date`) and `serverDateMs`, plus the box score from the same parse (§5.5), so
  *   the repository's loop never needs a second request for the Box score sheet.
- * - **The catalog**: every offered video entry (`EspnVideoMapper` at `now + skew`; http only from the debug override
- *   origin) is put into [catalog], with the skew; nothing is persisted.
+ * - **The catalog**: the detail's own clip selection (`EspnDetailMapper.videoEntries` at `now + skew`; http only from the
+ *   debug override origin) is put into [catalog], with the skew; nothing is persisted.
  * - Cancellation cancels the OkHttp call, so a 600 KB body stops at once and its partial DTO is dropped.
  * - Nothing about the user, playlist or device is sent (the IP, the app's UA, an event id). Logs carry the path label
  *   "summary" and the result kind only (never a query, an id or a body).
@@ -55,8 +54,11 @@ class EspnDetailSource internal constructor(
     private val mono: MonoClock,
     endpoints: () -> EspnEndpoints,
     private val catalog: EspnClipCatalog,
-    /** A stand-in mapper for transport tests; null (production) is `EspnDetailMapper.detail(…, httpOk)` (integration §18). */
-    private val mapDetail: ((EspnSummaryDto, GameId, Long?) -> GameDetail?)? = null,
+    /**
+     * The detail mapper: `(dto, id, atMs, httpOk)`. (Code review 2026-11-26, data #2) One code path with the full
+     * signature, so a stand-in in a transport test receives the same `httpOk` production passes.
+     */
+    private val mapDetail: (EspnSummaryDto, GameId, Long?, Boolean) -> GameDetail? = EspnDetailMapper::detail,
     private val mapBox: (EspnSummaryDto) -> BoxScore? = EspnDetailMapper::box,
     /** Wall clock (epoch ms), for the skew and the offer check. */
     private val wallNow: () -> Long = System::currentTimeMillis,
@@ -107,9 +109,7 @@ class EspnDetailSource internal constructor(
             withContext(mapDispatcher) {
                 val at = wall + skew
                 // (Integration §18) The source owns the skew and the server date; the mapper leaves both at their defaults.
-                val stand = mapDetail
-                val mapped = if (stand != null) stand(dto, id, at) else EspnDetailMapper.detail(dto, id, at, httpOk)
-                val detail = mapped?.copy(clockSkewMs = skew, serverDateMs = f.serverDateMs)
+                val detail = mapDetail(dto, id, at, httpOk)?.copy(clockSkewMs = skew, serverDateMs = f.serverDateMs)
                 val box = if (detail != null) mapBox(dto) else null
                 val entries = if (detail != null) offered(dto, at) else emptyList()
                 Triple(detail, box, entries)
@@ -126,12 +126,12 @@ class EspnDetailSource internal constructor(
         return DetailAnswer(Fetch.Ok(detail, f.receivedMono, f.serverDateMs, f.ageS, f.maxAgeS, f.wireBytes), false, box)
     }
 
-    /** The summary's offered video entries at [atMs] (≤ `HUB_NFL_MAX_CLIPS`), for the catalog. */
-    private fun offered(dto: EspnSummaryDto, atMs: Long): List<VideoEntry> =
-        dto.videos.orEmpty().asSequence()
-            .mapNotNull { EspnVideoMapper.entry(it, atMs, httpOk) }
-            .take(SportsConstants.HUB_NFL_MAX_CLIPS)
-            .toList()
+    /**
+     * The catalog's entries: (code review 2026-11-26, data #5) the **same** selection `EspnDetailMapper` lists as
+     * `GameDetail.clips` (highlight first, deduped, ≤ `HUB_NFL_MAX_CLIPS`, not expired at [atMs]; data #3: embargoed
+     * entries kept), so the highlight is always in both and "Up next" never misses.
+     */
+    private fun offered(dto: EspnSummaryDto, atMs: Long): List<VideoEntry> = EspnDetailMapper.videoEntries(dto.videos, atMs, httpOk)
 
     /** One summary read mapped to the box; kept for the interface (the repository uses [detailAnswer]'s box). */
     override suspend fun boxScore(id: GameId): Fetch<BoxScore> {

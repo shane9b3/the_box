@@ -58,12 +58,18 @@ data class EspnEndpoints(
      * to `{origin}/espn-core/v1/video/clips/`. The game summary is `apiBase + "summary?event={id}"`.
      */
     val clipBase: String = CLIP_BASE,
+    /**
+     * (NFL hub code review 2026-11-26, data #4) True only for endpoints built by [fromOverride] (the debug override file,
+     * which only a debuggable build reads). Every other instance, [DEFAULT] or one built by hand, is false.
+     */
+    val debugOverride: Boolean = false,
 ) {
     /**
-     * (Integration §18) Plain-http clip media and images are allowed: only for the debug override (endpoints that are not
-     * ESPN's), by the one rule [EspnVideoMapper.httpOkFor] that the board mapper also applies. Production: false.
+     * (Integration §18; code review 2026-11-26, data #4) Plain-http clip media and images are allowed **only** for the
+     * debug override: a positive flag ([debugOverride]) and a plain-http logo base ([EspnVideoMapper.httpOkFor], the rule
+     * the board mapper applies). It fails closed: any endpoints not built by [fromOverride] answer false.
      */
-    val httpMediaOk: Boolean get() = EspnVideoMapper.httpOkFor(logoBase)
+    val httpMediaOk: Boolean get() = debugOverride && EspnVideoMapper.httpOkFor(logoBase)
 
     companion object {
         const val API_BASE = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
@@ -80,7 +86,7 @@ data class EspnEndpoints(
             val origin = url.newBuilder().encodedPath("/").query(null).fragment(null).build().toString().trimEnd('/')
             return EspnEndpoints(
                 "$origin/apis/site/v2/sports/football/nfl/", "$origin/", "$origin/v2/sports/football/leagues/nfl/",
-                "$origin/espn-core/v1/video/clips/",
+                "$origin/espn-core/v1/video/clips/", debugOverride = true,
             )
         }
 

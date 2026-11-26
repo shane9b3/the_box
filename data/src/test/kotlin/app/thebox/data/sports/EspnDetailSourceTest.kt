@@ -7,6 +7,7 @@ import app.thebox.core.sports.GameId
 import app.thebox.core.sports.League
 import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.hub.ClipKind
+import app.thebox.core.sports.hub.ClipOffer
 import app.thebox.core.sports.hub.NflHubFixtures
 import app.thebox.data.sports.EspnHubTestSupport.NOV25
 import app.thebox.data.sports.EspnHubTestSupport.gzipJson
@@ -19,6 +20,13 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -207,6 +215,76 @@ class EspnDetailSourceTest {
         // A device clock a day off: the skew is clamped to an hour.
         answer = { json(text(NflHubFixtures.FINAL_MNF), 200, "Date" to httpDate(wall - 86_400_000)) }
         assertEquals(-SportsConstants.HUB_CLOCK_SKEW_MAX_MS, (fetch().fetch as Fetch.Ok).value.clockSkewMs)
+    }
+
+    // ---------------------------------------------------------------- code review 2026-11-26 (data #2, #3, #5)
+
+    /** (#2) The seam has the production signature: the stand-in receives the same `httpOk` (the override: true). */
+    @Test fun theStandInMapperReceivesTheHttpFlag() {
+        fetch()
+        assertEquals(true, mapper.lastHttpOk)
+    }
+
+    /** The real mapper through the default seam (no stand-in). */
+    private fun realSource(cat: EspnClipCatalog) = EspnDetailSource(
+        OkHttpClient(), mono, { EspnEndpoints.fromOverride(server.url("/").toString())!! }, cat, wallNow = { wall },
+    )
+
+    /** MNF's body with its `videos[]` replaced by [videos]. */
+    private fun mnfWith(videos: List<JsonObject>): String {
+        val root = Json.parseToJsonElement(text(NflHubFixtures.FINAL_MNF)).jsonObject
+        return JsonObject(root + ("videos" to JsonArray(videos))).toString()
+    }
+
+    private fun mnfVideos(): List<JsonObject> =
+        Json.parseToJsonElement(text(NflHubFixtures.FINAL_MNF)).jsonObject["videos"]!!.jsonArray.map { it.jsonObject }
+
+    /** [v] with a new id and publish date (one second apart per [n]). */
+    private fun copyOf(v: JsonObject, id: Long, n: Int): JsonObject =
+        JsonObject(v + ("id" to JsonPrimitive(id)) + ("originalPublishDate" to JsonPrimitive("2026-11-24T02:${(31 + n / 60).toString().padStart(2, '0')}:${(n % 60).toString().padStart(2, '0')}Z")))
+
+    /**
+     * (#5) More than `HUB_NFL_MAX_CLIPS` offered videos with the highlight listed last: the detail and the catalog come
+     * from one selection, so the highlight is in both and they hold the same ids.
+     */
+    @Test fun theCatalogAndTheDetailShareOneSelection() {
+        val vs = mnfVideos()
+        val highlight = vs.first { it["tracking"]!!.jsonObject["coverageType"]!!.jsonPrimitive.content == "Final Game Highlight" }
+        val play = vs.first { it["tracking"]!!.jsonObject["coverageType"]!!.jsonPrimitive.content == "OnePlay" }
+        val many = (1..30).map { copyOf(play, 60_000_000L + it, it) } + highlight
+        answer = { json(mnfWith(many)) }
+        val cat = EspnClipCatalog()
+        val d = (runBlocking { realSource(cat).detailAnswer(mnf, null) }.fetch as Fetch.Ok).value
+        assertEquals(SportsConstants.HUB_NFL_MAX_CLIPS, d.clips.size)
+        assertEquals("the highlight first in the detail", 50579688L, d.clips.first().videoId)
+        assertNotNull("and in the catalog", cat.get(50579688L))
+        assertEquals(d.clips.size, cat.size)
+        for (c in d.clips) assertNotNull("catalog has ${c.videoId}", cat.get(c.videoId))
+    }
+
+    /**
+     * (#3) A clip embargoed for another ten minutes is kept (detail and catalog), so the view model's offer tick can
+     * reveal it when the embargo lifts; it is not offered until then (the UI and the resolver check `ClipOffer.offered`).
+     */
+    @Test fun anEmbargoedClipIsKeptForTheEmbargoLift() {
+        val vs = mnfVideos()
+        val play = vs.first { it["id"]!!.jsonPrimitive.content == "50578630" }
+        val tr = play["timeRestrictions"]!!.jsonObject
+        val lift = wall + 600_000L
+        val embargoed = JsonObject(play + ("timeRestrictions" to JsonObject(tr + ("embargoDate" to JsonPrimitive(Instant.ofEpochMilli(lift).toString())))))
+        answer = { json(mnfWith(vs.map { if (it === play) embargoed else it })) }
+        val cat = EspnClipCatalog()
+        val d = (runBlocking { realSource(cat).detailAnswer(mnf, null) }.fetch as Fetch.Ok).value
+        val c = d.clips.first { it.videoId == 50578630L }
+        assertEquals(lift, c.embargoMs)
+        assertTrue("not offered yet", !ClipOffer.offered(c.embargoMs, c.expiresMs, wall))
+        assertEquals("the lift is the next change", lift, ClipOffer.changesAt(c.embargoMs, c.expiresMs, wall))
+        assertTrue("offered at the lift", ClipOffer.offered(c.embargoMs, c.expiresMs, lift))
+        assertNotNull(cat.get(50578630L))
+        // An expired clip is still never listed.
+        wall = Instant.parse("2026-11-26T02:30:00Z").toEpochMilli()
+        val late = (runBlocking { realSource(EspnClipCatalog()).detailAnswer(mnf, null) }.fetch as Fetch.Ok).value
+        assertTrue(late.clips.none { it.videoId == 50578630L })
     }
 
     @Test fun boxScoreIsOneReadMappedToTheBox() {

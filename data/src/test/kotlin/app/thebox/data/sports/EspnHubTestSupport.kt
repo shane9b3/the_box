@@ -33,9 +33,13 @@ internal object EspnHubTestSupport {
         @Volatile var throwOnMap = false
         @Volatile var answerNull = false
 
-        val detail: (EspnSummaryDto, GameId, Long?) -> GameDetail? = { dto, id, at ->
+        /** The last `httpOk` the source passed (code review 2026-11-26, data #2: the stand-in sees the production flag). */
+        @Volatile var lastHttpOk: Boolean? = null
+
+        val detail: (EspnSummaryDto, GameId, Long?, Boolean) -> GameDetail? = { dto, id, at, httpOk ->
             detailCalls.incrementAndGet()
             lastAt = at
+            lastHttpOk = httpOk
             lastDto = dto
             if (throwOnMap) error("mapper bug")
             if (answerNull || dto.header == null) null else detailOf(dto, id, at)

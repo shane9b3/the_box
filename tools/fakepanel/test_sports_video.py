@@ -279,10 +279,11 @@ class EspnVideoCase(unittest.TestCase):
         self.assertEqual((200, "image/png"), (st, h["content-type"]))
         self.assertEqual(b"\x89PNG", png[:4])
 
-    def test_gone_lists_the_clips_but_the_master_and_record_404(self):
+    def test_gone_lists_the_clips_but_the_master_403s_and_the_record_404s(self):
+        # (NFL hub code review 2026-11-26, data #10) 403 is CLIP_EXPIRED to the player (404 is not): the fresh lookup path.
         self.panel.cfg["sports_nfl_clips"] = "gone"
         v = self.summary_videos()[0]
-        self.assertEqual(404, self.raw(self.path_of(v["links"]["source"]["HLS"]["href"]))[0])
+        self.assertEqual(403, self.raw(self.path_of(v["links"]["source"]["HLS"]["href"]))[0])
         self.assertEqual(404, self.record(v["id"])[0])
 
     def test_slow_records_answer_late(self):

@@ -143,11 +143,20 @@ class EspnClipResolverTest {
         assertEquals("the catalog is updated", "https://clips.invalid/NEW/playlist.m3u8", catalog.get(50578630L)!!.hlsUrl)
     }
 
-    @Test fun freshWithTheSameUrlIsAFailureNotAReplay() {
+    /**
+     * (Code review 2026-11-26, data #1) ESPN's URLs are stable: Try again after a transient failure (5xx, Wi-Fi) gets the
+     * same URL back, and it plays. A really dead URL then fails once more as `CLIP_EXPIRED`, and `ClipSession` stops
+     * after its one re-resolve (`ClipSessionTest.aStableUrlThatIsReallyDeadEndsAfterOneReResolve`).
+     */
+    @Test fun freshWithTheSameUrlPlaysIt() {
         cataloged()
-        val r = runBlocking { resolver().stream(burrow, fresh = true) }
-        assertEquals(ClipResult.Failed(FailKind.HTTP_OTHER), r)
+        val ok = runBlocking { resolver().stream(burrow, fresh = true) } as ClipResult.Ok
+        assertEquals("https://clips.invalid/50578630/playlist.m3u8", ok.value.second.url)
         assertEquals("never two lookups for one retry", 1, requests.size)
+        assertEquals(50578630L, catalog.lastServed)
+        // Pressed again: one more lookup each time, never a loop inside the resolver.
+        runBlocking { resolver().stream(burrow, fresh = true) }
+        assertEquals(2, requests.size)
     }
 
     @Test fun freshNotFoundAndFailures() {

@@ -436,6 +436,7 @@ class EspnScoreSourceTest {
                 "http://10.0.2.2:8080/",
                 "http://10.0.2.2:8080/v2/sports/football/leagues/nfl/", // (NFL YDS §1.7) the statistics base
                 "http://10.0.2.2:8080/espn-core/v1/video/clips/", // (NFL hub commit 0) the clip record base
+                debugOverride = true, // (NFL hub code review 2026-11-26, data #4)
             ),
             EspnEndpoints.fromOverride(" http://10.0.2.2:8080/\n"),
         )

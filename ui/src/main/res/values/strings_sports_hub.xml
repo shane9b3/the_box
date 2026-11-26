@@ -649,4 +649,8 @@
          lists no leaders, last five or injuries. A reason and a next step. -->
     <string name="sports_hub_reason_matchup_loading">Matchup details are still loading. Try again in a moment.</string>
     <string name="sports_hub_reason_matchup_none">ESPN hasn\'t posted matchup details for this game yet. Check back closer to kick-off.</string>
+    <!-- (Code review 2026-11-26, UI m4) The summary failed with nothing cached (not "still loading"). -->
+    <string name="sports_hub_reason_matchup_failed">ESPN didn\'t send the matchup details. It tries again on its own; check back shortly.</string>
+    <!-- (UI M1) After kick-off the Matchup (season leaders, the week's injury report) is not offered; Scoring takes its slot. -->
+    <string name="sports_hub_reason_matchup_after_kickoff">The matchup is shown before kick-off only. Open Scoring for this game\'s plays.</string>
 </resources>

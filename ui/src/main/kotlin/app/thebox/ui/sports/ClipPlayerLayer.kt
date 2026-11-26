@@ -217,7 +217,7 @@ private fun TransportBar(res: Resources, s: ClipSession.State, pos: PositionSnap
                     Line(title ?: "", GuideUi.sans(32, FontWeight.SemiBold), Modifier.weight(1f))
                     Line(clipHints(res), GuideUi.sans(22, FontWeight.Medium, GuideUi.Fg70))
                 }
-                clipSubLine(res, ref, game, goals, videos)?.let { Line(it, GuideUi.sans(24, FontWeight.Medium, GuideUi.Fg70)) }
+                clipSubLine(res, ref, game, goals, videos, queue, index)?.let { Line(it, GuideUi.sans(24, FontWeight.Medium, GuideUi.Fg70)) }
             }
             val duration = pos?.durationMs?.takeIf { it > 0 }
             val at = pos?.positionMs?.coerceAtLeast(0) ?: 0L
@@ -253,13 +253,29 @@ private fun clipHints(res: Resources): String {
  * "Goal 1 of 6 · UTA at WPG · 1st 5:11" / "Game recap · UTA at WPG"; null without the game. (NFL hub §3.3) An ESPN clip:
  * "Game highlights · CIN at WSH · Video: ESPN", "Video 2 of 4 · CIN at WSH · Video: ESPN" ([videos]: the More videos
  * list), "CIN at WSH · Video: ESPN" for a clip not in it, "Video: ESPN" without the game: never without the attribution.
+ * (Code review 2026-11-26, UI m12) "Video k of n" counts the session's own [queue] (fixed when OK was pressed; its PLAY
+ * entries, [index] the one playing), so a skipped or expired entry never shifts the numbers; [videos] only when the
+ * queue does not hold [ref].
  */
-internal fun clipSubLine(res: Resources, ref: ClipRef, game: GameSnapshot?, goals: List<GoalItem>, videos: List<GameClip> = emptyList()): String? {
+internal fun clipSubLine(
+    res: Resources,
+    ref: ClipRef,
+    game: GameSnapshot?,
+    goals: List<GoalItem>,
+    videos: List<GameClip> = emptyList(),
+    queue: List<ClipRef> = emptyList(),
+    index: Int = -1,
+): String? {
     if (ref.gameId.league.group == LeagueGroup.NFL) {
         game ?: return res.getString(R.string.sports_hub_clip_espn_only)
         val a = game.away.abbrev
         val h = game.home.abbrev
         if (ref.kind == ClipKind.RECAP) return res.getString(R.string.sports_hub_clip_highlights_sub_espn, a, h)
+        if (index in queue.indices && queue[index] == ref && ref.kind == ClipKind.PLAY) {
+            val k = (0..index).count { queue[it].kind == ClipKind.PLAY }
+            val n = queue.count { it.kind == ClipKind.PLAY }
+            return res.getString(R.string.sports_hub_clip_video_sub_espn, k, n, a, h)
+        }
         val i = videos.indexOfFirst { it.videoId == ref.videoId }
         return if (i >= 0) res.getString(R.string.sports_hub_clip_video_sub_espn, i + 1, videos.size, a, h) else res.getString(R.string.sports_hub_clip_espn_sub, a, h)
     }

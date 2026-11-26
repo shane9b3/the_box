@@ -235,7 +235,6 @@ internal object HubSlots {
         val matcherBound: Boolean = true,
     ) {
         val group = game.id.league.group
-        val nhl get() = group == LeagueGroup.NHL
         val pre get() = game.phase == GamePhase.SCHEDULED || game.phase == GamePhase.PRE
         val live get() = game.phase == GamePhase.LIVE || game.phase == GamePhase.INTERMISSION
         val final get() = game.phase == GamePhase.FINAL
@@ -251,8 +250,8 @@ internal object HubSlots {
          * retry on their own.
          */
         val detailRetry get() = HubLeagues.of(group).detailed && failure != null && failure in RETRYABLE && !(final && playableRecap && !videoOff)
-        /** (NFL hub §2.3) The NHL: a recap id; the NFL: a highlight offered now (`ClipOffer`, §4.3). */
-        val playableRecap: Boolean get() = if (group == LeagueGroup.NFL) NflHubUi.highlight(game, detail, NflHubUi.offerNow(nowMs, detail)) != null else recapId != null
+        /** (NFL hub §2.3) The NHL: a recap id; the NFL: a highlight offered now (`ClipOffer`, §4.3); [HubLeagueUi.playableRecap]. */
+        val playableRecap: Boolean get() = HubLeagues.of(group).playableRecap(this)
         /** Live, or starting within `HUB_IMMINENT_MIN` (§5.5): Watch tunes and sheet rows tune. */
         val imminent get() = live || game.startUtcMs - nowMs <= SportsConstants.HUB_IMMINENT_MIN * 60_000L
     }
@@ -261,27 +260,26 @@ internal object HubSlots {
     fun default(c: Ctx): List<HubSlot> = HubLeagues.of(c.group).slots(c)
 
     /** The slot for [action] now: its label and enabled state recomputed (used in place while the set is frozen, §2.3). */
-    fun forAction(action: SlotAction?, c: Ctx): HubSlot = when (action) {
+    fun forAction(action: SlotAction?, c: Ctx): HubSlot = action?.let { HubLeagues.of(c.group).slotFor(it, c) } ?: when (action) {
         null -> HubSlot.EMPTY
         SlotAction.FOLLOW -> HubSlot(SlotAction.FOLLOW, if (c.followed) SlotLabel.FOLLOWING else SlotLabel.FOLLOW, true)
         SlotAction.RETRY -> if (c.detailRetry) HubSlot(SlotAction.RETRY, SlotLabel.RETRY, true) else HubSlot(SlotAction.FOLLOW, if (c.followed) SlotLabel.FOLLOWING else SlotLabel.FOLLOW, true)
         SlotAction.CHANNEL -> channel(c)
-        // (NFL hub §2.3) The NFL's Scoring (n), ▶ Highlights / Highlights soon / No highlights and ▶ From start.
-        SlotAction.GOALS -> if (c.group == LeagueGroup.NFL) NflHubUi.scoringSlot(c) else if (c.final) {
+        // (NFL hub §2.3; code review 2026-11-26) The NFL's Scoring (n), ▶ Highlights / Highlights soon / No highlights,
+        // ▶ From start and its pre-game-only Matchup come from `HubLeagueUi.slotFor` above; this is the shared rule.
+        SlotAction.GOALS -> if (c.final) {
             HubSlot(SlotAction.GOALS, if (c.goalCount > 0) SlotLabel.GOALS_N else SlotLabel.GOALS, c.goalCount > 0, c.goalCount)
         } else {
             HubSlot(SlotAction.GOALS, if (c.goalClips > 0) SlotLabel.GOALS_N else SlotLabel.GOALS, c.goalClips > 0 && !c.videoOff, c.goalClips)
         }
         SlotAction.WATCH_RECAP ->
-            if (c.group == LeagueGroup.NFL) NflHubUi.highlightSlot(c)
-            else if (c.recapId != null) HubSlot(SlotAction.WATCH_RECAP, SlotLabel.WATCH_RECAP, !c.videoOff)
+            if (c.recapId != null) HubSlot(SlotAction.WATCH_RECAP, SlotLabel.WATCH_RECAP, !c.videoOff)
             else HubSlot(SlotAction.WATCH_RECAP, SlotLabel.RECAP_SOON, false)
         SlotAction.BOX_SCORE -> HubSlot(SlotAction.BOX_SCORE, SlotLabel.BOX_SCORE, true)
         // (Verification review MED-1) Enabled exactly when the Matchup sheet has rows (a goalie pair with two empty lists
         // draws none).
         SlotAction.MATCHUP -> HubSlot(SlotAction.MATCHUP, SlotLabel.MATCHUP, c.detail != null && hasMatchupRows(c.detail))
-        SlotAction.WATCH_FROM_START ->
-            if (c.group == LeagueGroup.NFL) NflHubUi.fromStartSlot(c) else HubSlot(SlotAction.WATCH_FROM_START, SlotLabel.WATCH_FROM_START, c.catchUp.isNotEmpty())
+        SlotAction.WATCH_FROM_START -> HubSlot(SlotAction.WATCH_FROM_START, SlotLabel.WATCH_FROM_START, c.catchUp.isNotEmpty())
     }
 
     private fun channel(c: Ctx): HubSlot {

@@ -18,6 +18,7 @@ import app.thebox.core.sports.hub.ClipResult
 import app.thebox.core.sports.hub.DetailState
 import app.thebox.core.sports.hub.EspnDetailMapper
 import app.thebox.core.sports.hub.EspnSummaryDto
+import app.thebox.core.sports.hub.EspnVideoMapper
 import app.thebox.core.sports.hub.NflHubFixtures
 import app.thebox.core.sports.hub.NflHubPipeline
 import app.thebox.data.sports.EspnHubTestSupport.json
@@ -124,6 +125,9 @@ class NflHubPipelineDataTest {
                 val ready = withTimeout(10_000L) { repo.detail.first { it is DetailState.Ready } } as DetailState.Ready
                 val want = NflHubPipeline.expected(c) ?: error("$c does not map")
                 assertEquals("$c: the repository publishes exactly the real mapper's detail with the source's skew", want, ready.detail)
+                // (Code review 2026-11-26, data #8) `expected(case)` is the mapper's own output; these hand-written
+                // values, read off the fixtures, keep the assertion from being purely circular.
+                spot(c, ready.detail)
                 assertEquals("$c: skew", c.skewMs, ready.detail.clockSkewMs)
                 assertEquals("$c: server date", c.serverDateMs, ready.detail.serverDateMs)
                 // The box score from the same parse: the loop's slot, no second request.
@@ -141,6 +145,46 @@ class NflHubPipelineDataTest {
             }
         }
         assertEquals("one parse at a time with the real mapper", 1, maxInFlight.get())
+    }
+
+    /** Two or three values per case, written by hand from the fixture files (not computed by the mapper). */
+    private fun spot(c: NflHubPipeline.Case, d: app.thebox.core.sports.hub.GameDetail) {
+        fun passer(side: app.thebox.core.sports.Side) = d.leaders.first { it.category == "passingYards" }.let { if (side == app.thebox.core.sports.Side.AWAY) it.away else it.home }!!
+        val away = app.thebox.core.sports.Side.AWAY
+        val home = app.thebox.core.sports.Side.HOME
+        when (c) {
+            NflHubPipeline.PRE, NflHubPipeline.NAMES_AND_INJURIES -> {
+                assertEquals("$c", "SoFi Stadium", d.venue)
+                assertEquals("$c", "J. Love" to 2838, passer(away).name to passer(away).value)
+                assertEquals("$c", "M. Stafford" to 2623, passer(home).name to passer(home).value)
+            }
+            NflHubPipeline.LIVE -> {
+                assertEquals("$c", 4, d.plays.size)
+                assertEquals("$c: LAR 13–3", 3 to 13, d.plays.last().away to d.plays.last().home)
+                assertEquals("$c", 70 to 87, passer(away).value to passer(home).value)
+            }
+            NflHubPipeline.LIVE_HALFTIME -> {
+                assertEquals("$c", 6, d.plays.size)
+                assertEquals("$c: 13–13", 13 to 13, d.plays.last().away to d.plays.last().home)
+                assertEquals("$c", app.thebox.core.sports.hub.PlayScore.FG, d.plays.last().kind)
+            }
+            NflHubPipeline.FINAL_HIGHLIGHT -> {
+                assertEquals("$c", listOf(50579688L, 50578630L, 50578740L, 50579083L), d.clips.map { it.videoId })
+                assertEquals("$c: 20–22", 20 to 22, d.plays.last().away to d.plays.last().home)
+                assertEquals("$c", "Northwest Stadium", d.venue)
+            }
+            NflHubPipeline.FINAL_EXPIRED -> {
+                assertEquals("$c", 9, d.plays.size)
+                assertEquals("$c: 16–19", 16 to 19, d.plays.last().away to d.plays.last().home)
+                assertEquals("$c", "A. Rodgers" to 227, passer(away).name to passer(away).value)
+            }
+            NflHubPipeline.NO_CLIP -> {
+                assertEquals("$c: 9–26", 9 to 26, d.plays.last().away to d.plays.last().home)
+                assertEquals("$c", "Highmark Stadium", d.venue)
+                assertEquals("$c", "J. Allen" to 304, passer(home).name to passer(home).value)
+            }
+            else -> Unit // the provisional halftime body: covered by EspnDetailMapperTest's hand-built values
+        }
     }
 
     /** The facts the panel and the sheets depend on, as the real pipeline produces them for each case. */
@@ -174,6 +218,22 @@ class NflHubPipelineDataTest {
         assertEquals("Cook III", EspnDetailMapper.leaderSurname("J. Cook III"))
         assertEquals(6, names.injuries.count { it.side == app.thebox.core.sports.Side.AWAY })
         assertEquals(17, names.injuryCounts[app.thebox.core.sports.Side.AWAY])
+    }
+
+    /**
+     * (Code review 2026-11-26, data #4) The http rule fails closed: only endpoints from the debug override allow it. An
+     * https logo base that differs from ESPN's by one character, endpoints built by hand, or an https override never do.
+     */
+    @Test fun theHttpMediaRuleFailsClosed() {
+        assertTrue(!EspnEndpoints(EspnEndpoints.API_BASE, "https://a.espncdn.com").httpMediaOk)
+        assertTrue(!EspnEndpoints(EspnEndpoints.API_BASE, "https://b.espncdn.com/").httpMediaOk)
+        assertTrue("built by hand, even with an http base", !EspnEndpoints(EspnEndpoints.API_BASE, "http://panel.invalid/").httpMediaOk)
+        assertTrue(!EspnEndpoints.fromOverride("https://panel.invalid")!!.httpMediaOk)
+        assertTrue(EspnEndpoints.fromOverride("http://10.0.2.2:8080")!!.httpMediaOk)
+        assertTrue(!EspnVideoMapper.httpOkFor("https://a.espncdn.com"))
+        assertTrue(!EspnVideoMapper.httpOkFor(" https://a.espncdn.com/x/ "))
+        assertTrue(!EspnVideoMapper.httpOkFor(""))
+        assertTrue(EspnVideoMapper.httpOkFor("http://10.0.2.2:8080/"))
     }
 
     /** Production never offers an http clip: the same fixture with plain-http media through ESPN's own endpoints. */

@@ -11,7 +11,8 @@ output keeps only what the NFL hub mappers read, plus a few stub items so the de
 What it does (summary):
 - keeps only the DTO's top-level keys (header, boxscore, scoringPlays, leaders, gameInfo, article, videos,
   lastFiveGames, injuries) in the order recorded, plus a stub `drives` (one drive, 3 plays) and one-item stubs of `news`,
-  `winprobability` and `pickcenter` (the last with every value blanked: no odds are committed) when the sample has them;
+  `winprobability`, `pickcenter`, `odds` and `againstTheSpread` (the last three with every value blanked: no odds are
+  committed) when the sample has them;
 - drops every `links`, `logos`, `ad`, `cerebroId`, `dataSourceIdentifier`, `contributingPartner`, `pccId`, `uid`,
   `guid`, `tracking.trackingId` / `trackingName`, every `article` key but `type` and `headline`, `officials` and ticket
   info;
@@ -30,7 +31,7 @@ import sys
 MAX_BYTES = 40 * 1024
 
 TOP_KEYS = ["header", "boxscore", "scoringPlays", "leaders", "gameInfo", "article", "videos", "lastFiveGames", "injuries"]
-STUB_KEYS = ["drives", "news", "winprobability", "pickcenter"]
+STUB_KEYS = ["drives", "news", "winprobability", "pickcenter", "odds", "againstTheSpread"]
 DROP_KEYS = {
     "links", "logos", "logo", "ad", "cerebroId", "dataSourceIdentifier", "contributingPartner", "pccId", "uid", "guid",
     "officials", "ticketsInfo", "tickets", "$ref", "images", "posterImages", "categories", "keywords", "collegeAthlete",
@@ -233,8 +234,11 @@ def stub(key, v):
         return {"articles": [scrub(pick(a, ["id", "type", "headline"])) for a in arts]}
     if key == "winprobability":
         return v[:1]
-    if key == "pickcenter":
-        return [blank(v[0])] if v else []
+    if key in ("pickcenter", "odds", "againstTheSpread"):
+        # (NFL hub code review 2026-11-26, data #11) Every value blanked: the shape stays for the decoder's skip, no odds.
+        if isinstance(v, list):
+            return [blank(v[0])] if v else []
+        return blank(v)
     return None
 
 

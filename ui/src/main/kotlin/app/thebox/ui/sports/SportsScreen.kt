@@ -175,6 +175,8 @@ fun SportsScreen(
     var lastCardId by remember { mutableStateOf<String?>(null) }
     var returnCardId by remember { mutableStateOf<String?>(null) }
     var focusedSlot by remember { mutableIntStateOf(-1) }
+    /** (UI M1) The open sheet was closed by Back (its own focus move), not by the view model. */
+    var closedByUser by remember { mutableStateOf(false) }
     var sheetSlot by remember { mutableIntStateOf(0) }
     var lastSlot by remember { mutableIntStateOf(0) }
     // (Review M2) The panel's buttons take focus from the moment the page decides to enter (set before the request), not
@@ -268,7 +270,12 @@ fun SportsScreen(
     LaunchedEffect(clipActive) {
         if (wasClipActive && !clipActive) {
             clipEpoch++
-            if (sheet == null) { if (panelFocused) focusSlot(lastSlot) else focusCard(returnCardId ?: lastCardId) }
+            // (Code review 2026-11-26, UI m8) The slot that started the clip may have gone grey meanwhile (the highlight
+            // expired: "No highlights"): the nearest usable slot (Scoring) takes focus, not the card.
+            if (sheet == null) {
+                if (panelFocused) nearestUsableSlot(panel.slots, lastSlot)?.let(::focusSlot) ?: exitPanel()
+                else focusCard(returnCardId ?: lastCardId)
+            }
         }
         wasClipActive = clipActive
     }
@@ -289,6 +296,18 @@ fun SportsScreen(
         if (gone != null && !viewModel.panelFocused.value && viewModel.sheet.value == null && !clipActive) focusCard(gone)
         cardIds.forEachIndexed { i, id -> cardIndex[id] = i }
     }
+    // (Code review 2026-11-26, UI M1) The view model closed a sheet by itself while focus stays in the panel (the NFL
+    // Matchup at kick-off): focus goes to the panel's first usable slot, else to the card. A sheet closed by Back has
+    // already moved focus itself ([closedByUser]).
+    var sheetWasOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(sheet == null) {
+        val open = sheet != null
+        if (!open && sheetWasOpen && !closedByUser && viewModel.panelFocused.value && !clipActive) {
+            panel.firstEnabled?.let(::focusSlot) ?: exitPanel()
+        }
+        closedByUser = false
+        sheetWasOpen = open
+    }
     // A slot that stops being enabled while focused hands focus to the next enabled one, else to the card (§2.3).
     LaunchedEffect(panel.slots, panelFocused, focusedSlot) {
         if (panelFocused && focusedSlot in 0..2 && !panel.slots[focusedSlot].usable && sheet == null && !clipActive) {
@@ -298,7 +317,8 @@ fun SportsScreen(
     }
 
     val off = body is SportsBody.Off
-    val videoOffNow = if (app.thebox.core.sports.SportsConstants.ESPN_VIDEO_ENABLED) videoOffLeagues else videoOffLeagues + LeagueGroup.NFL
+    // (Code review 2026-11-26, UI open defect #1 row 10) The view model's set already holds the kill switch.
+    val videoOffNow = videoOffLeagues
 
     Box(
         modifier
@@ -417,6 +437,7 @@ fun SportsScreen(
                                 lastAtPress = lastPlayed
                             },
                             onClose = {
+                                closedByUser = true
                                 viewModel.closeSheet()
                                 val i = sheetSlot
                                 if (panelFocused && panel.slots.getOrNull(i)?.usable == true) focusSlot(i) else exitPanel()
@@ -451,6 +472,13 @@ fun SportsScreen(
 }
 
 private const val SportsHubDays = app.thebox.core.sports.SportsConstants.HUB_DAY_RANGE
+
+/**
+ * (Code review 2026-11-26, UI m8) The usable slot nearest to [i] (itself when usable; on a tie the later one, so a grey
+ * "No highlights" in slot 1 hands focus to Scoring); null when none is usable.
+ */
+internal fun nearestUsableSlot(slots: List<HubSlot>, i: Int): Int? =
+    slots.indices.filter { slots[it].usable }.minWithOrNull(compareBy<Int> { kotlin.math.abs(it - i) }.thenByDescending { it })
 
 private fun selectedOffsetOf(ui: SportsUiState, nfl: Boolean): Int = if (nfl) ui.offset.coerceIn(-1, 1) else ui.offset
 

@@ -522,6 +522,47 @@ class ClipSessionTest {
         assertEquals("Try again is fresh too", listOf(false, true, true), resolver.fresh)
     }
 
+    /**
+     * (Code review 2026-11-26, data #1) ESPN answers a fresh lookup with the same stable URL, which now plays. After a
+     * transient failure (the card from STREAM_INTERRUPTED), Try again recovers. A URL that is really dead fails again as
+     * CLIP_EXPIRED: one re-resolve, then the card; never a loop, and each Try again costs at most two lookups.
+     */
+    @Test
+    fun aStableUrlThatIsReallyDeadEndsAfterOneReResolve() = runTest {
+        val resolver = SlowResolver()
+        val rig = Rig(this, resolver)
+        rig.live(x)
+        rig.session.play(listOf(highlight(50579688)), 0)
+        runCurrent()
+        // Transient: the controller used up its restarts; Try again gets the same URL and plays.
+        rig.controller.base.state.value = PlaybackState.Error(rig.controller.clipNp(100), PlaybackError(PlaybackErrorCode.STREAM_INTERRUPTED))
+        runCurrent()
+        assertTrue(rig.session.state.value is ClipSession.State.Failed)
+        rig.session.retry()
+        runCurrent()
+        assertTrue("Try again recovers", rig.session.state.value is ClipSession.State.Playing)
+        assertEquals(2, rig.controller.clips.size)
+        assertEquals("the same URL plays again", rig.controller.clips[0].url, rig.controller.clips[1].url)
+        // Really dead: 403 → CLIP_EXPIRED → one fresh re-resolve → the same URL → CLIP_EXPIRED → the card.
+        rig.controller.base.state.value = PlaybackState.Error(rig.controller.clipNp(110), PlaybackError(PlaybackErrorCode.CLIP_EXPIRED))
+        runCurrent()
+        assertEquals(3, resolver.calls.size)
+        rig.controller.base.state.value = PlaybackState.Error(rig.controller.clipNp(120), PlaybackError(PlaybackErrorCode.CLIP_EXPIRED))
+        runCurrent()
+        assertEquals("no second re-resolve", 3, resolver.calls.size)
+        assertTrue(rig.session.state.value is ClipSession.State.Failed)
+        // One more Try again: at most a lookup and one re-resolve, then the card again.
+        rig.session.retry()
+        runCurrent()
+        rig.controller.base.state.value = PlaybackState.Error(rig.controller.clipNp(130), PlaybackError(PlaybackErrorCode.CLIP_EXPIRED))
+        runCurrent()
+        rig.controller.base.state.value = PlaybackState.Error(rig.controller.clipNp(140), PlaybackError(PlaybackErrorCode.CLIP_EXPIRED))
+        runCurrent()
+        assertEquals(5, resolver.calls.size)
+        assertTrue(rig.session.state.value is ClipSession.State.Failed)
+        assertEquals(listOf(false, true, true, true, true), resolver.fresh)
+    }
+
     @Test
     fun anExpiredFirstClipIsTheExpiredToastAndPlaysNothing() = runTest {
         val resolver = SlowResolver().apply { answers[50578630] = ClipResult.Expired }

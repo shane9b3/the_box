@@ -456,6 +456,12 @@ object ClipOffer {
         (embargoMs == null || embargoMs <= nowMs) && nowMs + SportsConstants.HUB_CLIP_EXPIRY_MARGIN_MS < expiresMs
 
     /**
+     * (NFL hub code review 2026-11-26, data #3 / UI m2) Not expired at [nowMs] (`nowMs + margin < expiresMs`), embargoed
+     * or not: whether a clip is kept in a list, and the opposite of "ESPN removed it". [offered] implies this.
+     */
+    fun listed(expiresMs: Long, nowMs: Long): Boolean = nowMs + SportsConstants.HUB_CLIP_EXPIRY_MARGIN_MS < expiresMs
+
+    /**
      * The next instant after [nowMs] at which [offered] changes (the embargo lifting, or `expiresMs − margin`); null for
      * none (the clip is past its offer window for good).
      */

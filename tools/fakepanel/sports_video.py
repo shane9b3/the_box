@@ -40,8 +40,9 @@ ESPN clips (NFL hub, docs/design/m6-nfl-hub.md section 8.4; with `--sports --spo
 Which games list clips (the summary's `videos[]`, the board's `highlights[]`, these records):
 - 401899003 (NYJ @ NE, final): by `sports_nfl_clips` (also `POST /admin/config`): `espn` a Final Game Highlight plus three
   OnePlay clips; `single` the highlight only; `none`; `expired` the highlight with `expirationDate` 1 h ago; `expiring` 2 min
-  from now (inside the app's 5 min margin: never offered); `gone` all four listed, but the master and the record answer
-  404 (the app's CLIP_EXPIRED -> fresh lookup path); `slow_records` all four, records answering after 8 s.
+  from now (inside the app's 5 min margin: never offered); `gone` all four listed, but the media answer 403 (the player's
+  CLIP_EXPIRED, so the app makes its one fresh record lookup) and the record 404 (the "ESPN removed this video" toast);
+  `slow_records` all four, records answering after 8 s.
 - 401898001 (DEN @ SEA, week 8, final): always one highlight that expired 1 h ago.
 - every other game (the featured live game included, also after its end): none.
 Valid clips are posted 3 h before the NFL slate's anchor and expire 72 h after it.
@@ -458,8 +459,12 @@ def handle_espn(h, path):
         return h.send(404, b"no such ESPN path", "text/plain")
     v.bump("espn_media")
     eid, sp = espn_spec_of(p, int(m.group(1)))
-    if sp is None or (mode == ESPN_GONE_MODE and eid == ESPN_CLIP_GAME):
+    if sp is None:
         return h.send(404, b"<html><body>404</body></html>", "text/html")
+    if mode == ESPN_GONE_MODE and eid == ESPN_CLIP_GAME:
+        # (NFL hub code review 2026-11-26, data #10) A dead CDN link answers 403, which the player classifies as
+        # CLIP_EXPIRED (404 is not), so the app makes its one fresh record lookup, which then 404s.
+        return h.send(403, b"<html><body>403 Forbidden</body></html>", "text/html")
     name = m.group(2)
     segs_of = {k: [s[0] for s in p.clips[k].segments] if p.clips.get(k) is not None else [] for k in ("std", "50fps")}
     if name == "master.m3u8":

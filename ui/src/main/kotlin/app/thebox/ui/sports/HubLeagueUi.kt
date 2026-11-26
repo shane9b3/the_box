@@ -6,6 +6,7 @@ import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.LeagueGroup
 import app.thebox.core.sports.hub.ChannelCandidate
 import app.thebox.core.sports.hub.ClipInfo
+import app.thebox.core.sports.hub.ClipKind
 import app.thebox.core.sports.hub.ClipRef
 import app.thebox.core.sports.hub.GameDetail
 import java.util.Locale
@@ -54,6 +55,51 @@ internal interface HubLeagueUi {
 
     /** NHL.com / ESPN wording (string resources chosen per league, never concatenated). */
     val source: HubSource
+
+    // ---- (NFL hub code review 2026-11-26, UI §"open defect #1") the slot and offer branches, one per league
+
+    /**
+     * This league's slot for [action] now, or null for the shared rule in `HubSlots.forAction` (the NHL and the CHL use
+     * the shared rule throughout).
+     */
+    fun slotFor(action: SlotAction, c: HubSlots.Ctx): HubSlot? = null
+
+    /** Whether the recap / highlight plays now (slot 1 on a final keeps it over Retry, `HubSlots.Ctx.detailRetry`). */
+    fun playableRecap(c: HubSlots.Ctx): Boolean = c.recapId != null
+
+    /** The recap / highlight that WATCH_RECAP plays now; null plays nothing (then [recapGoneToast], when set, is shown). */
+    fun recapRef(game: GameSnapshot, detail: GameDetail?, nowMs: Long): ClipRef? =
+        (detail?.recapId ?: game.media?.recapId)?.let { ClipRef(it, ClipKind.RECAP, game.id) }
+
+    /** The toast when WATCH_RECAP finds nothing to play (a frozen slot whose clip just expired); null for none. */
+    val recapGoneToast: HubToastKind? get() = null
+
+    /** Whether [ref] may be played now (`ClipOffer`; the NHL's and the CHL's clips do not expire). */
+    fun offeredRef(ref: ClipRef, game: GameSnapshot?, detail: GameDetail?, nowMs: Long): Boolean = true
+
+    /** The next wall instant anything [game]'s panel or card shows changes with time alone (the offer timer); null for none. */
+    fun nextOfferChange(game: GameSnapshot, detail: GameDetail?, nowMs: Long, skewMs: Long): Long? = null
+
+    /** Whether the card's "● Highlights" chip lights (§1.2). */
+    fun cardHighlights(game: GameSnapshot, nowMs: Long): Boolean {
+        val m = game.media ?: return false
+        return m.recapId != null || m.condensedId != null || m.goalClips > 0
+    }
+
+    /** The league's video is switched off in this build (the NFL's `ESPN_VIDEO_ENABLED` kill switch). */
+    val videoKilled: Boolean get() = false
+
+    /** Whether the detail's live score may replace the board's in the headline (the NFL detail carries none). */
+    val detailCarriesScore: Boolean get() = true
+
+    /**
+     * (UI M1) While focus is in the panel the slot set is frozen (§2.3). True: a phase change (pre-game → live → final)
+     * re-freezes it to the new phase's slots. The NHL and the CHL keep the set for the whole visit, as before.
+     */
+    val refreezeOnPhaseChange: Boolean get() = false
+
+    /** (UI M1) Whether an open Matchup sheet of [game] stays open; false closes it (focus to the first usable slot). */
+    fun matchupOpen(game: GameSnapshot): Boolean = true
 }
 
 /** (§6.6) Whose words a league's texts use. */

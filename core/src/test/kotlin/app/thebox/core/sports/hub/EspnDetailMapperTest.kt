@@ -211,10 +211,17 @@ class EspnDetailMapperTest {
         assertEquals("https://img.invalid/50579688.jpg", hl.thumbUrl)
     }
 
-    @Test fun embargoedClipsAreNotOffered() {
-        // 03:00Z on MNF night: the highlight (04:32) and the lights-out clip (03:21) are still embargoed.
-        val d = map(NflHubFixtures.FINAL_MNF, "401873078", atMs = ms("2026-11-24T03:00:00Z"))
-        assertEquals(listOf(50578630L, 50578740L), d.clips.map { it.videoId })
+    /**
+     * (Code review 2026-11-26, data #3) Embargoed clips are **kept** (so the view model's offer tick reveals them when the
+     * embargo lifts) but not offered: 03:00Z on MNF night, the highlight (04:32) and the lights-out clip (03:21) are listed
+     * with their embargo and only the two earlier plays pass `ClipOffer.offered`.
+     */
+    @Test fun embargoedClipsAreKeptButNotOffered() {
+        val at = ms("2026-11-24T03:00:00Z")
+        val d = map(NflHubFixtures.FINAL_MNF, "401873078", atMs = at)
+        assertEquals(listOf(50579688L, 50578630L, 50578740L, 50579083L), d.clips.map { it.videoId })
+        assertEquals(listOf(50578630L, 50578740L), d.clips.filter { ClipOffer.offered(it.embargoMs, it.expiresMs, at) }.map { it.videoId })
+        assertEquals(ms("2026-11-24T03:21:19Z"), d.clips.mapNotNull { ClipOffer.changesAt(it.embargoMs, it.expiresMs, at) }.min(), "the next lift")
     }
 
     @Test fun expiredAndMarginClipsAreNotOffered() {
@@ -510,7 +517,10 @@ class EspnDetailMapperTest {
         assertEquals(PlayScore.SAFETY, d.plays[3].kind)
         assertEquals(Side.HOME, d.plays[3].side)
         assertEquals(10 to 12, d.plays.last().away to d.plays.last().home)
-        assertEquals(listOf(50590001L), d.clips.map { it.videoId }, "the safety clip is embargoed until 02:58")
+        // (Code review 2026-11-26, data #3) The safety clip is listed with its embargo (02:58) and offered only from then.
+        assertEquals(listOf(50590001L, 50590002L), d.clips.map { it.videoId }, "the embargoed safety clip is kept")
+        val at = ms("2026-11-26T02:50:00Z")
+        assertEquals(listOf(50590001L), d.clips.filter { ClipOffer.offered(it.embargoMs, it.expiresMs, at) }.map { it.videoId }, "the safety clip is embargoed until 02:58")
         assertEquals(listOf(50590001L, 50590002L), live(3, atMs = ms("2026-11-26T03:00:00Z")).clips.map { it.videoId }, "oldest first")
         assertEquals(StatRow(StatKind.PASS_YARDS, StatValue.Count(-2), StatValue.Count(199)), d.gameStats.first { it.kind == StatKind.PASS_YARDS })
     }
