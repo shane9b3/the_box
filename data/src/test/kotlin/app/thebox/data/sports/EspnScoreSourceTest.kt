@@ -294,7 +294,8 @@ class EspnScoreSourceTest {
         assertEquals(FailKind.HTTP_5XX, (runBlocking { s.day("2026-11-09") } as Fetch.Failed).kind)
         answers["dates=20261109"] = { json("{}", 403, "Retry-After" to "99999") }
         val o = runBlocking { s.day("2026-11-09") } as Fetch.Failed
-        assertEquals(FailKind.HTTP_OTHER, o.kind)
+        // (NFL hub P2, arch M6) ESPN's WAF rule: a 403 on any ESPN call, the day board included, is a slow-down.
+        assertEquals(FailKind.HTTP_429, o.kind)
         assertEquals(300, o.retryAfterS)
     }
 

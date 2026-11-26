@@ -14,6 +14,8 @@ import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
 import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.hub.BoxScore
+import app.thebox.core.sports.hub.ClipKind
+import app.thebox.core.sports.hub.ClipOffer
 import app.thebox.core.sports.hub.DetailCadence
 import app.thebox.core.sports.hub.DetailPollPolicy
 import app.thebox.core.sports.hub.DetailPollPolicy.DetailGate
@@ -84,7 +86,13 @@ internal interface DetailFetcher {
  *   already resting skips the rest (OK entering the panel calls it again), as does [retry]. A move to another game cancels
  *   the in-flight call; its answer is dropped.
  * - The fetch runs in a child job; its answer comes back as an input, so all state is touched on the loop only.
- * - NFL and CHL games are [DetailState.BoardOnly] without a request.
+ * - (NFL hub P2, docs/design/m6-nfl-hub.md §5.2, §5.5) The NHL and the NFL are fetched (the NFL through
+ *   `EspnDetailSource`), each with its own [DetailCadence] through the same loop, rest and gate; CHL games are
+ *   [DetailState.BoardOnly] without a request. Every per-game map is keyed `"league:id"` (an NHL and an ESPN id never
+ *   collide). Back-off always wins over every other rule, the box-score request included.
+ * - (NFL, arch M4) The NFL box score comes from the same summary parse: [boxScore] posts to the loop, which answers from
+ *   its one-slot box cache or forces the shown game's next fetch and completes from that answer. There is never a
+ *   second parse in flight. The NHL keeps its own on-demand `boxscore` request (unchanged).
  * - A refetch that fails keeps the cached detail with `failing`; with nothing cached the state is `Failed(kind)`;
  *   offline with nothing cached is `Failed(OFFLINE)`. `stale` turns on at 2 × the phase's interval (A-S7).
  * - A failure inside the loop stops the detail with a log line; it never takes the app down.
@@ -100,8 +108,10 @@ class GameDetailRepositoryImpl internal constructor(
     private val wallNow: () -> Long,
     private val random: Random = Random.Default,
     private val dwellMs: Long = SportsConstants.HUB_FETCH_DWELL_MS,
+    /** (NFL hub §5.4) Extra memory to drop on [trim] (the ESPN clip catalog, except the playing clip). */
+    private val onTrim: () -> Unit = {},
 ) : GameDetailRepository {
-    /** (NFL hub commit 0) Built with both sources; the loop still fetches NHL games only (P2 routes the NFL). */
+    /** (NFL hub) Built with both sources; [DetailFetcher.of] routes by league. */
     @Inject constructor(
         source: NhlDetailSource,
         espn: EspnDetailSource,
@@ -110,7 +120,10 @@ class GameDetailRepositoryImpl internal constructor(
         signals: SportsSignals,
         @ApplicationScope scope: CoroutineScope,
         wall: WallClock,
-    ) : this(DetailFetcher.of(source, espn), store, awake.orElse(DeviceAwake.ALWAYS), signals, scope, ScoreRepositoryImpl.ELAPSED, wall::now)
+    ) : this(
+        DetailFetcher.of(source, espn), store, awake.orElse(DeviceAwake.ALWAYS), signals, scope, ScoreRepositoryImpl.ELAPSED, wall::now,
+        onTrim = espn::trimMemory,
+    )
 
     private sealed interface Input {
         data class Show(val game: GameSnapshot?) : Input
@@ -123,6 +136,8 @@ class GameDetailRepositoryImpl internal constructor(
         data class Foreground(val on: Boolean) : Input
         data class Online(val on: Boolean) : Input
         data class Fetched(val gen: Int, val id: GameId, val answer: DetailAnswer) : Input
+        /** (NFL hub §5.5) The box score of [id] from the loop's slot or the shown game's next parse. */
+        data class Box(val id: GameId, val answer: CompletableDeferred<Fetch<BoxScore>>) : Input
     }
 
     private val inputs = Channel<Input>(Channel.UNLIMITED)
@@ -133,6 +148,9 @@ class GameDetailRepositoryImpl internal constructor(
     override fun pause(paused: Boolean) = post(Input.Pause(paused))
     override fun retry() = post(Input.Retry)
     override fun trim() = post(Input.Trim)
+
+    /** Set when the loop stopped on a failure: a box-score caller is answered at once instead of waiting. */
+    @Volatile private var stopped = false
 
     /** The gate as the loop last saw it, for [boxScore] (called from the view model, off the loop). */
     @Volatile private var gateSnapshot = DetailGate(sportsOn = false, awake = false, foreground = false, online = false, paused = false)
@@ -150,7 +168,14 @@ class GameDetailRepositoryImpl internal constructor(
     override suspend fun boxScore(id: GameId): Fetch<BoxScore> {
         val g = gateSnapshot
         if (!g.online) return Fetch.Failed(FailKind.OFFLINE, null, mono.nowMs())
-        if (!g.open || id.league != League.NHL) return Fetch.Failed(FailKind.HTTP_OTHER, null, mono.nowMs())
+        if (!g.open || !detailed(id.league)) return Fetch.Failed(FailKind.HTTP_OTHER, null, mono.nowMs())
+        if (id.league != League.NHL) {
+            // (NFL hub §5.5, arch M4) Through the loop: the slot, or the shown game's next (shared) parse.
+            val answer = CompletableDeferred<Fetch<BoxScore>>()
+            post(Input.Box(id, answer))
+            if (stopped) answer.complete(Fetch.Failed(FailKind.HTTP_OTHER, null, mono.nowMs())) // the loop is gone
+            return answer.await()
+        }
         while (true) {
             var mine = false
             val flight = synchronized(boxLock) {
@@ -194,6 +219,11 @@ class GameDetailRepositoryImpl internal constructor(
     // ---- loop state (touched only inside the loop)
 
     private class Entry(val ok: Fetch.Ok<GameDetail>, val landingFailed: Boolean)
+
+    /** (NFL hub §5.5) The last parsed box score, keyed `league:id`; one slot (≤ 32 KB). */
+    private var boxSlot: Pair<String, Fetch.Ok<BoxScore>>? = null
+    /** (NFL hub §5.5) Box-score callers waiting for the shown game's next answer. */
+    private val boxWaiters = ArrayList<CompletableDeferred<Fetch<BoxScore>>>()
 
     private val cache = object : LinkedHashMap<String, Entry>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry>?): Boolean = size > SportsConstants.HUB_DETAIL_LRU
@@ -259,6 +289,10 @@ class GameDetailRepositoryImpl internal constructor(
         } catch (t: Throwable) {
             BoxLog.e(TAG, "detail loop stopped: ${t.javaClass.simpleName}", t)
             _detail.value = DetailState.None
+            stopped = true
+            val gone = Fetch.Failed(FailKind.HTTP_OTHER, null, mono.nowMs())
+            releaseBoxWaiters(gone)
+            while (true) (inputs.tryReceive().getOrNull() ?: break).let { if (it is Input.Box) it.answer.complete(gone) }
         }
     }
 
@@ -295,10 +329,12 @@ class GameDetailRepositoryImpl internal constructor(
                 force = true
             }
             Input.Trim -> {
-                val keep = shown?.id?.id
+                val keep = shown?.id?.let(::key)
                 cache.keys.retainAll { it == keep }
                 endedAt.keys.retainAll { it == keep }
                 seenUnfinished.retainAll { it == keep }
+                if (boxSlot?.first != keep) boxSlot = null
+                onTrim()
             }
             is Input.Sports -> {
                 sportsOn = i.on
@@ -309,6 +345,7 @@ class GameDetailRepositoryImpl internal constructor(
             is Input.Foreground -> isForeground = i.on
             is Input.Online -> isOnline = i.on
             is Input.Fetched -> if (i.gen == gen) fetched(i.id, i.answer)
+            is Input.Box -> box(i.id, i.answer)
         }
         updateGate()
     }
@@ -328,30 +365,85 @@ class GameDetailRepositoryImpl internal constructor(
         retryAfterS = null
         lastFailKind = null
         force = false
-        dwellUntil = if (game != null && game.id.league == League.NHL) mono.nowMs() + dwellMs else null
+        dwellUntil = if (game != null && detailed(game.id.league)) mono.nowMs() + dwellMs else null
     }
 
     private fun cancelInFlight() {
         inFlight?.cancel()
         inFlight = null
         gen++
+        // (NFL hub §5.5) A box-score caller waits for an answer that will not come now (another game, Sports off).
+        releaseBoxWaiters(Fetch.Failed(FailKind.HTTP_OTHER, null, mono.nowMs()))
+    }
+
+    // ---- the box score (NFL hub §5.5, arch M4)
+
+    private fun box(id: GameId, answer: CompletableDeferred<Fetch<BoxScore>>) {
+        val game = shown
+        val now = mono.nowMs()
+        if (game == null || game.id != id || !gate().open) {
+            answer.complete(Fetch.Failed(FailKind.HTTP_OTHER, null, now))
+            return
+        }
+        val k = key(id)
+        val slot = boxSlot?.takeIf { it.first == k }?.second
+        if (slot != null && boxFresh(game, slot, now)) {
+            answer.complete(slot)
+            return
+        }
+        // Back-off always wins: no forced request while failing; the sheet shows its Retry row.
+        if (failures > 0) {
+            answer.complete(Fetch.Failed(lastFailKind ?: FailKind.HTTP_OTHER, retryAfterS, now))
+            return
+        }
+        boxWaiters += answer
+        if (inFlight == null) {
+            dwellUntil = null
+            force = true
+        } // else: the parse in flight answers it
+    }
+
+    /** A slot answers while no older than the phase's interval; a final's (or a phase without one) at any age. */
+    private fun boxFresh(game: GameSnapshot, slot: Fetch.Ok<BoxScore>, now: Long): Boolean {
+        val entry = cache[key(game.id)]
+        val phase = phase(game, entry)
+        if (phase == GamePhase.FINAL) return true
+        val interval = DetailPollPolicy.intervalMs(cadence(game.id.league), phase, finalFacts(game, entry)) ?: return true
+        return now - slot.receivedMono <= interval
+    }
+
+    private fun releaseBoxWaiters(f: Fetch<BoxScore>) {
+        if (boxWaiters.isEmpty()) return
+        val waiting = boxWaiters.toList()
+        boxWaiters.clear()
+        for (w in waiting) w.complete(f)
     }
 
     private fun fetched(id: GameId, a: DetailAnswer) {
         inFlight = null
+        val k = key(id)
         when (val f = a.fetch) {
             is Fetch.Ok -> {
-                cache[id.id] = Entry(if (a.landingFailed) keepLanding(f, cache[id.id]) else f, a.landingFailed)
+                cache[k] = Entry(if (a.landingFailed) keepLanding(f, cache[k]) else f, a.landingFailed)
                 failures = 0
                 lastFailMono = null
                 retryAfterS = null
                 lastFailKind = null
-                if (f.value.fetchedPhase != GamePhase.FINAL) seenUnfinished += id.id
+                if (f.value.fetchedPhase != GamePhase.FINAL) seenUnfinished += k
                 shown?.let(::noteEnd)
             }
             Fetch.NotFound -> failed(FailKind.HTTP_OTHER, mono.nowMs(), null)
             is Fetch.Failed -> failed(f.kind, f.receivedMono, f.retryAfterS)
         }
+        // (NFL hub §5.5) The box from the same parse: the slot, and every caller waiting for it.
+        a.box?.let { boxSlot = k to it }
+        releaseBoxWaiters(
+            a.box ?: when (val f = a.fetch) {
+                is Fetch.Failed -> f
+                Fetch.NotFound -> Fetch.Failed(FailKind.HTTP_OTHER, null, mono.nowMs())
+                is Fetch.Ok -> Fetch.Failed(FailKind.BAD_BODY, null, f.receivedMono)
+            },
+        )
     }
 
     /**
@@ -404,12 +496,14 @@ class GameDetailRepositoryImpl internal constructor(
             _detail.value = DetailState.None
             return
         }
-        if (game.id.league != League.NHL) {
+        if (!detailed(game.id.league)) {
             _detail.value = DetailState.BoardOnly(game.id)
             return
         }
         val now = mono.nowMs()
         if (inFlight == null && fetchDue(game, now)) launchFetch(children, game)
+        // (NFL hub §5.5) A box-score caller never waits on a fetch that cannot start (the gate closed meanwhile).
+        if (inFlight == null && boxWaiters.isNotEmpty() && !gate().open) releaseBoxWaiters(Fetch.Failed(FailKind.HTTP_OTHER, null, now))
         publish(game, now)
     }
 
@@ -427,10 +521,10 @@ class GameDetailRepositoryImpl internal constructor(
     }
 
     private fun policyNextAt(game: GameSnapshot, now: Long): Long? {
-        val entry = cache[game.id.id]
+        val entry = cache[key(game.id)]
         val phase = phase(game, entry)
         return DetailPollPolicy.nextAt(
-            CADENCE, gate(), entry?.ok, phase, entry?.ok?.value?.fetchedPhase, finalFacts(game, entry), failures, lastFailMono,
+            cadence(game.id.league), gate(), entry?.ok, phase, entry?.ok?.value?.fetchedPhase, finalFacts(game, entry), failures, lastFailMono,
             retryAfterS, refused(), pollPhaseMs, jitter, now,
         )
     }
@@ -454,7 +548,7 @@ class GameDetailRepositoryImpl internal constructor(
     }
 
     private fun publish(game: GameSnapshot, now: Long) {
-        val entry = cache[game.id.id]
+        val entry = cache[key(game.id)]
         val kind = lastFailKind
         _detail.value = when {
             entry != null -> {
@@ -463,7 +557,7 @@ class GameDetailRepositoryImpl internal constructor(
                     detail = entry.ok.value,
                     fetchedAtMono = entry.ok.receivedMono,
                     failing = failures > 0 || entry.landingFailed || !isOnline,
-                    stale = DetailPollPolicy.isStale(CADENCE, entry.ok.receivedMono, phase, finalFacts(game, entry), now),
+                    stale = DetailPollPolicy.isStale(cadence(game.id.league), entry.ok.receivedMono, phase, finalFacts(game, entry), now),
                 )
             }
             !isOnline -> DetailState.Failed(game.id, FailKind.OFFLINE)
@@ -474,11 +568,11 @@ class GameDetailRepositoryImpl internal constructor(
 
     private fun nextWake(now: Long): Long? {
         val game = shown ?: return null
-        if (game.id.league != League.NHL) return null
-        val entry = cache[game.id.id]
+        if (!detailed(game.id.league)) return null
+        val entry = cache[key(game.id)]
         val stale = entry?.let {
             val phase = phase(game, it)
-            DetailPollPolicy.staleAt(CADENCE, it.ok.receivedMono, phase, finalFacts(game, it))?.takeIf { at -> at > now }
+            DetailPollPolicy.staleAt(cadence(game.id.league), it.ok.receivedMono, phase, finalFacts(game, it))?.takeIf { at -> at > now }
         }
         if (inFlight != null || !gate().open) return stale
         val fetch = when {
@@ -494,16 +588,31 @@ class GameDetailRepositoryImpl internal constructor(
     private fun phase(game: GameSnapshot, entry: Entry?): GamePhase =
         DetailPollPolicy.effectivePhase(game.phase, entry?.ok?.value?.fetchedPhase)
 
-    private fun recapPosted(game: GameSnapshot, entry: Entry?): Boolean =
-        entry?.ok?.value?.recapId != null || game.media?.recapId != null
+    /**
+     * The NHL: a recap id in the detail or on the board. (NFL hub §4.3, §5.2) The NFL: a RECAP clip in the detail, or the
+     * board's highlight, **offered** at `now + skew` (`ClipOffer`; an expired highlight is not "posted"; the NFL detail
+     * never sets `recapId`).
+     */
+    private fun recapPosted(game: GameSnapshot, entry: Entry?): Boolean {
+        val d = entry?.ok?.value
+        if (game.id.league != League.NFL) return d?.recapId != null || game.media?.recapId != null
+        val at = wallNow() + (d?.clockSkewMs ?: 0L)
+        if (d != null && d.clips.any { it.kind == ClipKind.RECAP && ClipOffer.offered(it.embargoMs, it.expiresMs, at) }) return true
+        val m = game.media ?: return false
+        m.recapId ?: return false
+        return m.recapExpiresMs?.let { ClipOffer.offered(null, it, at) } ?: true
+    }
 
-    /** (NFL hub commit 0) The policy's FINAL facts. P2: the NFL's offered highlight and PLAY clips (§5.2). */
-    private fun finalFacts(game: GameSnapshot, entry: Entry?): FinalFacts =
-        FinalFacts(recapPosted(game, entry), playClips = false, endedAgoMs = endedAgoMs(game))
+    /** The policy's FINAL facts; (NFL hub §5.2) [FinalFacts.playClips]: the NFL detail lists a PLAY clip. */
+    private fun finalFacts(game: GameSnapshot, entry: Entry?): FinalFacts = FinalFacts(
+        recapPosted(game, entry),
+        playClips = entry?.ok?.value?.clips?.any { it.kind == ClipKind.PLAY } == true,
+        endedAgoMs = endedAgoMs(game),
+    )
 
     /** Remembers when a game seen unfinished in this process turned FINAL (board or detail). */
     private fun noteEnd(game: GameSnapshot) {
-        val id = game.id.id
+        val id = key(game.id)
         val detailPhase = cache[id]?.ok?.value?.fetchedPhase
         val final = game.phase == GamePhase.FINAL || detailPhase == GamePhase.FINAL
         if (!final) {
@@ -515,10 +624,12 @@ class GameDetailRepositoryImpl internal constructor(
 
     /**
      * How long ago the game ended (the recap wait, §4.3): from the moment this process saw it turn FINAL, else estimated
-     * as the listed start + [GAME_LENGTH_MS] (a game first seen already final). Null without a usable start.
+     * as the listed start + the league's `gameLengthMs` (the NHL's [GAME_LENGTH_MS]; the NFL's 3 h 15 min) for a game first
+     * seen already final. Null without a usable start.
      */
     private fun endedAgoMs(game: GameSnapshot): Long? {
-        val end = endedAt[game.id.id] ?: game.startUtcMs.takeIf { it > 0 }?.plus(GAME_LENGTH_MS) ?: return null
+        val length = cadence(game.id.league).gameLengthMs
+        val end = endedAt[key(game.id)] ?: game.startUtcMs.takeIf { it > 0 }?.plus(length) ?: return null
         return (wallNow() - end).coerceAtLeast(0L)
     }
 
@@ -526,8 +637,15 @@ class GameDetailRepositoryImpl internal constructor(
         private const val TAG = "GameDetail"
         /** A regulation NHL game's usual length, start to final horn, for a game first seen already final. */
         internal val GAME_LENGTH_MS = DetailCadence.NHL.gameLengthMs
-        /** (NFL hub commit 0) Every game the loop fetches is the NHL's today; P2 picks the cadence by league (§5.2). */
-        private val CADENCE = DetailCadence.NHL
+
+        /** (NFL hub §5.2) The leagues with a detail source; every other league is BoardOnly. */
+        internal fun detailed(league: League): Boolean = league == League.NHL || league == League.NFL
+
+        /** (NFL hub §5.2) The league's detail cadence. */
+        internal fun cadence(league: League): DetailCadence = if (league == League.NFL) DetailCadence.NFL else DetailCadence.NHL
+
+        /** (NFL hub §5.2, arch m8) The key of every per-game map: an NHL and an ESPN id never collide. */
+        internal fun key(id: GameId): String = "${id.league}:${id.id}"
 
         private fun phaseOf(ms: Long?): Long =
             ms?.takeIf { it in SportsConstants.POLL_PHASE_MIN_MS..SportsConstants.POLL_PHASE_MAX_MS } ?: SportsConstants.POLL_PHASE_MIN_MS

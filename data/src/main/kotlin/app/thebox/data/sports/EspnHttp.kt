@@ -32,11 +32,13 @@ import kotlin.coroutines.resumeWithException
  *   kotlinx `decodeFromStream` (`ignoreUnknownKeys`) through a [CappedStream] counting decoded bytes, then drained to the
  *   end so the wire meter counts the whole body and the connection is reusable.
  * - 200: decoded, or `BAD_BODY` over the cap / not JSON / a spine of the wrong type; 404 JSON = `NotFound`, HTML 404 /
- *   400 / other = `HTTP_OTHER`; 429; 5xx.
+ *   400 / other = `HTTP_OTHER`; 429; 5xx. The declared `Content-Length` check stays, but OkHttp's transparent gunzip makes
+ *   it −1 for every gzip answer: the protection is [CappedStream] counting decoded bytes.
  * - Logging by state change only, a path label and the result kind (never a query, a body or an id), under [tag].
  *
- * The WAF rule (403, and 202 with `x-amzn-waf-action`, → `HTTP_429` for every call) is P2's (§5.3); today the callers map
- * a 403 themselves.
+ * - (NFL hub P2, §5.3, arch M6) **The WAF rule**, for every ESPN call (board, summary, clip records): a 403, and a 202 with
+ *   an `x-amzn-waf-action` header (the AWS WAF challenge seen on www.espn.com), are `HTTP_429`, so every caller's
+ *   refused floor applies. [Answer.code] keeps the real status; the board's own 403 → 429 mappings are now no-ops.
  */
 internal class EspnHttp(
     /** The built client (the caller installs `WireMeter`, the call timeout and no cache). */
@@ -103,34 +105,21 @@ internal class EspnHttp(
         val type = res.header("Content-Type")
         fun failed(kind: FailKind, length: Long? = null, html: Boolean = false) =
             Answer<T>(Fetch.Failed(kind, NhlScoreSource.retryAfterS(res), received), type, length, res.code, html)
-        return when (val code = res.code) {
+        val code = res.code
+        // (NFL hub P2, arch M6) ESPN's WAF: a 403, or a 202 challenge, is a slow-down for every ESPN call.
+        if (code == HTTP_FORBIDDEN || (code == HTTP_ACCEPTED && res.header(WAF_ACTION) != null)) return failed(FailKind.HTTP_429)
+        return when (code) {
             200 -> {
                 val declared = res.body.contentLength()
                 if (declared > cap) return failed(FailKind.BAD_BODY, declared)
-                val stream = CappedStream(res.body.byteStream(), cap)
-                val dto = try {
-                    decode(serializer, stream)
-                } catch (e: IOException) {
-                    if (stream.overCap) return failed(FailKind.BAD_BODY, stream.count)
-                    throw e // a real read failure: IO / TIMEOUT
-                } catch (e: SerializationException) {
-                    return failed(FailKind.BAD_BODY, stream.count)
-                } catch (e: IllegalArgumentException) { // a lexer error that is not a SerializationException
-                    return failed(FailKind.BAD_BODY, stream.count)
+                when (val d = decodeCapped(res.body.byteStream(), serializer, cap)) {
+                    is Decoded.Bad -> failed(FailKind.BAD_BODY, d.count)
+                    is Decoded.Ok -> {
+                        onDecoded(d.value)
+                        val ok = Fetch.Ok(d.value, received, NhlScoreSource.serverDateMs(res), NhlScoreSource.ageS(res), WireMeter.maxAgeS(res))
+                        Answer(ok, type, d.count, code)
+                    }
                 }
-                // (Update interval §3.2) Read to the end (whitespace, the gzip trailer), so the listener's wire bytes are
-                // the whole body and the connection is reusable.
-                try {
-                    val rest = ByteArray(DRAIN_BYTES)
-                    while (stream.read(rest) >= 0) Unit
-                } catch (e: IOException) {
-                    if (stream.overCap) return failed(FailKind.BAD_BODY, stream.count)
-                    throw e
-                }
-                if (stream.overCap) return failed(FailKind.BAD_BODY, stream.count)
-                onDecoded(dto)
-                val ok = Fetch.Ok(dto, received, NhlScoreSource.serverDateMs(res), NhlScoreSource.ageS(res), WireMeter.maxAgeS(res))
-                Answer(ok, type, stream.count, code)
             }
             404 -> if (isHtml(res, type)) failed(FailKind.HTTP_OTHER, html = true) else Answer(Fetch.NotFound, type, null, code)
             400 -> failed(FailKind.HTTP_OTHER, html = isHtml(res, type))
@@ -139,10 +128,6 @@ internal class EspnHttp(
             else -> failed(FailKind.HTTP_OTHER).also { if (code in 300..399) BoxLog.w(tag, "unexpected redirect $code") }
         }
     }
-
-    @OptIn(ExperimentalSerializationApi::class)
-    private fun <T> decode(serializer: DeserializationStrategy<T>, stream: InputStream): T =
-        JSON.decodeFromStream(serializer, stream)
 
     /** An HTML 404 (a captive portal, ESPN's CDN error page for an unknown logo) is not the API saying "no such game". */
     private fun isHtml(res: Response, type: String?): Boolean {
@@ -195,9 +180,53 @@ internal class EspnHttp(
         }
     }
 
-    private companion object {
-        const val DRAIN_BYTES = 512
-        const val HTML_SNIFF_BYTES = 512L
-        val JSON = Json { ignoreUnknownKeys = true }
+    /** A capped decode: the value and the decoded bytes read, or [Bad] (over the cap, not JSON, a wrong spine). */
+    sealed interface Decoded<out T> {
+        val count: Long
+        class Ok<T>(val value: T, override val count: Long) : Decoded<T>
+        class Bad(override val count: Long, val overCap: Boolean) : Decoded<Nothing>
+    }
+
+    internal companion object {
+        private const val DRAIN_BYTES = 512
+        private const val HTML_SNIFF_BYTES = 512L
+        private const val HTTP_ACCEPTED = 202
+        private const val HTTP_FORBIDDEN = 403
+        /** AWS WAF's action header on a challenge (`challenge`, `captcha`). */
+        const val WAF_ACTION = "x-amzn-waf-action"
+        private val JSON = Json { ignoreUnknownKeys = true }
+
+        /**
+         * The one decode every ESPN body takes (the transport's and the decode tests'): kotlinx `decodeFromStream`
+         * (`ignoreUnknownKeys`, so undeclared sections are skipped by the lexer, never built) through a [CappedStream] of
+         * [cap] decoded bytes, then drained to the end (the gzip trailer; the wire meter counts the whole body and the
+         * connection is reusable). A real read failure (IO, timeout, a cancelled call) is thrown; over the cap, a lexer
+         * error or a spine of the wrong type is [Decoded.Bad], and no partial value escapes.
+         */
+        @OptIn(ExperimentalSerializationApi::class)
+        fun <T> decodeCapped(input: InputStream, serializer: DeserializationStrategy<T>, cap: Long): Decoded<T> {
+            val stream = CappedStream(input, cap)
+            val dto = try {
+                JSON.decodeFromStream(serializer, stream)
+            } catch (e: IOException) {
+                if (stream.overCap) return Decoded.Bad(stream.count, true)
+                throw e // a real read failure: IO / TIMEOUT
+            } catch (e: SerializationException) {
+                return Decoded.Bad(stream.count, stream.overCap)
+            } catch (e: IllegalArgumentException) { // a lexer error that is not a SerializationException
+                return Decoded.Bad(stream.count, stream.overCap)
+            }
+            // (Update interval §3.2) Read to the end (whitespace, the gzip trailer), so the listener's wire bytes are
+            // the whole body and the connection is reusable.
+            try {
+                val rest = ByteArray(DRAIN_BYTES)
+                while (stream.read(rest) >= 0) Unit
+            } catch (e: IOException) {
+                if (stream.overCap) return Decoded.Bad(stream.count, true)
+                throw e
+            }
+            if (stream.overCap) return Decoded.Bad(stream.count, true)
+            return Decoded.Ok(dto, stream.count)
+        }
     }
 }
