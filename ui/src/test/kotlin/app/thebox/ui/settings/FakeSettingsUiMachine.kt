@@ -31,6 +31,10 @@ class FakeSettingsUiMachine(initial: SettingsUiState = SettingsUiState()) : Sett
     override fun act(action: GuideEvent.Act): Boolean = true
     override fun onLeave() = Unit
     override fun dispatch(event: SettingsEvent) { events += event }
+    /** (Settings panel commit 0) [present] publishes the presentation, as the real machine does; [announces] counts. */
+    override fun present(p: app.thebox.core.settings.SettingsPresentation) { state.value = state.value.copy(presentation = p) }
+    var announces = 0
+    override fun announceOpen() { announces++ }
 
     override fun attachGuide(dispatch: ((GuideEvent) -> Unit)?) { guide = dispatch }
     override fun openFromFull(route: SettingsRoute, detached: Boolean) = Unit

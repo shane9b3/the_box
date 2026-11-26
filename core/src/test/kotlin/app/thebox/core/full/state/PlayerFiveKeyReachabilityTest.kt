@@ -215,7 +215,9 @@ class PlayerFiveKeyReachabilityTest {
     private fun assertReach(start: Start, u: UpDownInPlayer, layers: List<PlayerLayer>, items: List<QuickItem>, scrub: List<ScrubFocus>, effects: List<String>) {
         val r = search(start, PlayerSettings(upDown = u))
         val missing = buildList {
-            addAll(layers.filter { it !in r.layers })
+            // (Settings panel commit 0) SETTINGS_PANEL is entered by the guide (`settingsPanel(true)`), not by the player's
+            // five keys; A2 decides whether this player-only search reaches it.
+            addAll(layers.filter { it !in r.layers && it != PlayerLayer.SETTINGS_PANEL })
             addAll(items.filter { it !in r.quickSelected }.map { "quick:$it" })
             addAll(PickerKind.entries.filter { it !in r.pickers }.map { "picker:$it" }) // M5 integration: SERVER is offered (Sources)
             addAll(scrub.filter { it !in r.scrub }.map { "scrub:$it" })

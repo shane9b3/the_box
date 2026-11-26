@@ -430,6 +430,8 @@ class GuideStateMachineImpl(
                 if (updateCard == null) updateFocused = false
             }
             is GuideEvent.SourceHolding -> onSourceHolding(event.token, event.source)
+            // (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.6) The panel never opens yet; A1 expands it.
+            GuideEvent.ExpandSettings -> Unit
         }
     }
 

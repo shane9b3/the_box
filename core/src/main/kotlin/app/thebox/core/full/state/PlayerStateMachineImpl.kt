@@ -282,6 +282,8 @@ class PlayerStateMachineImpl(
             PlayerLayer.ERROR -> errorKey(a, justClosed)
             PlayerLayer.NONE -> bareKey(a, justClosed)
             PlayerLayer.PLACE_SCORE -> placeKey(a)
+            // (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.2) Never entered yet; A2 handles PLAY_PAUSE.
+            PlayerLayer.SETTINGS_PANEL -> false
         }
         if (layer == PlayerLayer.INFO) infoHideAt = curMs + settings.infoBarMs
         if (layer == PlayerLayer.QUICK_BAR) quickHideAt = curMs + QUICK_BAR_IDLE_MS

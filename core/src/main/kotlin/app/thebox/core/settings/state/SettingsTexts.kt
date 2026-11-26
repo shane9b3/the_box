@@ -330,6 +330,23 @@ enum class SettingsText {
     // the NFL (%1$s = the league's name, "OHL"). SPORTS_INTERVAL takes the group's name ("CHL"); SPORTS_INTERVAL_LEAGUE
     // now takes only the shown league (no "other").
     SPORTS_INTERVAL_SLOWED_LEAGUE,
+    // (Settings panel commit 0, docs/design/m6-player-settings-panel.md §4.2, §4.4, §5.2, §2.3; append-only) The panel's
+    // timing lines (stage A texts; one per PanelTiming except NONE and AT_ONCE, `SettingsPanelRules.timingText`), the
+    // quick-bar line for aspect / audio language / subtitles (§4.1), the stage-A notices (`PanelApplyResult`), the root
+    // header's expand hint, and the open/expand announcement (%1$s = the page title; the root list uses the _ROOT form).
+    PANEL_TIMING_REPREPARE,
+    PANEL_TIMING_CHANGE_CHANNEL,
+    PANEL_TIMING_NEXT_START,
+    PANEL_TIMING_RESTART_APP,
+    PANEL_TIMING_NEXT_UPDATE,
+    PANEL_TIMING_NEXT_GUIDE_UPDATE,
+    PANEL_QUICK_BAR_HINT,
+    PANEL_NOTICE_REPREPARING,
+    PANEL_NOTICE_WAITS_FOR_RESUME,
+    PANEL_NOTICE_CARD_SHOWN,
+    PANEL_FULL_SCREEN_HINT,
+    PANEL_ANNOUNCE_OPEN,
+    PANEL_ANNOUNCE_OPEN_ROOT,
 }
 
 fun interface SettingsTexts {

@@ -325,6 +325,20 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.SPORTS_STYLE_PILL -> R.string.settings_sports_style_pill
         SettingsText.SPORTS_STYLE_STACKED -> R.string.settings_sports_style_stacked
         SettingsText.SPORTS_INTERVAL_SLOWED_LEAGUE -> R.string.settings_sports_interval_slowed_league
+        // (Settings panel commit 0, docs/design/m6-player-settings-panel.md §4.2, §4.4, §5.2)
+        SettingsText.PANEL_TIMING_REPREPARE -> R.string.settings_panel_timing_reprepare
+        SettingsText.PANEL_TIMING_CHANGE_CHANNEL -> R.string.settings_panel_timing_change_channel
+        SettingsText.PANEL_TIMING_NEXT_START -> R.string.settings_panel_timing_next_start
+        SettingsText.PANEL_TIMING_RESTART_APP -> R.string.settings_panel_timing_restart_app
+        SettingsText.PANEL_TIMING_NEXT_UPDATE -> R.string.settings_panel_timing_next_update
+        SettingsText.PANEL_TIMING_NEXT_GUIDE_UPDATE -> R.string.settings_panel_timing_next_guide_update
+        SettingsText.PANEL_QUICK_BAR_HINT -> R.string.settings_panel_quick_bar_hint
+        SettingsText.PANEL_NOTICE_REPREPARING -> R.string.settings_panel_notice_repreparing
+        SettingsText.PANEL_NOTICE_WAITS_FOR_RESUME -> R.string.settings_panel_notice_waits_for_resume
+        SettingsText.PANEL_NOTICE_CARD_SHOWN -> R.string.settings_panel_notice_card_shown
+        SettingsText.PANEL_FULL_SCREEN_HINT -> R.string.settings_panel_full_screen_hint
+        SettingsText.PANEL_ANNOUNCE_OPEN -> R.string.settings_panel_announce_open
+        SettingsText.PANEL_ANNOUNCE_OPEN_ROOT -> R.string.settings_panel_announce_open_root
         }
     }
 }

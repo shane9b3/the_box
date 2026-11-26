@@ -114,6 +114,14 @@ data class GuideUiState(
     val pin: app.thebox.core.parental.PinPromptState? = null,
     /** (M5, §2.12 item 2) The update card (S17), in the guide only (never in FULL). */
     val update: app.thebox.core.update.UpdateCardState? = null,
+    /**
+     * (Settings panel commit 0, docs/design/m6-player-settings-panel.md §0 item 2, §2.2, §2.3; additive) The in-player
+     * settings panel is open over FULL: the one source of truth for it. Only ever true while [mode] is FULL (the guide's
+     * `publish()` closes the panel otherwise, S2). While it is set the guide sends every key to the settings machine
+     * before the player machine, the router reads the GUIDE key table ([GuideStateMachine.keyContext]), and `AppRoot`
+     * draws `SettingsPanel` over the video. The player hears it as `PlayerStateMachine.settingsPanel(open)`.
+     */
+    val settingsPanel: Boolean = false,
 )
 
 /** Inputs of the state machine. All delivered on main. */
@@ -185,6 +193,14 @@ sealed interface GuideEvent {
     data class Update(val card: app.thebox.core.update.UpdateCardState?) : GuideEvent
     /** (2026-11-14) The answer to [GuideEffects.findSourceHolding] for [token]: the first source holding the row, or null. */
     data class SourceHolding(val token: Long, val source: GuideSource?) : GuideEvent
+    /**
+     * (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.6, S10; additive) The settings panel's route
+     * now needs the whole canvas (`SettingsPanelRules.expands`) after navigation outside a key (a page source's push,
+     * replace, popTo or pushGated, a PIN grant's step). `AppRoot` dispatches it from its own coroutine, never from inside
+     * a dispatch. Idempotent: the guide expands the panel to full-screen Settings (mode SETTINGS, same path, no
+     * `onLeave`) only while [GuideUiState.settingsPanel] is set and the route expands; otherwise it does nothing.
+     */
+    data object ExpandSettings : GuideEvent
 }
 
 /** Side effects requested by the state machine; implemented by :ui's GuideEffectsImpl (WP-C). Main-safe, non-blocking. */
@@ -300,8 +316,22 @@ interface GuideStateMachine {
     var settings: app.thebox.core.settings.SettingsMachine?
         get() = null
         set(@Suppress("UNUSED_PARAMETER") value) = Unit
-    /** (M5, §2.12 item 5, S3) The settings editor is open: the router passes every key except BACK to Compose. */
+    /**
+     * (M5, §2.12 item 5, S3) The settings editor is open: the router passes every key except BACK to Compose.
+     * (Settings panel commit 0, §2.2) Also while the settings panel is open: `(mode == SETTINGS || settingsPanel) &&
+     * settings?.textInputActive == true` (A1).
+     */
     val textInputActive: Boolean get() = false
+
+    /**
+     * (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.2, S1; additive) The key table the router
+     * reads keys with: GUIDE while the settings panel is open (a held BACK has its long binding and does not repeat-pop;
+     * LEFT/RIGHT act on key-down, as in full-screen Settings), else PLAYER in FULL, else GUIDE. `KeyRouterImpl` uses it in
+     * place of its own `mode == FULL` test (A1). The default already reads [GuideUiState.settingsPanel], so fakes that
+     * publish the flag get the panel's table.
+     */
+    val keyContext: app.thebox.core.input.KeyContext
+        get() = ui.value.let { if (it.mode == ScreenMode.FULL && !it.settingsPanel) app.thebox.core.input.KeyContext.PLAYER else app.thebox.core.input.KeyContext.GUIDE }
     /**
      * (M5 integration 2026-10-16, WP-C amendment) The PIN layer (decision §0.9) the host routes controller refusals and
      * PIN-store answers to; null when the machine has none (fakes). Replaces the hosts' `machine as? ParentalHost` cast.

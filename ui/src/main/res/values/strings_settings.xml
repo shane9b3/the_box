@@ -315,4 +315,21 @@
     <string name="settings_epg_manual">chosen by you</string>
     <string name="settings_epg_tvg_id">the playlist\'s guide id</string>
     <!-- end WP-A page strings -->
+
+    <!-- Settings panel commit 0 (docs/design/m6-player-settings-panel.md §4.2, §4.4, §5.2, §2.3): the in-player panel's
+         timing lines (stage A), the quick-bar line, the stage-A notices, the root header's hint and the announcement.
+         Generated with SettingsText (PANEL_*); keep in step. -->
+    <string name="settings_panel_timing_reprepare">Re-prepares the stream when you change it</string>
+    <string name="settings_panel_timing_change_channel">Applies when you change channel</string>
+    <string name="settings_panel_timing_next_start">Applies the next time The Box starts</string>
+    <string name="settings_panel_timing_restart_app">Applies after a restart (Restart now)</string>
+    <string name="settings_panel_timing_next_update">Applies at the next playlist update</string>
+    <string name="settings_panel_timing_next_guide_update">Applies at the next guide update</string>
+    <string name="settings_panel_quick_bar_hint">For this channel, use the quick bar</string>
+    <string name="settings_panel_notice_repreparing">Re-preparing the stream. A choice made for this channel on the quick bar still wins.</string>
+    <string name="settings_panel_notice_waits_for_resume">Applies when playback resumes.</string>
+    <string name="settings_panel_notice_card_shown">Saved. Close Settings and choose Retry to try it.</string>
+    <string name="settings_panel_full_screen_hint">☰ Full screen</string>
+    <string name="settings_panel_announce_open">Settings, %1$s</string>
+    <string name="settings_panel_announce_open_root">Settings</string>
 </resources>

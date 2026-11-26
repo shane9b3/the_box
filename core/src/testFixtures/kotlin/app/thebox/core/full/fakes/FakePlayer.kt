@@ -108,6 +108,9 @@ class FakePlayerStateMachine(initial: PlayerUiState = PlayerUiState()) : PlayerS
     /** (Score bug commit 0) Every `scores(...)` the host sent. */
     val scoreFacts = ArrayList<app.thebox.core.sports.ScoreFacts>()
     override fun scores(facts: app.thebox.core.sports.ScoreFacts) { scoreFacts += facts }
+    /** (Settings panel commit 0, S2) Every `settingsPanel(open)` the guide sent (one per dispatch), in order. */
+    val panelCalls = ArrayList<Boolean>()
+    override fun settingsPanel(open: Boolean) { panelCalls += open }
 
     companion object {
         /** A factory that hands out [machine] and remembers the effects it was given. */

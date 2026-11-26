@@ -51,6 +51,8 @@ class ComposedFullBackLadderTest {
                 w.press(SELECT)
                 w.press(SELECT)
             }
+            // (Settings panel commit 0) Entered only by the guide's settings panel; A1/A2 add its ladder case.
+            PlayerLayer.SETTINGS_PANEL -> return null
         }
         if (w.ui.layer != layer) return null
         when (o) {

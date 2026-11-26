@@ -84,6 +84,13 @@ class FakeGuideStateMachine(initial: GuideUiState = GuideUiState()) : GuideState
     override var settings: app.thebox.core.settings.SettingsMachine? = null
     var textInput = false
     override val textInputActive: Boolean get() = textInput
+    /**
+     * (Settings panel commit 0, S1) What [keyContext] answers; null = the contract's default, read from [ui] (GUIDE while
+     * `GuideUiState.settingsPanel`, PLAYER in FULL, else GUIDE).
+     */
+    var keyContextOverride: app.thebox.core.input.KeyContext? = null
+    override val keyContext: app.thebox.core.input.KeyContext
+        get() = keyContextOverride ?: super.keyContext
     fun bumpFrame() = version.update { it + 1 }
 
     companion object {

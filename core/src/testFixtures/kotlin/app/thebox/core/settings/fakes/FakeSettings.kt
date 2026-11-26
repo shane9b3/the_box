@@ -1,6 +1,7 @@
 package app.thebox.core.settings.fakes
 
 import app.thebox.core.catchup.archive.LiveSettingsApplier
+import app.thebox.core.catchup.archive.PanelApplyResult
 import app.thebox.core.guide.GuideEvent
 import app.thebox.core.guide.GuideStateMachine
 import app.thebox.core.input.BoxAction
@@ -12,6 +13,7 @@ import app.thebox.core.settings.SettingsDomain
 import app.thebox.core.settings.SettingsEffects
 import app.thebox.core.settings.SettingsEvent
 import app.thebox.core.settings.SettingsMachine
+import app.thebox.core.settings.SettingsPresentation
 import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.settings.SettingsStore
 import app.thebox.core.settings.SettingsUiState
@@ -124,18 +126,41 @@ class RecordingSettingsMachine(
     val acts = ArrayList<GuideEvent.Act>()
     val events = ArrayList<SettingsEvent>()
     var leaves = 0
+    /** (Settings panel commit 0) Every [present] call, in order. */
+    val presented = ArrayList<SettingsPresentation>()
+    /** (Settings panel commit 0) [announceOpen] calls. */
+    var announces = 0
+    /**
+     * (Settings panel commit 0) The order of the calls the guide makes ("present(PANEL)", "open(Root,true,false)",
+     * "onLeave", "announceOpen"): the panel opens with `present(PANEL)` before `open` (§2.3).
+     */
+    val log = ArrayList<String>()
 
     override fun open(route: SettingsRoute, fromFull: Boolean, detached: Boolean) {
         opened += Triple(route, fromFull, detached)
-        _ui.value = SettingsUiState(route = route)
+        log += "open($route,$fromFull,$detached)"
+        _ui.value = SettingsUiState(route = route, presentation = _ui.value.presentation)
     }
     override fun act(action: GuideEvent.Act): Boolean { acts += action; return consume(action) }
-    override fun onLeave() { leaves++ }
+    override fun onLeave() { leaves++; log += "onLeave" }
     override fun dispatch(event: SettingsEvent) { events += event }
+    override fun present(p: SettingsPresentation) {
+        presented += p
+        log += "present($p)"
+        _ui.value = _ui.value.copy(presentation = p)
+    }
+    override fun announceOpen() { announces++; log += "announceOpen" }
+
+    /** (Settings panel commit 0) Moves the fake to [route] as a page source's navigation would (expand-collector tests). */
+    fun showRoute(route: SettingsRoute) { _ui.value = _ui.value.copy(route = route) }
 }
 
 /** Counts [LiveSettingsApplier.apply] calls (ReapplyOnExitTest, S9). */
 class FakeLiveSettingsApplier : LiveSettingsApplier {
     var applied = 0
     override fun apply() { applied++ }
+    /** (Settings panel commit 0, §4.2) [applyFromPanel] calls (not counted in [applied]) and what they answer. */
+    var panelApplies = 0
+    var panelResult: PanelApplyResult = PanelApplyResult.REPREPARING
+    override fun applyFromPanel(): PanelApplyResult { panelApplies++; return panelResult }
 }

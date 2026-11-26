@@ -13,8 +13,13 @@ import kotlinx.coroutines.flow.emptyFlow
 /**
  * What every page builder sees (docs/design/m5-setup-settings.md §3.2.3): the simple/advanced switch and the clock.
  * Data a builder needs beyond that it reads from its own injected sources.
+ *
+ * (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.1, §4.4; additive) [panel]: the page is built for
+ * the in-player panel (`SettingsUiState.presentation == PANEL`; `SettingsEffectsImpl.ctx()` sets it). Builders then omit
+ * the appended timing sentence (`WpaPages.row()`), because the panel draws its own timing line from `row.effect` and
+ * `SettingsPanelRules.timing(row)`. Rows, ids, kinds and effects are the same in both presentations.
  */
-data class PageContext(val advanced: Boolean = true, val nowMs: Long)
+data class PageContext(val advanced: Boolean = true, val nowMs: Long, val panel: Boolean = false)
 
 /**
  * (WP-A seam, §1.3a: one owner per page) Builds the pages of some routes. `:ui`'s `SettingsEffectsImpl` asks the

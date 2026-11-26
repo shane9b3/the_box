@@ -747,11 +747,11 @@ Gate per stage: `./gradlew :core:test :ui:testDebugUnitTest :app:testDebugUnitTe
 
 | Package | Files owned | Depends on | Model |
 |---|---|---|---|
-| **A0 commit 0** (lead) | `SettingsMachine.kt` (presentation, `present`); `SettingsPages.kt` (`PageContext.panel`); `GuideStateContracts.kt` (`settingsPanel`, `ExpandSettings`, `keyContext`); `PlayerContracts.kt` (`SETTINGS_PANEL`, `QuickBarState.panelOpen`, `settingsPanel()`); `ArchiveContracts.kt` (`PanelApplyResult` stage-A values, `applyFromPanel`); `SettingsPanelRules.kt` (signatures, `PanelTiming`, constants); `SettingsTexts.kt` (keys); `SettingsShellLink.announceOpen()` default in `SettingsPages.kt`; stub `ui/.../settings/SettingsPanel.kt` (signature only); fakes: `FakeSettings` (testFixtures), the `:ui` `FakeGuideStateMachine`, player fakes | – | Opus |
-| **A1 guide, router, root glue** | `GuideStateMachineImpl.kt`; `KeyRouterImpl.kt`; `AppRoot.kt` (draw `SettingsPanel`, reminder offset, the posted expand collector); `FullScreenHost.kt` (the `picker` line); tests `GuideSettingsPanelTest`, `KeyRouterPanelTest`, the `RootTreeRuleTest` case, placement and reminder cases, expand collector test | A0 | Opus |
-| **A2 player machine** | `PlayerStateMachineImpl.kt`; `PlayerSettingsPanelLayerTest` | A0 | Opus |
-| **A3 settings machine, rules, effects, applier** | `SettingsMachineImpl.kt` (`present`, cache clear, `announceOpen`); `SettingsPanelRules.kt` (bodies); `SettingsEffectsImpl.kt` (`ctx.panel`, `scheduleApply`, `skipNextReapply`, notices); `app/.../LiveSettingsApplierImpl.kt` (`applyFromPanel`); tests `SettingsMachinePanelTest`, `SettingsPanelRulesTest`, `SettingsEffectsPanelApplyTest`, `LiveSettingsApplierImplTest` | A0 | Opus |
-| **A4 texts** | `WpaPages.kt` (omit the timing sentence when `ctx.panel`); `ResourceSettingsTexts.kt`; `values/strings_settings.xml` (timing lines, notices, "☰ Full screen", announce); builder tests in both presentations | A0 | Sonnet |
+| **A0 commit 0 + 0b** (lead, done) | `SettingsMachine.kt` (`SettingsPresentation`, `presentation`, `present`, `announceOpen`); `SettingsPages.kt` (`PageContext.panel`); `GuideStateContracts.kt` (`settingsPanel`, `ExpandSettings`, `keyContext`); `PlayerContracts.kt` (`SETTINGS_PANEL`, `QuickBarState.panelOpen`, `settingsPanel()`); `LiveSettingsApplier.kt` (`PanelApplyResult`, `applyFromPanel`); `SettingsPanelRules.kt` (signatures, constants, `PanelTiming` **and the frozen bodies**, 0b) + `SettingsPanelRulesTest`; `SettingsTexts.kt` (13 `PANEL_*` keys); `ResourceSettingsTexts.kt` + `strings_settings.xml` (their mapping and strings); stub `ui/.../settings/SettingsPanel.kt`; fakes: `FakeSettings.kt` (testFixtures), `FakeState.kt` (`FakeGuideStateMachine`), `FakePlayer.kt`, `:ui` `FakeSettingsUiMachine`; neutral branches (Commit 0 rulings item 9) | – | Opus |
+| **A1 guide, router, root glue** | `GuideStateMachineImpl.kt`; `KeyRouterImpl.kt`; `AppRoot.kt` (draw `SettingsPanel`, reminder offset, the posted expand collector); `FullScreenHost.kt` (the `picker` line); tests `GuideSettingsPanelTest`, `KeyRouterPanelTest`, the `RootTreeRuleTest` case, placement and reminder cases, expand collector test; **`ComposedFullBackLadderTest`** (the SETTINGS_PANEL case: it needs the composed guide with a settings machine attached; green once A2 lands) | A0 | Opus |
+| **A2 player machine** | `PlayerStateMachineImpl.kt`; `PlayerSettingsPanelLayerTest`; **`PlayerKeysTableTest`** (+ `player_keys.csv` rows ending in SETTINGS_PANEL) and **`PlayerFiveKeyReachabilityTest`** (drop or keep the commit-0 skip) | A0 | Opus |
+| **A3 settings machine, effects, applier** | `SettingsMachineImpl.kt` (`present`, cache clear, `announceOpen`); `SettingsEffectsImpl.kt` (`ctx.panel`, `scheduleApply`, `skipNextReapply`, notices); `app/.../LiveSettingsApplierImpl.kt` (`applyFromPanel`); tests `SettingsMachinePanelTest`, `SettingsEffectsPanelApplyTest`, `LiveSettingsApplierImplTest`. Not `SettingsPanelRules.kt` (lead, frozen in 0b) | A0 | Opus |
+| **A4 texts** | `WpaPages.kt` (omit the timing sentence when `ctx.panel`); builder tests in both presentations; may reword the 13 `PANEL_*` strings in `strings_settings.xml` (no new keys without the lead) | A0 | Sonnet |
 | **A5 panel UI** | `SettingsPanel.kt` (body, `SettingsPanelUi`); `SettingsRowViews.kt` (`compact`); `MoveModeRow.kt` (`width`); `QuickBar.kt` (active pill); tests `SettingsPanelBoundsTest`, `SettingsCompactRowTest`, `QuickBarPanelStyleTest` | A0 | Sonnet (mechanical, under §5) |
 
 A1–A5 run in parallel after A0; their file sets are disjoint. Integration (lead): emulator checklist states 1–8, code
@@ -761,9 +761,9 @@ review pass.
 
 | Package | Files owned | Depends on | Model |
 |---|---|---|---|
-| **B0 commit 0** (lead) | `PlaybackApi.kt` (`OverrideKind`, `ReapplyOutcome`, `reapplySettings` return type, `restartForSettings`, `channelOverrides`, `onUserSettingChanged`); `ArchiveContracts.kt` (append `PanelApplyResult` values, `restartFromPanel`); `WpaPageEnv` in `WpaPages.kt` (`channelOverrides()` default); fakes in `:player` and `:app` tests | `playback` merged; stage A merged | Opus |
+| **B0 commit 0** (lead) | `PlaybackApi.kt` (`OverrideKind`, `ReapplyOutcome`, `reapplySettings` return type, `restartForSettings`, `channelOverrides`, `onUserSettingChanged`); `LiveSettingsApplier.kt` (append `PanelApplyResult` values, `restartFromPanel`; Commit 0 ruling 2); `WpaPageEnv` in `WpaPages.kt` (`channelOverrides()` default); fakes in `:player` and `:app` tests | `playback` merged; stage A merged | Opus |
 | **B1 controller** | `PlaybackControllerImpl.kt`; `:player` tests | B0 | Opus |
-| **B2 panel restart and honest outcome** | new `PanelRetuneRows.kt`; `SettingsPanelRules.kt` (stage-B timing texts); `SettingsEffectsImpl.kt` (restart scheduling, `onUserSettingChanged` for tunneling); `LiveSettingsApplierImpl.kt` (outcome mapping, `restartFromPanel`, pacing); `app/.../WpaPageEnvImpl.kt`; `WpaPages.kt` (CHANNEL_OVERRIDE line under `ctx.panel`); `PlaylistPages.kt` (S3 awaits, omit the sentence under `ctx.panel`); `SetupText.kt`, `strings_setup.xml`, `strings_settings.xml` (stage-B texts); `SettingsPanel.kt` (drop the band's description-drop rule); `:core`/`:app`/`:ui` tests | B0 (runs against B1's contract with a fake) | Opus |
+| **B2 panel restart and honest outcome** | new `PanelRetuneRows.kt`; `SettingsPanelRules.kt` (stage-B timing texts; the only stage-B owner of the file); `SettingsEffectsImpl.kt` (restart scheduling, `onUserSettingChanged` for tunneling); `LiveSettingsApplierImpl.kt` (outcome mapping, `restartFromPanel`, pacing); `app/.../WpaPageEnvImpl.kt`; `WpaPages.kt` (CHANNEL_OVERRIDE line under `ctx.panel`); `PlaylistPages.kt` (S3 awaits, omit the sentence under `ctx.panel`); `SetupText.kt`, `strings_setup.xml`, `strings_settings.xml` (stage-B texts); `SettingsPanel.kt` (drop the band's description-drop rule); `:core`/`:app`/`:ui` tests | B0 (runs against B1's contract with a fake) | Opus |
 
 Integration (lead): re-run emulator states 2, 3 and 8 with the stage-B expectations; code review pass; record the
 reconciled decision in `docs/00-master-plan.md` or `docs/decisions/2026-11-26-player-settings-panel.md`.
@@ -843,3 +843,62 @@ Still open:
 | N10 announce on open | adopted | §2.3; §6 |
 | N11 seek keys | deferred | §7 |
 | "Keep" / "Cut" lists | first version = Keep | §0, §4, §7 |
+
+---
+
+## Commit 0 rulings (2026-11-26)
+
+Where commit 0 (A0) had to choose, the choice that keeps A1–A5 disjoint and today's behaviour unchanged was taken.
+
+1. **`announceOpen()` is a `SettingsMachine` member** (default no-op), not a `SettingsShellLink` one (§2.3 said link).
+   The guide holds a `SettingsMachine` and never casts it; `SettingsMachineImpl` implements both interfaces, so A3's work
+   is the same, and `RecordingSettingsMachine` can count it for A1's tests.
+2. **`PanelApplyResult` and `applyFromPanel()` live in `LiveSettingsApplier.kt`** (package
+   `app.thebox.core.catchup.archive`), not `ArchiveContracts.kt`: the interface is declared there. `applyFromPanel` is a
+   default member, so `LiveSettingsApplier` stays a `fun interface` and the test lambdas compile. B0 appends there.
+3. **`GuideStateMachine.keyContext`'s default already reads the flag**: GUIDE while `ui.value.settingsPanel`, PLAYER in
+   FULL, else GUIDE. One rule, and fakes that publish the flag get the panel's table. A1 need not override it.
+4. **The texts are complete in commit 0.** Thirteen append-only `SettingsText` keys (`PANEL_TIMING_REPREPARE`,
+   `_CHANGE_CHANNEL`, `_NEXT_START`, `_RESTART_APP`, `_NEXT_UPDATE`, `_NEXT_GUIDE_UPDATE`, `PANEL_QUICK_BAR_HINT`,
+   `PANEL_NOTICE_REPREPARING`, `_WAITS_FOR_RESUME`, `_CARD_SHOWN`, `PANEL_FULL_SCREEN_HINT`, `PANEL_ANNOUNCE_OPEN` "Settings,
+   %1$s", `PANEL_ANNOUNCE_OPEN_ROOT` "Settings") with their §4.2 / §4.4 / §5.2 strings in `strings_settings.xml` and their
+   lines in `ResourceSettingsTexts`. The exhaustive `when` there makes a key without a string a compile error, and it
+   removes an A4 → A5 dependency (A5 reads the keys). A4 keeps `WpaPages.kt` and the builder tests, and may reword those
+   thirteen strings. The root list has no page title, hence the `_ROOT` announcement.
+5. **Two rule signatures beyond §2.6.** `SettingsPanelRules.timingText(PanelTiming): SettingsText?` (the §4.4 table,
+   filled in commit 0: null for NONE and AT_ONCE; B2 changes it for stage B) and `quickBarHint(row): Boolean` (§4.1: the
+   band adds `PANEL_QUICK_BAR_HINT` for `playback.aspect`, `playback.audio_language`, `playback.subtitles`; filled in 0b).
+6. ~~Stub bodies~~ superseded by commit 0b (item 10): the rule bodies are real and frozen.
+7. **`SettingsPanel(machine: SettingsMachine, lowEnd: Boolean, modifier: Modifier = Modifier)`**, in
+   `ui/.../settings/SettingsPanel.kt`; commit 0 draws nothing. A5 owns the body and `object SettingsPanelUi`.
+8. **Fakes.** `RecordingSettingsMachine`: `present` publishes `presentation` and is recorded (`presented`), `announces`,
+   an ordered `log` ("present(PANEL)", "open(…)", "onLeave", "announceOpen"), `showRoute(route)`; `open` keeps the
+   presentation. `FakeLiveSettingsApplier`: `panelApplies`, `panelResult` (not counted in `applied`).
+   `FakeGuideStateMachine`: `keyContextOverride` (null = the default). `FakePlayerStateMachine`: `panelCalls`.
+   `FakeSettingsUiMachine` (`:ui` tests): `present` publishes, `announces`.
+9. **Neutral branches outside the contract files** (the panel never opens, so none runs): `GuideStateMachineImpl`
+   `dispatchInner` `GuideEvent.ExpandSettings -> Unit` (A1); `PlayerStateMachineImpl.act` `PlayerLayer.SETTINGS_PANEL ->
+   false` (A2); tests: `PlayerKeysTableTest.coverage` and `PlayerFiveKeyReachabilityTest.assertReach` skip SETTINGS_PANEL
+   (entered by the guide, not by player keys; A2 adds its rows or reach), `ComposedFullBackLadderTest.setUp`
+   `SETTINGS_PANEL -> return null` (A1/A2 add the ladder case).
+
+### Commit 0b (2026-11-26, lead rulings on the A0 report)
+
+10. **`SettingsPanelRules` bodies are frozen in commit 0b and owned by the lead.** A3 no longer owns the file; B2 edits it
+    in stage B. `expands` is an exhaustive `when` over `SettingsRoute` (no `else`), exactly the §2.6 table;
+    `SettingsPanelRulesTest` checks one or more instances of every route class (and fails when a route class has no
+    row). `timing` maps `row.effect` one to one (§4.4), whatever the row kind. `quickBarHint` matches
+    `PlaybackRows.ASPECT`, `AUDIO_LANGUAGE`, `SUBTITLES` by id or `"$id."` prefix (as S4).
+11. **Menu and a long OK are one action.** `DefaultKeyMap` maps the Menu key and a long OK (both contexts) to
+    `CONTEXT_MENU`; `expandKey` sees only the `BoxAction`, so it cannot tell them apart. The rule applied: CONTEXT_MENU
+    expands only at `route == Root && pane == SECTIONS` (the root list, which has no row menus), never on a page, so a
+    long OK on a row (S11) cannot expand. On the root list a long OK expands as Menu does; accepted. OPEN_SETTINGS
+    expands at any route and pane (the editor never sees it: the router hands keys to Compose then).
+12. **Table readings.** `FixGuide` with or without a channel, `SyncStatus`, `Channel(identity)`, `SaveLocation` (any
+    purpose), `LocationDetail` and `PauseRewind` stay in the panel; `PhoneSetup` expands for every purpose (backup and
+    log downloads included); `LocationTest` expands with either argument; `FirstRun` expands (never reached from FULL).
+13. **Test ownership.** `PlayerKeysTableTest` and `PlayerFiveKeyReachabilityTest` belong to A2. The SETTINGS_PANEL case
+    of `ComposedFullBackLadderTest` belongs to A1: the test runs the composed guide + player (`PlayerWorld(withGuide =
+    true)`), and the panel needs the guide to open it with a settings machine attached to that world; it passes only
+    once A2's layer exists, so A1 may leave the commit-0 skip until integration. A4 = `WpaPages.kt`, builder tests and
+    rewording of the `PANEL_*` strings only. §11.1 lists the files per package after these rulings.

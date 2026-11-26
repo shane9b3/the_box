@@ -22,6 +22,14 @@ data class ChoiceState(val row: RowId, val focused: Int)
 data class MoveState(val row: RowId, val fromIndex: Int, val index: Int)
 data class MenuState(val row: RowId, val options: List<ChoiceOption>, val focused: Int)
 
+/**
+ * (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.1; additive) How the one settings machine is shown:
+ * FULL_SCREEN is M5's `SettingsScreen` (mode SETTINGS); PANEL is the in-player panel over FULL (`SettingsPanel`, mode
+ * stays FULL, `GuideUiState.settingsPanel`). Same machine, tree, page sources and row views; only the drawing and the
+ * page texts (`PageContext.panel`) differ.
+ */
+enum class SettingsPresentation { FULL_SCREEN, PANEL }
+
 data class SettingsUiState(
     val route: SettingsRoute = SettingsRoute.Root,
     val stack: List<SettingsRoute> = emptyList(),
@@ -49,6 +57,11 @@ data class SettingsUiState(
     val captureButton: Int = 0,
     val captureTest: Boolean = false,
     val captureReport: Pair<BoxAction?, BoxAction?>? = null,
+    /**
+     * (Settings panel commit 0, §2.1; additive) The presentation [SettingsMachine.present] last chose. The panel draws
+     * `Pane.SECTIONS` at Root as its root list and `Pane.PAGE` as the page; `AppRoot`'s expand collector reads it (§2.6).
+     */
+    val presentation: SettingsPresentation = SettingsPresentation.FULL_SCREEN,
 )
 
 /** Effects the machine requests; :ui's SettingsEffectsImpl implements them. Main-safe, non-blocking. */
@@ -101,6 +114,24 @@ interface SettingsMachine {
     val textInputActive: Boolean
     val nextDeadlineMs: StateFlow<Long>
     var pinGate: PinGate?
+
+    /**
+     * (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.1, N5; additive) Switches the presentation and
+     * publishes it in [SettingsUiState.presentation]. Path, stack, cursors, overlays and the S9 visit (whether [onLeave]
+     * has run) are untouched. During an open visit it clears the page cache and reloads the displayed route, so every page
+     * on the path is rebuilt with the new presentation's texts (`PageContext.panel`) when shown. Dispatches nothing to the
+     * guide (S10). The guide calls `present(PANEL)` **before** [open] when it opens the panel, and `present(FULL_SCREEN)`
+     * after [onLeave] when it closes it, or alone when it expands the panel. Idempotent. Default: no-op (fakes); the
+     * presentation then stays FULL_SCREEN.
+     */
+    fun present(p: SettingsPresentation) = Unit
+
+    /**
+     * (Settings panel commit 0, §2.3, N10; additive) Asks the machine to announce "Settings, <page title>" (TalkBack /
+     * VoiceView) once the displayed page is known: `SettingsShellEvent.Announce` through the shell link, posted (never
+     * from inside the caller's dispatch). The guide calls it after opening and after expanding the panel. Default: no-op.
+     */
+    fun announceOpen() = Unit
 }
 
 fun interface SettingsMachineFactory {

@@ -30,6 +30,15 @@ enum class PlayerLayer {
      * between corners, OK or Back saves ([PlayerEffects.setScoreCorner]) and returns to the quick bar. WP-4b enters it.
      */
     PLACE_SCORE,
+    /**
+     * (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.2; append-only) The in-player settings panel is
+     * open (`GuideUiState.settingsPanel`; entered only by [PlayerStateMachine.settingsPanel] true). Passive: the guide sends
+     * keys to the settings machine first, and [PlayerStateMachine.act] here handles PLAY_PAUSE only (false for the rest).
+     * The quick bar stays published with [QuickBarState.panelOpen] and focus on SETTINGS, no auto-hide; no info bar, no
+     * paused dim; an error card is published unfocused (`focused = -1`). Survives `syncError`, `enterFull` and `closeAll`
+     * while the last `settingsPanel(true)` stands (S2).
+     */
+    SETTINGS_PANEL,
 }
 
 /** State pill (product §3.8): LIVE red, CATCH_UP accent, PAUSED white 12 %, BEHIND "−MM:SS". */
@@ -328,6 +337,12 @@ data class QuickBarState(
      * (`SportsText.quickValue`); set only while the quick bar shows, so a score update never recomposes anything else.
      */
     val score: app.thebox.core.sports.ScoreFacts? = null,
+    /**
+     * (Settings panel commit 0, docs/design/m6-player-settings-panel.md §5.8; additive) The settings panel is open
+     * ([PlayerLayer.SETTINGS_PANEL]): the Settings pill is drawn **active, not focused** (fill White .16, 2 px accent
+     * border, `stateDescription` "Open") and the bar takes no keys. [focused] is SETTINGS's index meanwhile.
+     */
+    val panelOpen: Boolean = false,
 )
 
 enum class PickerKind {
@@ -733,6 +748,16 @@ interface PlayerStateMachine {
      * `sports` prefs, from PlayerViewModel whenever one changes (main). Default: ignored (WP-4b's machine reads it).
      */
     fun scores(facts: app.thebox.core.sports.ScoreFacts) = Unit
+
+    /**
+     * (Settings panel commit 0, docs/design/m6-player-settings-panel.md §2.2, S2; additive) The guide's settings-panel flag,
+     * told at the end of **every** guide dispatch (idempotent; repeated values change nothing). true: enter
+     * [PlayerLayer.SETTINGS_PANEL], remembering the layer it came from (QUICK_BAR or ERROR), closing the picker, list,
+     * scrub and place mode; no `quickHideAt`. A synchronous call from inside this machine's own [act] (quick bar Settings
+     * → `PlayerEffects.openSettings()` → the guide opens the panel) is expected (N9). false while in SETTINGS_PANEL: back
+     * to QUICK_BAR focused on SETTINGS with the 8 s hide timer, or to ERROR while the error is active. Default: ignored.
+     */
+    fun settingsPanel(open: Boolean) = Unit
 }
 
 /** (2026-11-14) A channel-list tune: [identityHash] of the channel, [source] of the list's lineup. */
