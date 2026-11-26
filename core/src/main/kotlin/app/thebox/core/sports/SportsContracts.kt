@@ -5,6 +5,7 @@
 package app.thebox.core.sports
 
 import app.thebox.core.sports.hub.PeriodScore
+import app.thebox.core.sports.hub.VideoEntry
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.Serializable
@@ -158,8 +159,19 @@ enum class Market { NATIONAL, HOME, AWAY }
 /**
  * [recapExpiresMs] (NFL hub §5.1, §6.2): the effective expiry of the NFL board highlight in [recapId] (the card chip and
  * slot 1 offer it only while `ClipOffer` holds); the NHL leaves it null.
+ *
+ * [highlight] (NFL hub §20, appended): the board's highlight as the full entry `EspnVideoMapper` maps (metadata and HLS
+ * master), so a highlight ESPN lists on the scoreboard but not in the game summary is a first-class, playable clip
+ * (`NflHighlight`). Memory only: a [GameSnapshot] is never persisted, and `VideoEntry.toString` prints the clip id only.
+ * When set, [recapId] and [recapExpiresMs] are its id and expiry. The NHL and the CHL leave it null.
  */
-data class GameMedia(val recapId: Long?, val condensedId: Long?, val goalClips: Int, val recapExpiresMs: Long? = null)
+data class GameMedia(
+    val recapId: Long?,
+    val condensedId: Long?,
+    val goalClips: Int,
+    val recapExpiresMs: Long? = null,
+    val highlight: VideoEntry? = null,
+)
 
 /** NFL / CHL board facts the app already receives (Sports Hub §7.1). Every field optional. */
 data class BoardExtras(

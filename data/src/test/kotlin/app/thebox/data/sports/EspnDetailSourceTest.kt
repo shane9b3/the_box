@@ -204,6 +204,24 @@ class EspnDetailSourceTest {
         assertEquals(0, late.size)
     }
 
+    /**
+     * (§20) The board's highlight goes into the catalog through the source, with the http rule failing closed: https
+     * always; plain http only from the debug override, never on ESPN's own endpoints.
+     */
+    @Test fun theBoardHighlightJoinsTheCatalogUnderTheHttpRule() {
+        fun entry(url: String) = app.thebox.core.sports.hub.VideoEntry(
+            app.thebox.core.sports.hub.GameClip(50601743L, ClipKind.RECAP, "t", 80_000L, null, null, wall + 86_400_000L, null), url,
+        )
+        source().noteBoardHighlight(entry("http://10.0.2.2:8080/espn-media/50601743/master.m3u8"))
+        assertEquals("the override allows http", 1, catalog.size)
+        val prod = EspnClipCatalog()
+        val p = EspnDetailSource(OkHttpClient(), mono, { EspnEndpoints.DEFAULT }, prod, mapper.detail, mapper.box, { wall })
+        p.noteBoardHighlight(entry("http://clips.invalid/50601743/playlist.m3u8"))
+        assertEquals("production refuses http media", 0, prod.size)
+        p.noteBoardHighlight(entry("https://clips.invalid/50601743/playlist.m3u8"))
+        assertEquals("https://clips.invalid/50601743/playlist.m3u8", prod.get(50601743L)!!.hlsUrl)
+    }
+
     @Test fun theSkewComesFromTheDateHeaderAndIsClamped() {
         // The server is 90 s ahead of the device: the mapper is asked at now + 90 s, and the detail carries the skew.
         answer = { json(text(NflHubFixtures.FINAL_MNF), 200, "Date" to httpDate(wall + 90_000)) }

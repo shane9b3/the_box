@@ -436,8 +436,8 @@ Mitigations, all required:
   dropped by `EspnVideoMapper`.
 - `EspnClipCatalog` (`:data`, `@Singleton`, memory only, LRU `ESPN_CLIP_CATALOG_MAX` (64) by clip id, `synchronized`):
   `{GameClip, hlsUrl}` entries. It is written by `EspnDetailSource` after each summary parse (the offered entries
-  `EspnVideoMapper` returned) and by `EspnClipResolver` after a record lookup. The board does not write to it (§15). It is
-  never persisted. The HLS URL lives only here and in the `ClipStream` handed to `playClip`.
+  `EspnVideoMapper` returned) and by `EspnClipResolver` after a record lookup, and (§20) with the shown game's board
+  highlight, through the detail repository. It is never persisted. The HLS URL lives only here and in the `ClipStream` handed to `playClip`.
 - `info(ref)` for ESPN is **catalog-only**: a hit returns `ClipInfo(ref, title, null, durationMs, posterUrl = null,
   thumbnailUrl = thumbUrl)`; a miss returns `NotFound`. Neither makes a request (arch M2). The panel and the sheet build
   their pictures from `GameClip` and never call `info()` for the NFL (`NflHubUi.clipRefs` returns none). `ClipSession`'s
@@ -491,8 +491,8 @@ time:
 - the Scoring sheet rows (the `remember` key at `GoalsSheet.kt:118` gains the tick).
 
 The NFL mapper never sets `GameDetail.recapId`, so the NHL `recapPosted` logic is not silently reused with an expired id.
-The NFL highlight is `clips.firstOrNull { it.kind == RECAP && offered }`, else the board's `media.recapId` while
-offered. The master request remains the backstop for a wrong clock.
+(§20) The NFL highlight is `NflHighlight.offered`: the first offered RECAP of the detail's clips ∪ the board's highlight.
+The master request remains the backstop for a wrong clock.
 
 ### 4.4 Clip-to-scoring-play link
 
@@ -568,9 +568,10 @@ Changes in `ClipSession`:
 | images | on draw | 48–292 KB | Coil |
 
 The board DTO (`EspnCompetitionDto`) gains `highlights: List<EspnVideoDto>? = null` (the summary's video DTO, ≤ 1 per
-game). `EspnMapper` maps an offered highlight, evaluated at the board's `serverDateMs`, to `GameSnapshot.media =
-GameMedia(recapId = id, condensedId = null, goalClips = 0, recapExpiresMs = effective expiry)`. The card chip and slot
-1 then work from the board before the summary arrives. Playing it before the summary is cached costs one record lookup.
+game). `EspnMapper` maps a listed highlight, evaluated at the board's `serverDateMs`, to `GameSnapshot.media =
+GameMedia(recapId = id, condensedId = null, goalClips = 0, recapExpiresMs = effective expiry, highlight = the full
+entry)` (§20). The card chip and slot 1 then work from the board before the summary arrives, and the highlight plays
+from the catalog even when the summary never lists it.
 
 ### 5.2 Refresh cadence (`DetailPollPolicy` with a per-league `DetailCadence`)
 
@@ -1024,6 +1025,7 @@ sample is committed. A committed fixture is **< 40 KB** and never a full summary
 | `summary-pre-401873079.json` | GB@LAR | pre-game: 8 averages, last five, season leaders with 5.5 sacks, injuries incl. IR, an Analysis clip expiring at kick-off (dropped), no `scoringPlays` / `drives` keys | commit 0 |
 | `clip-record-50578630.json`, `clip-record-50579083.json` | `clips-mnf/` | the `{videos:[…]}` wrapper | commit 0 |
 | `scoreboard-highlights-wk11.json` | `sb11.json`, two events | board `highlights[]`, `broadcasts` | commit 0 |
+| `summary-final-401873079.json`, `scoreboard-event-final-401873079.json` (§20) | the 04:45Z capture; the board's `highlights[]` entry synthesized | final, five OnePlay clips, no highlight in the summary; the highlight on the board only | fix 2026-11-26 |
 | `summary-live-401873079-{1,2,3}.json` | the lead's capture `nfl/live-sum-401873079-*.json` (lead ruling 10) | live team stats, scoring so far, in-game clips if any | P1 |
 
 **If the capture is missing**, P1 writes the three live fixtures by hand from the final sample's shapes (the same keys and
@@ -1084,7 +1086,8 @@ The NHL and CHL panel and sheet goldens must hash equal after commit 0's move an
   - `expiring`: 2 min from now, inside the margin, not offered;
   - `gone`: listed, but the media answer 403 (the player's `CLIP_EXPIRED`) and the record 404 (the `CLIP_EXPIRED` →
     fresh path; code review 2026-11-26 data #10: a 404 master was not `CLIP_EXPIRED`);
-  - `slow_records`: records answer after 8 s.
+  - `slow_records`: records answer after 8 s;
+  - `board_only` (§20): the board lists the highlight, the summary only the three one-plays, the record answers.
 - `fakepanel.py`: route table and `DEFAULTS` (commit 0 only). Tests `test_sports_nfl.py` and `test_sports_video.py` are
   extended (P2).
 - The debug override `files/debug/sports_base` already serves the ESPN API paths. `EspnEndpoints.fromOverride` maps
@@ -1297,7 +1300,7 @@ from the final shapes and marked provisional.
 | m13 | A better clock reference | Fixed: `clockSkewMs`; board at its server date (§4.3) |
 | m14 | Unused `StatKind`s; the reducer is uncommitted; key order; catalog threads | Fixed: kinds cut (ruling 3); `tools/espn/reduce_summary.py`; "no code depends on key order"; catalog `synchronized`, no board writes (§5.3, §4.2, §8.1) |
 | Cut 1 | Clip-to-play linking | Cut (§15) |
-| Cut 2 | Catalog fill from the scoreboard source | Cut (§15) |
+| Cut 2 | Catalog fill from the scoreboard source | Cut (§15); brought back 2026-11-26 (§20) |
 | Cut 3 | Nudge and halftime hold | Cut (§15) |
 | Cut 4 | `ClipRendition` as a policy | Accepted as a constant pair, with a low-RAM cap of 720p30 (ruling 4) |
 | Cut 5 | Redact registration | Cut |
@@ -1384,7 +1387,6 @@ from the final shapes and marked provisional.
 | Item | Reason | To bring it back |
 |---|---|---|
 | Clip-to-scoring-play link (▶ on scoring rows) | Only ESPN-aired games have it (MNF: 3 of 10 scoring plays). It costs up to 16 record lookups per game, a budget, concurrency, per-game counters and `ClipInfo.playIds`, and the same clips already play from More videos. | After the live capture shows how often links exist: a `links(gameId, ids)` seam on `EspnClipResolver`, with the budget in the resolver only; declare `plays[].id` as `JsonElement` (a number in the record). |
-| Catalog fill from the scoreboard source | The board highlight needs only `GameMedia(recapId, recapExpiresMs)`; a miss costs one 2 KB lookup. Filling it would make the score actor depend on `:data` video code and churn the LRU. | Not planned. |
 | The score-change nudge and the half-time hold | Neither has an input path into the repository (arch M1); they save ~13 requests a game. | Repository input on every board snapshot, with back-off still winning. |
 | The repository's expiry re-publish | The VM's `offerTick` is the one mechanism (arch M7). | Not planned. |
 | Clip paths registered for log redaction | It evicts real secrets from the 64-entry transient LRU; the paths are public. Clip URLs are still logged as host only. | A static `Redact` pattern for `cmp-espn.media.dssott.com`, if ever wanted. |
@@ -1636,3 +1638,75 @@ frozen slots and Matchup sheet are as before; `:ui:sportsHashGate` proves the pi
 | m11 | The CHL final rules have their test back (no catch-up: three empty slots, `enterPanel` null; a catch-up airing: Watch from start alone); the NFL test renamed. Behaviour unchanged. | `SportsViewModelHubTest.aFinalChlGameOffersWatchFromStartOnlyWithACatchUpAiring` |
 | m12 | "Video k of n" counts the session's queue (PLAY entries, its index), falling back to the panel's list. | `NflSheetsReviewTest.videoKOfNComesFromTheQueue` |
 | #1 | Behind `HubLeagueUi`: `slotFor` (rows 2–4 and Matchup), `playableRecap` (1), `recapRef` / `recapGoneToast` (7), `offeredRef` (9), `videoKilled` with the one `videoOffLeagues` set the screen reads (10), `nextOfferChange` (11), the skew by `HubSource.ESPN` (12), `detailCarriesScore` (13), `cardHighlights` (14). `Ctx.nhl` deleted (6). Rows 5, 8, 15–17 deferred (§15). | every existing NHL / CHL / NFL test and golden hash |
+
+---
+
+## 20. Board highlight (fix 2026-11-26)
+
+### 20.1 Evidence (GB @ LAR, event 401873079, emulator against real ESPN, 30–60 min after the final)
+
+- The **scoreboard** entry carried the game's one full highlight: `competitions[0].highlights[0]` = 50601743, "Rams pick
+  up important home win over the Packers", 80 s, `coverageType` "Final Game Highlight".
+- The **summary**'s `videos[]` never listed it: only single plays (`OnePlay`; five in the 04:45Z capture). The FACTS note
+  ("the scoreboard's highlights[] holds only the final game highlight") was right that the lists differ; on MNF the
+  summary happened to hold the highlight as well. A Netflix game shows it may not.
+- The summary also listed no single play during the game (02:44Z and 03:34Z captures: `videos: []`), though the five
+  were published from 02:22Z on; they were listed only after the final.
+- On screen: the card chip and the panel's caption ("Game highlights", from the board's bare id) said a highlight was
+  there; slot 1 stayed ▶ From start and the Scoring sheet had no Game highlights row. Causes: the slot set frozen at
+  panel entry was never re-evaluated for a highlight that appeared later (`SportsViewModel.buildPanel`, the frozen
+  `fr.map { forAction }`); the board carried only an id and an expiry (`EspnMapper.highlight` → `GameMedia(recapId,
+  recapExpiresMs)`), so the highlight had no title, duration or picture, was in neither `GameDetail.clips` nor the
+  catalog, and could only play through a record lookup; and the repository's board snapshot was refreshed only on a
+  phase change, so its final wait ("re-read every 5 min until the highlight appears") never saw the board's highlight
+  and kept reading a summary that would never list it.
+
+### 20.2 The rule
+
+- **The board's highlight is a full entry.** `GameMedia.highlight: VideoEntry? = null` (appended): the same
+  `EspnVideoMapper` entry the summary's clips get (id, headline, duration, thumbnail, HLS URL, embargo, expiry, the
+  settop and https rules). `recapId` / `recapExpiresMs` are its id and expiry (unchanged for every reader). Like the
+  summary's clips (data #3), an entry under embargo is kept (`ClipOffer.listed` at the board's date) and only offered
+  once it lifts. Memory only: a `GameSnapshot` is never persisted, and `VideoEntry.toString` prints the id only.
+  Why on `GameMedia` rather than the score source writing the catalog: the board is the URL's only source, the snapshot
+  already reaches both the detail repository (which owns the catalog path) and the UI, the NHL and CHL are untouched by
+  a defaulted field, and only the **shown** game's highlight enters the catalog (no LRU churn from 16 board games, no
+  video dependency in the score actor). The cost: the HLS URL also lives in the in-memory snapshot (`EspnClipCatalog`'s
+  KDoc says so); the UI reads `.clip` only.
+- **One clip list.** `NflHighlight.clips` (`:core`, pure): the summary's selection ∪ the board's highlight, one entry per
+  id (the summary's wins, so a highlight the summary lists expired stays expired), every highlight first, then the
+  plays, ≤ `HUB_NFL_MAX_CLIPS`. The repository publishes it as `GameDetail.clips` (its cache keeps the summary's own)
+  and, on every `show()` of an NFL game with a highlight (video on), hands the entry to the catalog
+  (`EspnDetailSource.noteBoardHighlight`, https only unless the debug override). So `info()` stays catalog-only and
+  `stream()` plays it with no request; a catalog miss (trimmed) still has the record lookup, which serves a
+  board-only highlight like any other clip.
+- **One offered decision.** `NflHighlight.offered(game, detail, now + skew)`, through `NflHubUi.highlight`, decides
+  slot 1, the picture and caption, the card chip (the shown card is given the panel's detail), the Scoring sheet's Game
+  highlights row, WATCH_RECAP, the clip session's offer check, and the repository's `recapPosted`. A bare board id
+  without an entry (hand-built snapshots only) is still a highlight, without a title or picture.
+- **Re-evaluation in place.** `HubLeagueUi.slotSetKey` (NFL: on a final, whether a highlight is offered with video on).
+  A change while the set is frozen re-freezes it to the default set, as the phase change already did (§19 UI M1). On a
+  final only slot 1 changes meaning; focus keeps its slot index (the screen moves it only off a slot that is no longer
+  usable), so focus is never taken from Scoring or Box score, and a focused slot 1 stays focused. An open Scoring sheet
+  rebuilds its rows from the newer snapshot and keeps the focused row.
+- **The final wait.** The view model forwards every change of the shown game's board media to the repository
+  (`followPhase`: same game, same phase, new `media` → `show(game)`, no rest, no request by itself). `recapPosted` counts
+  the board's highlight, so the 2 h wait ends the moment the board lists it; only the 30 min single-play wait (§5.2) may
+  still re-read the summary.
+
+### 20.3 Tests and tools
+
+| What | Test |
+|---|---|
+| merge, dedupe, order, cap, offered, bare ids | `NflHighlightTest` |
+| board entry kept whole, embargoed kept, the GB @ LAR board (synthesized highlight) | `EspnMapperHubTest.boardHighlightBecomesTheMedia`, `evaluatedAtTheBoardsServerDate`, `theBoardOnlyHighlightOfGbAtLar_synthesizedBoard` |
+| the real final summary (five plays, no highlight) | `EspnDetailMapperTest.finalOfANetflixGameListsPlaysButNoHighlight` |
+| repository: clips ∪ board, catalog, the wait ends, kill switch | `GameDetailRepositoryNflTest.aHighlightOnlyOnTheBoardEndsTheWaitJoinsTheClipsAndTheCatalog`, `theKillSwitchKeepsTheBoardHighlightOut` |
+| catalog http rule; record fallback for a board-only id | `EspnDetailSourceTest.theBoardHighlightJoinsTheCatalogUnderTheHttpRule`, `EspnClipResolverTest.aBoardOnlyHighlightStreamsFromTheCatalogElseFromOneRecordLookup_synthesizedBoard` |
+| pipeline case `FINAL_BOARD_HIGHLIGHT` (`:data` and `:ui`) | `NflHubPipelineDataTest` (every case + `theBoardOnlyHighlightIsInTheClipsAndPlaysFromTheCatalog_synthesizedBoard`), `NflHubPipelineUiTest.finalWithTheHighlightOnTheBoardOnly` |
+| the four surfaces agree (2 × 2 × 3), in-place slot 1, sheet row, play, expiry | `NflBoardHighlightTest`, `NflSheetsReviewTest.aBoardHighlightAppearsInTheOpenSheetWithoutStealingFocus` |
+| fake panel `sports_nfl_clips = board_only` | `test_sports_video.test_board_only_lists_the_highlight_on_the_board_alone_and_its_record_answers` |
+
+The real final summary gives real single-play clips after a game, but it does not replace either provisional live
+fixture: `-2` (an in-game clip at halftime) and `-3` (a clip still under embargo) cover listings no capture has shown —
+the summary listed no clip during play, and real embargoes sit 2 s before publication, so none was ever seen embargoed.

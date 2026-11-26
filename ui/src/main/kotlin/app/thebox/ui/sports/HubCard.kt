@@ -139,6 +139,11 @@ internal fun HubCard(
     offerTick: Int = 0,
     /** (NFL hub §4.3, integration §18) The view model's ESPN skew: the chip's offer check runs at `now + skew`. */
     skewMs: Long = 0L,
+    /**
+     * (NFL hub §20) The panel's detail when this card's game is the one shown, else null: the chip asks the panel's own
+     * highlight question (a highlight the summary lists but the board does not lights it too).
+     */
+    detail: app.thebox.core.sports.hub.GameDetail? = null,
 ) {
     val res = LocalResources.current
     val g = card.game
@@ -210,7 +215,7 @@ internal fun HubCard(
                 TeamRow(g.home, home, league, 1, g.phase, winner, SPORTS_HOME_NAME_TAG + g.id.id, measure)
             }
             Spacer(Modifier.weight(1f))
-            BottomRow(pill, g.id.id, card.followed, showHighlights && cardHighlights(g, nowMs + skewMs))
+            BottomRow(pill, g.id.id, card.followed, showHighlights && cardHighlights(g, nowMs + (detail?.clockSkewMs ?: skewMs), detail))
         }
     }
 }
@@ -256,8 +261,8 @@ internal fun rememberHubMeasure(): Measure {
  * Whether the card's "● Highlights" chip lights (§1.2): the NHL with any board video; (NFL hub §2.1, §4.3) the NFL only
  * while the board's highlight is offered at [nowMs] (`ClipOffer`); the CHL never has one.
  */
-internal fun cardHighlights(g: app.thebox.core.sports.GameSnapshot, nowMs: Long): Boolean =
-    HubLeagues.of(g.id.league.group).cardHighlights(g, nowMs)
+internal fun cardHighlights(g: app.thebox.core.sports.GameSnapshot, nowMs: Long, detail: app.thebox.core.sports.hub.GameDetail? = null): Boolean =
+    HubLeagues.of(g.id.league.group).cardHighlights(g, detail, nowMs)
 
 /** The bottom row: the status pill, then at most one chip (§1.2); the chip is hidden when both do not fit, never the pill. */
 @Composable

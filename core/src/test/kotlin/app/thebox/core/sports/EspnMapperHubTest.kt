@@ -18,8 +18,9 @@ import kotlin.test.assertTrue
 
 /**
  * docs/design/m6-nfl-hub.md §2.5, §4.3, §5.1, §16 #18 (P1): the board's highlight → `GameMedia(recapId, recapExpiresMs)`
- * at the board's server date; expired, embargoed and non-settop highlights give none; an absent or wrong-shaped
- * `highlights` never fails the board; `delayed` from the status name.
+ * at the board's server date; expired and non-settop highlights give none; an absent or wrong-shaped `highlights` never
+ * fails the board; `delayed` from the status name. (§20) The whole entry is kept (`GameMedia.highlight`), and an
+ * embargoed highlight is kept (listed, not offered) as the summary's clips are.
  */
 class EspnMapperHubTest {
     private val logoBase = "https://a.espncdn.com/"
@@ -41,14 +42,44 @@ class EspnMapperHubTest {
     @Test fun boardHighlightBecomesTheMedia() {
         val b = board()
         assertEquals(2, b.games.size)
+        val pit = assertNotNull(game(b, pitPhi).media)
         assertEquals(
-            GameMedia(recapId = 50565318L, condensedId = null, goalClips = 0, recapExpiresMs = ms("2026-11-26T21:29:49Z")),
-            game(b, pitPhi).media,
+            GameMedia(recapId = 50565318L, condensedId = null, goalClips = 0, recapExpiresMs = ms("2026-11-26T21:29:49Z"), highlight = pit.highlight),
+            pit,
         )
+        val cin = assertNotNull(game(b, cinWsh).media)
         assertEquals(
-            GameMedia(recapId = 50579688L, condensedId = null, goalClips = 0, recapExpiresMs = ms("2026-11-26T04:32:10Z")),
-            game(b, cinWsh).media,
+            GameMedia(recapId = 50579688L, condensedId = null, goalClips = 0, recapExpiresMs = ms("2026-11-26T04:32:10Z"), highlight = cin.highlight),
+            cin,
         )
+        // (§20) The full entry: what the summary mapper would make of the same video object.
+        val e = assertNotNull(cin.highlight)
+        assertEquals("https://clips.invalid/50579688/playlist.m3u8", e.hlsUrl)
+        assertEquals(app.thebox.core.sports.hub.ClipKind.RECAP, e.clip.kind)
+        assertEquals("Commanders storm back, stun Bengals 22-20 on MNF", e.clip.title)
+        assertEquals(74_000L, e.clip.durationMs)
+        assertEquals(ms("2026-11-24T04:32:10Z"), e.clip.embargoMs)
+        assertEquals("https://img.invalid/50579688.jpg", e.clip.thumbUrl)
+        assertEquals("VideoEntry(50579688, RECAP)", e.toString(), "the URL is never printed")
+    }
+
+    /**
+     * (§20) GB @ LAR final (2026-11-26): the real board event with its highlight (**synthesized**: no saved board was
+     * captured after ESPN posted it) maps to a full, playable entry; the summary of that moment never listed it.
+     */
+    @Test fun theBoardOnlyHighlightOfGbAtLar_synthesizedBoard() {
+        val dto = NflHubFixtures.JSON.decodeFromString(EspnGameDto.serializer(), SportsFixtures.text(NflHubFixtures.BOARD_EVENT_FINAL_SYNTH))
+        val g = assertNotNull(EspnMapper.game(dto, GameId(League.NFL, "401873079"), ms("2026-11-26T05:48:01Z"), logoBase))
+        assertEquals(GamePhase.FINAL, g.phase)
+        val e = assertNotNull(g.media?.highlight)
+        assertEquals(50601743L, e.clip.videoId)
+        assertEquals("Rams pick up important home win over the Packers", e.clip.title)
+        assertEquals(80_000L, e.clip.durationMs)
+        assertEquals("https://clips.invalid/50601743/playlist.m3u8", e.hlsUrl)
+        assertEquals(50601743L, g.media?.recapId)
+        assertEquals(e.clip.expiresMs, g.media?.recapExpiresMs)
+        val summary = NflHubFixtures.summary(NflHubFixtures.FINAL_GB_LAR)
+        assertTrue(summary.videos.orEmpty().none { it.tracking?.coverageType == "Final Game Highlight" }, "the summary lists no highlight")
     }
 
     @Test fun theFollowSnapshotCarriesTheMediaToo() {
@@ -58,9 +89,11 @@ class EspnMapperHubTest {
     }
 
     @Test fun evaluatedAtTheBoardsServerDate() {
-        // Before the MNF highlight's embargo (04:32:10Z): only PIT @ PHI's is offered.
+        // Before the MNF highlight's embargo (04:32:10Z): (§20) kept, as the summary's clips are (data #3), with its
+        // embargo; every use checks ClipOffer.offered, so it is offered from the instant the embargo lifts.
         val early = board(at = ms("2026-11-24T04:00:00Z"))
-        assertNull(game(early, cinWsh).media, "embargoed")
+        val embargoed = assertNotNull(game(early, cinWsh).media?.highlight, "embargoed: listed")
+        assertTrue(!app.thebox.core.sports.hub.ClipOffer.offered(embargoed.clip.embargoMs, embargoed.clip.expiresMs, ms("2026-11-24T04:00:00Z")), "not offered")
         assertEquals(50565318L, game(early, pitPhi).media?.recapId)
         // Inside the 5 min margin of the MNF expiry, and past it.
         val late = board(at = ms("2026-11-26T04:28:00Z"))

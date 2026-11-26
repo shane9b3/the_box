@@ -83,7 +83,17 @@ object NflHubPipeline {
     /** MIA @ BUF final: ESPN posted no video ("J. Cook III" leads the rushers). */
     val NO_CLIP = Case("final, no clip", nfl("401873070"), SportsFixtures.text(NflHubFixtures.FINAL_MIA_BUF), at("2026-11-22T22:30:00Z"), at("2026-11-22T22:30:00Z"))
 
-    val CASES = listOf(PRE, LIVE, LIVE_HALFTIME, LIVE_HALFTIME_PROVISIONAL, FINAL_HIGHLIGHT, FINAL_EXPIRED, NO_CLIP)
+    /**
+     * (§20) GB @ LAR final, 50 min after ESPN posted the highlight: the **real** final summary (five OnePlay clips, no
+     * highlight) and the board event with its highlight (**synthesized**, see [NflHubFixtures.BOARD_EVENT_FINAL_SYNTH]).
+     * The highlight exists only on the board; the one clip list is the board's highlight then the five plays.
+     */
+    val FINAL_BOARD_HIGHLIGHT = Case(
+        "final, highlight on the board only", nfl("401873079"), SportsFixtures.text(NflHubFixtures.FINAL_GB_LAR), at("2026-11-26T05:48:00Z"), at("2026-11-26T05:48:01Z"),
+        boardEvent = SportsFixtures.text(NflHubFixtures.BOARD_EVENT_FINAL_SYNTH),
+    )
+
+    val CASES = listOf(PRE, LIVE, LIVE_HALFTIME, LIVE_HALFTIME_PROVISIONAL, FINAL_HIGHLIGHT, FINAL_EXPIRED, NO_CLIP, FINAL_BOARD_HIGHLIGHT)
 
     /**
      * The GB @ LAR pre-game with GB's (away) receiving leader renamed "A. St. Brown" and 14 more Out lines in GB's injury
@@ -121,8 +131,18 @@ object NflHubPipeline {
     private fun edited(body: String, edit: (JsonObject) -> JsonObject): String =
         edit(NflHubFixtures.JSON.parseToJsonElement(body).jsonObject).toString()
 
-    /** What `EspnDetailSource` hands the repository for [c] (see the class KDoc). */
+    /**
+     * What the repository publishes for [c] shown with [game] (see the class KDoc): `EspnDetailSource`'s answer, then
+     * (§20) its clips ∪ the board's highlight (`NflHighlight.clips`), as `GameDetailRepositoryImpl` publishes them.
+     */
     fun expected(c: Case, httpOk: Boolean = true): GameDetail? {
+        val dto = NflHubFixtures.JSON.decodeFromString(EspnSummaryDto.serializer(), c.body)
+        val d = EspnDetailMapper.detail(dto, c.id, c.wallMs + c.skewMs, httpOk)?.copy(clockSkewMs = c.skewMs, serverDateMs = c.serverDateMs) ?: return null
+        return d.copy(clips = NflHighlight.clips(d.clips, game(c).media?.highlight?.clip))
+    }
+
+    /** What `EspnDetailSource` alone answers for [c] (the summary's own clips, before the repository's merge). */
+    fun sourceDetail(c: Case, httpOk: Boolean = true): GameDetail? {
         val dto = NflHubFixtures.JSON.decodeFromString(EspnSummaryDto.serializer(), c.body)
         return EspnDetailMapper.detail(dto, c.id, c.wallMs + c.skewMs, httpOk)?.copy(clockSkewMs = c.skewMs, serverDateMs = c.serverDateMs)
     }

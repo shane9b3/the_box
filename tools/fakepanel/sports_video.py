@@ -42,7 +42,9 @@ Which games list clips (the summary's `videos[]`, the board's `highlights[]`, th
   OnePlay clips; `single` the highlight only; `none`; `expired` the highlight with `expirationDate` 1 h ago; `expiring` 2 min
   from now (inside the app's 5 min margin: never offered); `gone` all four listed, but the media answer 403 (the player's
   CLIP_EXPIRED, so the app makes its one fresh record lookup) and the record 404 (the "ESPN removed this video" toast);
-  `slow_records` all four, records answering after 8 s.
+  `slow_records` all four, records answering after 8 s; `board_only` (NFL hub section 20) all four, but the summary's
+  `videos[]` leaves the highlight out (the three OnePlay clips only): only the board's `highlights[]` lists it, and its
+  record answers (as ESPN for GB @ LAR, 2026-11-26).
 - 401898001 (DEN @ SEA, week 8, final): always one highlight that expired 1 h ago.
 - every other game (the featured live game included, also after its end): none.
 Valid clips are posted 3 h before the NFL slate's anchor and expire 72 h after it.
@@ -353,6 +355,8 @@ ESPN_MEDIA_PREFIX = "/espn-media/"
 ESPN_CLIP_GAME = "401899003"
 ESPN_EXPIRED_GAME = "401898001"
 ESPN_GONE_MODE = "gone"
+# (NFL hub section 20) The highlight is listed on the board only, never in the summary.
+ESPN_BOARD_ONLY_MODE = "board_only"
 ESPN_SLOW_RECORD_S = 8.0
 ESPN_DEVICES = ["settop", "tablet", "handset", "ipad", "desktop"]
 # (variant, width, height, frame rate, bandwidth, panel clip)
@@ -412,8 +416,10 @@ def espn_video(base, eid, spec):
 
 
 def espn_videos(h, eid):
-    """The summary's `videos[]` of game [eid] (empty for most games)."""
-    return [espn_video(h.base(), eid, sp) for sp in espn_clip_specs(h.panel, eid)]
+    """The summary's `videos[]` of game [eid] (empty for most games); `board_only`: without the highlight."""
+    board_only = h.panel.cfg.get("sports_nfl_clips", "espn") == ESPN_BOARD_ONLY_MODE and eid == ESPN_CLIP_GAME
+    return [espn_video(h.base(), eid, sp) for sp in espn_clip_specs(h.panel, eid)
+            if not (board_only and sp[1] == "Final Game Highlight")]
 
 
 def espn_highlights(panel, eid, base):

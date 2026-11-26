@@ -19,6 +19,7 @@ import app.thebox.core.sports.hub.ClipRef
 import app.thebox.core.sports.hub.EspnDetailMapper
 import app.thebox.core.sports.hub.GameClip
 import app.thebox.core.sports.hub.GameDetail
+import app.thebox.core.sports.hub.NflHighlight
 import app.thebox.core.sports.hub.PlayScore
 import app.thebox.core.sports.hub.ScoringPlay
 import app.thebox.core.sports.hub.StatKind
@@ -58,7 +59,18 @@ internal object NflHubUi : HubLeagueUi {
     /** (UI m3) "ESPN removed this video; …" (§3.4). */
     override val recapGoneToast: HubToastKind get() = HubToastKind.VIDEO_EXPIRED
 
-    override fun cardHighlights(game: GameSnapshot, nowMs: Long): Boolean = game.media != null && highlight(game, null, nowMs) != null
+    /**
+     * (§20) The chip asks the panel's own question ([highlight]): the board's highlight, and for the shown game also its
+     * detail's clips ([detail], the screen passes it for that card only), at [nowMs] (already `now + skew`).
+     */
+    override fun cardHighlights(game: GameSnapshot, detail: GameDetail?, nowMs: Long): Boolean = highlight(game, detail, nowMs) != null
+
+    /**
+     * (§20) Whether a highlight is offered now (video on): a change while the slot set is frozen re-freezes it, so slot 1
+     * turns into ▶ Highlights the moment the highlight appears (board or summary), and back when it expires. Finals only
+     * (no other phase's set has a highlight slot).
+     */
+    override fun slotSetKey(c: HubSlots.Ctx): Any? = if (c.final) !c.videoOff && highlight(c.game, c.detail, offerNow(c.nowMs, c.detail)) != null else null
 
     override val videoKilled: Boolean get() = !SportsConstants.ESPN_VIDEO_ENABLED
 
@@ -349,19 +361,18 @@ internal object NflHubUi : HubLeagueUi {
     /** The reference instant of every offer check: the wall clock plus the detail's server skew (§4.3). */
     internal fun offerNow(nowMs: Long, d: GameDetail?): Long = nowMs + (d?.clockSkewMs ?: 0L)
 
-    /** The game highlight offered now: the detail's RECAP clip, else the board's highlight (§4.3). */
+    /** The game highlight offered now (§4.3, §20). [clip] carries its title, duration and thumbnail when a source gave them. */
     internal data class Highlight(val videoId: Long, val clip: GameClip?)
 
-    internal fun highlight(g: GameSnapshot, d: GameDetail?, offerNowMs: Long): Highlight? {
-        d?.clips?.firstOrNull { it.kind == ClipKind.RECAP && offered(it, offerNowMs) }?.let { return Highlight(it.videoId, it) }
-        val media = g.media ?: return null
-        val id = media.recapId ?: return null
-        // A board highlight the detail lists as expired is not offered either.
-        if (d?.clips?.any { it.videoId == id && !offered(it, offerNowMs) } == true) return null
-        val exp = media.recapExpiresMs
-        // (P3 note) The mapper sets the board's expiry with every highlight; a missing one is trusted as offered.
-        return if (exp == null || ClipOffer.offered(null, exp, offerNowMs)) Highlight(id, null) else null
-    }
+    /**
+     * (§20) **The** offered-highlight decision of every NFL surface: slot 1 ([highlightSlot]), the picture and its caption
+     * ([media]), the card chip ([cardHighlights]), the Scoring sheet's "Game highlights" row ([scoringRows]), WATCH_RECAP
+     * ([recapRef]) and the slot-set key ([slotSetKey]). It is `NflHighlight.offered` over the detail's clips ∪ the
+     * board's highlight, the rule the repository's final wait uses too. A board highlight the detail lists as expired is
+     * not offered (the detail's entry wins). A board id without an entry (hand-built snapshots) has no title or picture.
+     */
+    internal fun highlight(g: GameSnapshot, d: GameDetail?, offerNowMs: Long): Highlight? =
+        NflHighlight.offered(g, d, offerNowMs)?.let { Highlight(it.videoId, it) }
 
     internal fun offered(c: GameClip, offerNowMs: Long): Boolean = ClipOffer.offered(c.embargoMs, c.expiresMs, offerNowMs)
 
@@ -374,8 +385,9 @@ internal object NflHubUi : HubLeagueUi {
         val g = game
         val d = detail
         val at = offerNow(nowMs, d)
-        d?.clips?.firstOrNull { it.videoId == ref.videoId }?.let { return offered(it, at) }
-        if (g != null && g.media?.recapId == ref.videoId) return highlight(g, d, at)?.videoId == ref.videoId
+        // (§20) The same list the panel offers from: the detail's clips ∪ the board's highlight.
+        val clips = if (g != null) NflHighlight.clips(g, d) else d?.clips.orEmpty()
+        clips.firstOrNull { it.videoId == ref.videoId }?.let { return offered(it, at) }
         return true
     }
 
@@ -390,10 +402,10 @@ internal object NflHubUi : HubLeagueUi {
         val d = detail
         val skew = skewMs
         val at = nowMs + skew
-        val fromClips = d?.clips.orEmpty().mapNotNull { ClipOffer.changesAt(it.embargoMs, it.expiresMs, at) }
-        val fromBoard = g.media?.recapExpiresMs?.let { ClipOffer.changesAt(null, it, at) }
+        // (§20) Every clip of the one list (the detail's ∪ the board's highlight); a board id without an expiry never changes.
+        val fromClips = NflHighlight.clips(g, d).filter { it.expiresMs != Long.MAX_VALUE }.mapNotNull { ClipOffer.changesAt(it.embargoMs, it.expiresMs, at) }
         // Back from the reference clock to the wall clock the view model waits on.
-        val offers = (fromClips + listOfNotNull(fromBoard)).map { it - skew }
+        val offers = fromClips.map { it - skew }
         val windows = if (g.phase == GamePhase.FINAL && highlight(g, d, at) == null) {
             val ended = g.startUtcMs + SportsConstants.HUB_NFL_GAME_LENGTH_MS
             listOf(ended + SportsConstants.HUB_NFL_HIGHLIGHT_WAIT_MS, ended + SportsConstants.HUB_CLIP_DEFAULT_LIFE_MS).filter { it > nowMs }
@@ -416,9 +428,7 @@ internal object NflHubUi : HubLeagueUi {
      */
     private fun anyExpired(g: GameSnapshot, d: GameDetail?, nowMs: Long): Boolean {
         val at = offerNow(nowMs, d)
-        if (d?.clips?.any { it.kind == ClipKind.RECAP && !ClipOffer.listed(it.expiresMs, at) } == true) return true
-        val media = g.media ?: return false
-        return media.recapId != null && media.recapExpiresMs != null && !ClipOffer.offered(null, media.recapExpiresMs!!, at)
+        return NflHighlight.clips(g, d).any { it.kind == ClipKind.RECAP && !ClipOffer.listed(it.expiresMs, at) }
     }
 
     /** The reason caption (§2.4) of a final without an offered highlight: soon, didn't post, removed, or video off. */

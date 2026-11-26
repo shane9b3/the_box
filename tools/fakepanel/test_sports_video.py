@@ -286,6 +286,27 @@ class EspnVideoCase(unittest.TestCase):
         self.assertEqual(403, self.raw(self.path_of(v["links"]["source"]["HLS"]["href"]))[0])
         self.assertEqual(404, self.record(v["id"])[0])
 
+    def test_board_only_lists_the_highlight_on_the_board_alone_and_its_record_answers(self):
+        # (NFL hub section 20, GB @ LAR 2026-11-26) The summary lists the single plays only; the board the highlight.
+        self.panel.cfg["sports_nfl_clips"] = "board_only"
+        v = self.summary_videos()
+        self.assertEqual(["OnePlay"] * 3, [x["tracking"]["coverageType"] for x in v])
+        st, _, body = self.raw("/apis/site/v2/sports/football/nfl/scoreboard")
+        self.assertEqual(200, st)
+        ev = next(e for e in json.loads(body)["events"] if e["id"] == "401899003")
+        hl = ev["competitions"][0]["highlights"]
+        self.assertEqual(["Final Game Highlight"], [x["tracking"]["coverageType"] for x in hl])
+        cid = hl[0]["id"]
+        self.assertEqual(sports_video.espn_clip_id("401899003", 0), cid)
+        self.assertNotIn(cid, [x["id"] for x in v])
+        st, rec = self.record(cid)
+        self.assertEqual(200, st, "the record lookup (the app's catalog-miss fallback) finds it")
+        self.assertEqual("Final Game Highlight", rec["videos"][0]["tracking"]["coverageType"])
+        self.assertEqual(200, self.raw(self.path_of(hl[0]["links"]["source"]["HLS"]["href"]))[0], "and its media plays")
+        self.panel.cfg["sports_nfl_clips"] = "espn"
+        self.assertEqual("Final Game Highlight", self.summary_videos()[0]["tracking"]["coverageType"], "espn: in both")
+        self.assertIn("board_only", fakepanel.NFL_CLIP_MODES)
+
     def test_slow_records_answer_late(self):
         self.panel.cfg["sports_nfl_clips"] = "slow_records"
         cid = self.summary_videos()[0]["id"]

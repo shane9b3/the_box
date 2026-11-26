@@ -18,6 +18,8 @@ import app.thebox.data.sports.EspnHubTestSupport.json
 import app.thebox.data.sports.EspnHubTestSupport.text
 import app.thebox.data.sports.EspnHubTestSupport.wafChallenge
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -130,6 +132,35 @@ class EspnClipResolverTest {
         runBlocking { r.stream(burrow) }
         assertEquals(1, requests.size)
         assertTrue(runBlocking { r.info(burrow) } is ClipResult.Ok)
+    }
+
+    /**
+     * (§20) GB @ LAR's highlight, listed on the board only: put by the repository from the board's entry it streams with
+     * no request; when the catalog lacks it (trimmed, or the board never reached the repository) the one record lookup
+     * (`…/video/clips/{id}`) finds a Final Game Highlight and plays it.
+     */
+    @Test fun aBoardOnlyHighlightStreamsFromTheCatalogElseFromOneRecordLookup_synthesizedBoard() {
+        wall = Instant.parse("2026-11-26T05:48:00Z").toEpochMilli()
+        val video = NflHubFixtures.JSON.parseToJsonElement(text(NflHubFixtures.BOARD_EVENT_FINAL_SYNTH))
+            .jsonObject["events"]!!.jsonArray[0].jsonObject["competitions"]!!.jsonArray[0].jsonObject["highlights"]!!.jsonArray[0]
+        val dto = NflHubFixtures.JSON.decodeFromJsonElement(app.thebox.core.sports.hub.EspnVideoDto.serializer(), video)
+        val ref = ClipRef(50601743L, ClipKind.RECAP, GameId(League.NFL, "401873079"))
+        answer = { json("{\"videos\":[$video]}") }
+        // The record path: a catalog miss, one lookup.
+        val (info, stream) = (runBlocking { resolver().stream(ref) } as ClipResult.Ok).value
+        assertEquals("https://clips.invalid/50601743/playlist.m3u8", stream.url)
+        assertEquals("Rams pick up important home win over the Packers", info.title)
+        assertEquals(80_000L, info.durationMs)
+        assertEquals(1, requests.size)
+        assertEquals("/espn-core/v1/video/clips/50601743", requests.single().url.encodedPath)
+        // The catalog path: the board's entry, put as the repository does; info and stream make no request.
+        val fresh = EspnClipCatalog()
+        fresh.put(listOf(EspnVideoMapper.entry(dto, null, httpOk = false)!!))
+        requests.clear()
+        val r2 = EspnClipResolver(OkHttpClient.Builder().build(), mono, endpoints = { EspnEndpoints.fromOverride(server.url("/").toString())!! }, catalog = fresh, wallNow = { wall })
+        assertTrue(runBlocking { r2.info(ref) } is ClipResult.Ok)
+        assertTrue(runBlocking { r2.stream(ref) } is ClipResult.Ok)
+        assertTrue("no request", requests.isEmpty())
     }
 
     // ---------------------------------------------------------------- fresh (arch M3)

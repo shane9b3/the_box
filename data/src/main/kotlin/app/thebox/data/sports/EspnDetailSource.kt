@@ -144,6 +144,16 @@ class EspnDetailSource internal constructor(
         }
     }
 
+    /**
+     * (§20) The shown game's board highlight (`GameMedia.highlight`) into the catalog, so it plays like a summary clip
+     * (no record lookup) even when the summary never lists it. The http rule fails closed here too: plain-http media only
+     * from the debug override (the board mapper already applies its half of the rule).
+     */
+    internal fun noteBoardHighlight(entry: VideoEntry) {
+        val url = entry.hlsUrl
+        if (url.startsWith("https://", ignoreCase = true) || (httpOk && url.startsWith("http://", ignoreCase = true))) catalog.put(listOf(entry))
+    }
+
     /** (§5.4) `onTrimMemory`: the catalog, except the clip last handed to the player. */
     internal fun trimMemory() = catalog.trimToServed()
 
