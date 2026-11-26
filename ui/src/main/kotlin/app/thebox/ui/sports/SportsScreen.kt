@@ -706,6 +706,7 @@ private fun GamesGrid(
                 measure = measure,
                 offerTick = offerTick,
                 skewMs = espnSkewMs,
+                detail = panel.detail?.takeIf { panel.game?.id == card.game.id && it.id == card.game.id },
                 // Up from the first row goes to the selected day chip, whichever column it is in (§2.2).
                 modifier = Modifier.focusProperties { if (index < 2) up = dayChip },
             )

@@ -5,6 +5,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
@@ -181,6 +182,32 @@ class NflSheetsReviewTest {
         assertEquals("the one that moved up", 1, scoringNeighbour(left, 1))
         assertNull("no focused row: the frame's default", scoringNeighbour(left, -1))
         assertNull(scoringNeighbour(listOf(ScoringRow.Info("x")), 0))
+    }
+
+    /**
+     * (NFL hub §20) The highlight appears on the board while the Scoring sheet is open (GB @ LAR: the summary never lists
+     * it): the Game highlights row is added in place and the focused row keeps focus.
+     */
+    @Test fun aBoardHighlightAppearsInTheOpenSheetWithoutStealingFocus() {
+        val g0 = NflHubTestKit.mnfFinal()
+        val at = NflHubTestKit.AFTER_FINAL
+        val d = NflHubTestKit.mnfFinalDetail(g0, clips = NflHubTestKit.PLAY_CLIPS)
+        val clip = app.thebox.core.sports.hub.GameClip(
+            50601743L, app.thebox.core.sports.hub.ClipKind.RECAP, "Rams pick up important home win over the Packers", 80_000L, at - 60_000L, at - 62_000L,
+            at + 86_400_000L, "https://img.invalid/50601743.jpg",
+        )
+        val g1 = g0.copy(media = app.thebox.core.sports.GameMedia(clip.videoId, null, 0, clip.expiresMs, app.thebox.core.sports.hub.VideoEntry(clip, "https://clips.invalid/50601743/playlist.m3u8")))
+        val game = androidx.compose.runtime.mutableStateOf(g0)
+        rule.setContent {
+            BoxTheme { GoalsSheet(game.value, d, emptyMap(), emptyList(), 50578740L, onPlay = { _, _ -> }, onPlayArchive = {}, onMissingClip = {}, onClose = {}, nowMs = at) }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("video:PLAY:50578740"), useUnmergedTree = true).assertIsFocused()
+        assertEquals(0, rule.onAllNodesWithTag(hubSheetRowTag("video:RECAP:50601743"), useUnmergedTree = true).fetchSemanticsNodes().size)
+        game.value = g1
+        rule.waitForIdle()
+        assertEquals(1, rule.onAllNodesWithTag(hubSheetRowTag("video:RECAP:50601743"), useUnmergedTree = true).fetchSemanticsNodes().size)
+        rule.onNodeWithTag(hubSheetRowTag("video:PLAY:50578740"), useUnmergedTree = true).assertIsFocused()
     }
 
     /** (m12) "Video k of n" counts the session's queue, so a skipped (expired) entry never shifts the numbers. */

@@ -15,7 +15,6 @@ import app.thebox.core.sports.League
 import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.hub.BoxScore
 import app.thebox.core.sports.hub.ClipKind
-import app.thebox.core.sports.hub.ClipOffer
 import app.thebox.core.sports.hub.DetailCadence
 import app.thebox.core.sports.hub.DetailPollPolicy
 import app.thebox.core.sports.hub.DetailPollPolicy.DetailGate
@@ -23,6 +22,8 @@ import app.thebox.core.sports.hub.DetailState
 import app.thebox.core.sports.hub.FinalFacts
 import app.thebox.core.sports.hub.GameDetail
 import app.thebox.core.sports.hub.GameDetailRepository
+import app.thebox.core.sports.hub.NflHighlight
+import app.thebox.core.sports.hub.VideoEntry
 import app.thebox.data.di.ApplicationScope
 import app.thebox.data.di.WallClock
 import kotlinx.coroutines.CompletableDeferred
@@ -112,6 +113,11 @@ class GameDetailRepositoryImpl internal constructor(
     private val onTrim: () -> Unit = {},
     /** (NFL hub code review 2026-11-26, data #6) `SportsConstants.ESPN_VIDEO_ENABLED`: off, no NFL final waits for a video. */
     private val espnVideo: Boolean = SportsConstants.ESPN_VIDEO_ENABLED,
+    /**
+     * (NFL hub §20) The shown NFL game's board highlight, handed to the clip catalog (`EspnDetailSource.noteBoardHighlight`)
+     * so `info()` stays catalog-only and `stream()` plays it without a record lookup, even when the summary never lists it.
+     */
+    private val onBoardHighlight: (VideoEntry) -> Unit = {},
 ) : GameDetailRepository {
     /** (NFL hub) Built with both sources; [DetailFetcher.of] routes by league. */
     @Inject constructor(
@@ -125,6 +131,7 @@ class GameDetailRepositoryImpl internal constructor(
     ) : this(
         DetailFetcher.of(source, espn), store, awake.orElse(DeviceAwake.ALWAYS), signals, scope, ScoreRepositoryImpl.ELAPSED, wall::now,
         onTrim = espn::trimMemory,
+        onBoardHighlight = espn::noteBoardHighlight,
     )
 
     private sealed interface Input {
@@ -370,6 +377,9 @@ class GameDetailRepositoryImpl internal constructor(
         val was = shown
         shown = game
         if (game != null) noteEnd(game)
+        // (NFL hub §20) The board's highlight joins the catalog the resolver plays from (a newer snapshot of the shown game
+        // comes here too: the view model forwards every change of its board media).
+        if (game != null && game.id.league == League.NFL && espnVideo) game.media?.highlight?.let(onBoardHighlight)
         if (game?.id == was?.id) {
             // The same game again: a newer board snapshot (its phase), or OK entering the panel during the rest.
             if (game != null && dwellUntil != null) dwellUntil = null
@@ -576,7 +586,7 @@ class GameDetailRepositoryImpl internal constructor(
             entry != null -> {
                 val phase = phase(game, entry)
                 DetailState.Ready(
-                    detail = entry.ok.value,
+                    detail = published(game, entry.ok.value),
                     fetchedAtMono = entry.ok.receivedMono,
                     failing = failures > 0 || entry.landingFailed || !isOnline,
                     stale = DetailPollPolicy.isStale(cadence(game.id.league), entry.ok.receivedMono, phase, finalFacts(game, entry), now),
@@ -586,6 +596,16 @@ class GameDetailRepositoryImpl internal constructor(
             kind != null && failures > 0 -> DetailState.Failed(game.id, kind)
             else -> DetailState.Loading(game.id)
         }
+    }
+
+    /**
+     * (NFL hub §20) What the panel is given: the NFL detail's clips ∪ the board's highlight (`NflHighlight.clips`), so a
+     * highlight ESPN lists only on the scoreboard is in the shown game's one clip list. The cache keeps the summary's own.
+     */
+    private fun published(game: GameSnapshot, d: GameDetail): GameDetail {
+        if (game.id.league != League.NFL || !espnVideo) return d
+        val merged = NflHighlight.clips(d.clips, game.media?.highlight?.clip)
+        return if (merged === d.clips) d else d.copy(clips = merged)
     }
 
     private fun nextWake(now: Long): Long? {
@@ -611,9 +631,11 @@ class GameDetailRepositoryImpl internal constructor(
         DetailPollPolicy.effectivePhase(game.phase, entry?.ok?.value?.fetchedPhase)
 
     /**
-     * The NHL: a recap id in the detail or on the board. (NFL hub §4.3, §5.2) The NFL: a RECAP clip in the detail, or the
-     * board's highlight, **offered** at `now + skew` (`ClipOffer`; an expired highlight is not "posted"; the NFL detail
-     * never sets `recapId`).
+     * The NHL: a recap id in the detail or on the board. (NFL hub §4.3, §5.2, §20) The NFL: the highlight the UI offers,
+     * `NflHighlight.offered` over the detail's clips ∪ the board's highlight at `now + skew` (an expired highlight is not
+     * "posted"; the NFL detail never sets `recapId`). A highlight on the board alone counts, so the final wait never
+     * re-reads the summary for a highlight the summary may never list. [game] is the newest board snapshot: the view
+     * model forwards every change of the shown game's board media ([show]).
      */
     private fun recapPosted(game: GameSnapshot, entry: Entry?): Boolean {
         val d = entry?.ok?.value
@@ -621,10 +643,7 @@ class GameDetailRepositoryImpl internal constructor(
         // (Code review 2026-11-26, data #6) The kill switch: the app offers no ESPN video, so there is nothing to wait for.
         if (!espnVideo) return true
         val at = wallNow() + (d?.clockSkewMs ?: 0L)
-        if (d != null && d.clips.any { it.kind == ClipKind.RECAP && ClipOffer.offered(it.embargoMs, it.expiresMs, at) }) return true
-        val m = game.media ?: return false
-        m.recapId ?: return false
-        return m.recapExpiresMs?.let { ClipOffer.offered(null, it, at) } ?: true
+        return NflHighlight.offered(game, d, at) != null
     }
 
     /** The policy's FINAL facts; (NFL hub §5.2) [FinalFacts.playClips]: the NFL detail lists a PLAY clip. */

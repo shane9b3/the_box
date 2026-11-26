@@ -45,6 +45,18 @@ object NflHubFixtures {
     const val BOARD_EVENT_HALF = DIR + "scoreboard-event-half-401873079.json"
     /** The board's own event (`scoreboard/{id}`, wrapped as `{events: [ … ]}`) at the same instant as [LIVE_GB_LAR_1]. */
     const val BOARD_EVENT_LIVE = DIR + "scoreboard-event-live-401873079.json"
+    /**
+     * (§20) GB @ LAR after the final, **real** summary (the 2026-11-26T04:45Z capture, `STATUS_FINAL`): five OnePlay clips
+     * and **no** Final Game Highlight. The first real single-play clips after a game.
+     */
+    const val FINAL_GB_LAR = DIR + "summary-final-401873079.json"
+    /**
+     * (§20) The board's own event for GB @ LAR final: the real 04:45Z capture (week board reduced to the event) plus a
+     * **synthesized** `highlights[]` entry (none of the saved boards was captured after ESPN posted it), shaped exactly as
+     * week 11's, with the id, headline and duration the emulator showed (50601743, "Rams pick up important home win over
+     * the Packers", 80 s) and `.invalid` hosts.
+     */
+    const val BOARD_EVENT_FINAL_SYNTH = DIR + "scoreboard-event-final-401873079.json"
 
     val SUMMARIES = listOf(FINAL_MIA_BUF, FINAL_PIT_PHI, FINAL_MNF, FINAL_SAFETY, FINAL_DEF_TD, PRE_GB_LAR)
 

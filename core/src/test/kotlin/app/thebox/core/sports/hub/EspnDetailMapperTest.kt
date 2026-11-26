@@ -497,6 +497,27 @@ class EspnDetailMapperTest {
         assertNull(sacks.home)
     }
 
+    /**
+     * (§20) GB @ LAR final, the **real** 04:45Z capture: five single-play clips (published during the game, 02:22Z to
+     * 04:31Z, but listed by the summary only after it; the 02:44Z and 03:34Z captures listed none), and no Final Game
+     * Highlight: ESPN put that on the scoreboard only.
+     */
+    @Test fun finalOfANetflixGameListsPlaysButNoHighlight() {
+        val d = assertNotNull(EspnDetailMapper.detail(NflHubFixtures.summary(NflHubFixtures.FINAL_GB_LAR), id("401873079"), ms("2026-11-26T05:48:01Z")))
+        assertEquals(GamePhase.FINAL, d.fetchedPhase)
+        assertEquals(9, d.plays.size)
+        assertEquals(13 to 26, d.plays.last().away to d.plays.last().home)
+        assertEquals("SoFi Stadium", d.venue)
+        assertEquals("Blake Corum leads Rams' dominant rushing attack in their 5th straight win, 26-13 over Packers", d.recapHeadline)
+        assertEquals(listOf(50600428L, 50600543L, 50601135L, 50601318L, 50601532L), d.clips.map { it.videoId })
+        assertTrue(d.clips.all { it.kind == ClipKind.PLAY })
+        assertEquals("Kyren Williams walks in for a Rams TD", d.clips.first().title)
+        assertEquals(24_000L, d.clips.first().durationMs)
+        // Real embargoes sit 2 s before publication: listed only once lifted (no capture has shown one still embargoed).
+        assertEquals(ms("2026-11-26T02:22:22Z"), d.clips.first().embargoMs)
+        assertEquals(ms("2026-11-28T02:22:22Z"), d.clips.first().expiresMs)
+    }
+
     @Test fun liveHalftimeWithAnInGameClip_provisional() {
         val d = live(2)
         assertEquals(GamePhase.INTERMISSION, d.fetchedPhase)

@@ -200,6 +200,27 @@ class NflHubPipelineUiTest {
         assertEquals(3, away.count { it is BoxRow.Table })
     }
 
+    /**
+     * (§20) GB @ LAR final: the real summary lists five single plays and no highlight; the board (synthesized highlight)
+     * lists it. Slot 1, the poster, the card chip and the Scoring sheet all offer the board's highlight.
+     */
+    @Test fun finalWithTheHighlightOnTheBoardOnly() {
+        val r = run(NflHubPipeline.FINAL_BOARD_HIGHLIGHT)
+        val m = r.vm.panel.value
+        assertEquals(SlotLabel.HIGHLIGHTS, m.slots[0].label)
+        assertTrue(m.slots[0].usable)
+        assertEquals(9, m.slots[1].count)
+        val poster = content(r).media as MediaSpec.Poster
+        assertEquals(50601743L, poster.videoId)
+        assertEquals(s(R.string.sports_hub_caption_highlights, "1:20"), poster.caption)
+        assertTrue(cardHighlights(r.game, m.nowMs + r.detail.clockSkewMs, r.detail))
+        assertTrue("the board alone lights the chip too", cardHighlights(r.game, m.nowMs + r.detail.clockSkewMs))
+        val videos = scoring(r).filterIsInstance<ScoringRow.Video>()
+        assertEquals(listOf(50601743L, 50600428L, 50600543L, 50601135L, 50601318L, 50601532L), videos.map { it.ref.videoId })
+        assertEquals(ClipKind.RECAP, videos.first().ref.kind)
+        assertEquals(s(R.string.sports_hub_row_game_highlights), videos.first().label)
+    }
+
     @Test fun finalWhoseHighlightExpired() {
         val r = run(NflHubPipeline.FINAL_EXPIRED)
         val m = r.vm.panel.value

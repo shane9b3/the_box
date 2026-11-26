@@ -17,6 +17,7 @@ import app.thebox.core.sports.DemandOwner
 import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.Fetch
 import app.thebox.core.sports.GameId
+import app.thebox.core.sports.GameMedia
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
@@ -274,6 +275,8 @@ class SportsViewModel internal constructor(
     private val frozen = MutableStateFlow<List<SlotAction?>?>(null)
     /** (Code review 2026-11-26, UI M1) The game's phase when [frozen] was taken. */
     private var frozenPhase: GamePhase? = null
+    /** (NFL hub §20) The league's `HubLeagueUi.slotSetKey` when [frozen] was taken (the NFL: a final's highlight offered). */
+    private var frozenKey: Any? = null
     private val matches = MutableStateFlow<Map<String, MatchState>>(emptyMap())
     private val clipInfos = MutableStateFlow<Map<Long, ClipInfo>>(emptyMap())
     /**
@@ -326,6 +329,8 @@ class SportsViewModel internal constructor(
     private var matchJob: Job? = null
     private var fetchedId: String? = null
     private var fetchedPhase: GamePhase? = null
+    /** (NFL hub §20) The board media of the snapshot last given to the repository. */
+    private var fetchedMedia: GameMedia? = null
     private val infoRequested = HashSet<Long>()
     private val videoOffJobs = HashMap<LeagueGroup, Job>()
     private var entered = false
@@ -688,6 +693,7 @@ class SportsViewModel internal constructor(
         val first = _panel.value.firstEnabled ?: return null
         enteredId = game.id
         frozenPhase = _panel.value.game?.phase
+        frozenKey = _panel.value.game?.let { HubLeagues.of(it.id.league.group).slotSetKey(ctxOf(_panel.value)) }
         frozen.value = _panel.value.slots.map { it.action }
         panelFocus.value = true
         refreshPanel()
@@ -699,6 +705,7 @@ class SportsViewModel internal constructor(
         enteredId = null
         panelFocus.value = false
         frozenPhase = null
+        frozenKey = null
         frozen.value = null
     }
 
@@ -880,6 +887,7 @@ class SportsViewModel internal constructor(
             if (!immediate) delay(SportsConstants.HUB_FETCH_DWELL_MS)
             fetchedId = game.id.id
             fetchedPhase = game.phase
+            fetchedMedia = game.media
             showNow(game)
             startMatch(game)
             ensureClipInfos()
@@ -918,8 +926,18 @@ class SportsViewModel internal constructor(
      * games match differently). The previous answer stays on screen until the new one arrives.
      */
     private fun followPhase(game: GameSnapshot) {
-        if (fetchedId != game.id.id || fetchedPhase == null || fetchedPhase == game.phase) return
+        if (fetchedId != game.id.id || fetchedPhase == null) return
+        if (fetchedPhase == game.phase) {
+            // (NFL hub §20) The board's video facts changed (its highlight appeared, or went): the repository gets the newer
+            // snapshot (no rest, no new request by itself), so its clip list, catalog and final wait see the board highlight.
+            if (game.media != fetchedMedia) {
+                fetchedMedia = game.media
+                detail?.show(game)
+            }
+            return
+        }
         fetchedPhase = game.phase
+        fetchedMedia = game.media
         detail?.show(game)
         val m = matcher ?: return
         if (game.phase == GamePhase.POSTPONED) return
@@ -1063,10 +1081,16 @@ class SportsViewModel internal constructor(
         val fr = frozen.value
         // (Code review 2026-11-26, UI M1) A league that re-freezes at a phase change (the NFL: a pre-game set's Matchup
         // becomes Scoring at kick-off) takes the new phase's default set, frozen again from here.
-        val refreeze = panelFocus.value && fr != null && ui.refreezeOnPhaseChange && frozenPhase?.let { phaseGroup(it) != phaseGroup(g.phase) } == true
+        // (NFL hub §20) Likewise when the league's slot-set key changes (the NFL: a final's highlight became offered, or
+        // expired), so slot 1 never stays ▶ From start beside a "Game highlights" picture. Only slot 1 changes meaning on a
+        // final; focus keeps its index (the screen moves it only off a slot that is no longer usable).
+        val key = ui.slotSetKey(ctx)
+        val phaseMoved = ui.refreezeOnPhaseChange && frozenPhase?.let { phaseGroup(it) != phaseGroup(g.phase) } == true
+        val refreeze = panelFocus.value && fr != null && (phaseMoved || key != frozenKey)
         val slots = if (panelFocus.value && fr != null && !refreeze) fr.map { HubSlots.forAction(it, ctx) } else HubSlots.default(ctx)
         if (refreeze) {
             frozenPhase = g.phase
+            frozenKey = key
             frozen.value = slots.map { it.action }
         }
         return base.copy(slots = slots)

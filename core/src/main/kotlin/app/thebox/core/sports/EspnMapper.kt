@@ -2,6 +2,7 @@
 package app.thebox.core.sports
 
 import app.thebox.core.sports.hub.ClipKind
+import app.thebox.core.sports.hub.ClipOffer
 import app.thebox.core.sports.hub.EspnVideoDto
 import app.thebox.core.sports.hub.EspnVideoMapper
 import app.thebox.core.sports.hub.PeriodScore
@@ -206,16 +207,22 @@ object EspnMapper {
 
     /**
      * (NFL hub §4.3, §5.1) The board's `highlights[]` → `GameMedia(recapId, condensedId = null, goalClips = 0,
-     * recapExpiresMs)`: the first entry [EspnVideoMapper] maps to a [ClipKind.RECAP], offered at the board's own
-     * [serverDateMs] (so this pure mapper needs no wall clock; without a date the time check is skipped and the UI's
-     * `ClipOffer` check at draw time decides). An expired, embargoed, non-settop or non-https highlight gives no media.
+     * recapExpiresMs, highlight)`: the first entry [EspnVideoMapper] maps to a [ClipKind.RECAP], not expired at the
+     * board's own [serverDateMs] (so this pure mapper needs no wall clock; without a date the time check is skipped and
+     * the UI's `ClipOffer` check at draw time decides). An expired, non-settop or non-https highlight gives no media.
      * [httpOk]: `EspnVideoMapper.httpOkFor(logoBase)`, the one http rule (the debug override origin only; integration §18).
+     *
+     * (§20) The whole entry is kept ([GameMedia.highlight]): ESPN's summary may never list the board's highlight (GB @ LAR,
+     * 2026-11-26), so the board is then its only source. As for the summary's clips (code review 2026-11-26, data #3), an
+     * entry still under embargo is kept ([ClipOffer.listed]); every use checks [ClipOffer.offered], embargo included.
      */
     private fun highlight(list: List<EspnVideoDto>?, serverDateMs: Long?, httpOk: Boolean): GameMedia? {
-        val clip = list.orEmpty().firstNotNullOfOrNull { dto ->
-            EspnVideoMapper.entry(dto, serverDateMs, httpOk)?.clip?.takeIf { it.kind == ClipKind.RECAP }
+        val entry = list.orEmpty().firstNotNullOfOrNull { dto ->
+            EspnVideoMapper.entry(dto, null, httpOk)
+                ?.takeIf { it.clip.kind == ClipKind.RECAP && (serverDateMs == null || ClipOffer.listed(it.clip.expiresMs, serverDateMs)) }
         } ?: return null
-        return GameMedia(recapId = clip.videoId, condensedId = null, goalClips = 0, recapExpiresMs = clip.expiresMs)
+        val clip = entry.clip
+        return GameMedia(recapId = clip.videoId, condensedId = null, goalClips = 0, recapExpiresMs = clip.expiresMs, highlight = entry)
     }
 
     // ------------------------------------------------------------------ Sports Hub board facts (m6-sports-hub.md §7.1, §7.2)

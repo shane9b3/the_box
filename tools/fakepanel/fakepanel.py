@@ -98,8 +98,9 @@ DEFAULTS = {
     **events.DEFAULTS,
 }
 # (NFL hub §8.4) `sports_nfl_clips`: a highlight + 3 one-plays; one highlight; none; the highlight expired 1 h ago; expiring
-# in 2 min (inside the margin); listed but the master and the record 404; records answering after 8 s.
-NFL_CLIP_MODES = ("espn", "single", "none", "expired", "expiring", "gone", "slow_records")
+# in 2 min (inside the margin); listed but the master and the record 404; records answering after 8 s; (§20) the highlight
+# on the board only (the summary lists the 3 one-plays, as ESPN did for GB @ LAR on 2026-11-26).
+NFL_CLIP_MODES = ("espn", "single", "none", "expired", "expiring", "gone", "slow_records", "board_only")
 # (NFL hub §8.4) The ESPN video paths: the clip records (EspnEndpoints.fromOverride's clipBase) and the fake HLS media.
 ESPN_VIDEO_PREFIXES = ("/espn-core/", "/espn-media/")
 NFL_SUMMARY_PATH = sports_nfl.API_PREFIX + "summary"

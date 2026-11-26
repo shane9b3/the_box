@@ -61,7 +61,10 @@ data class GameDetail(
     val plays: List<ScoringPlay> = emptyList(),
     /** (NFL) Pre-game rows RECORD, LAST_FIVE, POINTS_PG, POINTS_ALLOWED_PG, YARDS_PG, YARDS_ALLOWED_PG, in order. */
     val seasonStats: List<StatRow> = emptyList(),
-    /** (NFL) RECAP and PLAY clips offered at parse time (§4.3); no URL (URLs stay in `:data`'s catalog). */
+    /**
+     * (NFL) RECAP and PLAY clips listed at parse time (§4.3); no URL (URLs stay in `:data`'s catalog). (§20) As the
+     * repository publishes it: the summary's clips ∪ the board's highlight (`NflHighlight.clips`).
+     */
     val clips: List<GameClip> = emptyList(),
     /** (NFL) `article.headline` of a Recap article. */
     val recapHeadline: String? = null,

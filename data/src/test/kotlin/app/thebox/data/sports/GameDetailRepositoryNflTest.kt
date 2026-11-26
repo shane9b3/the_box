@@ -94,6 +94,8 @@ class GameDetailRepositoryNflTest {
 
     private var wall = 1_795_489_210_000L
     private var trims = 0
+    /** (§20) Every board highlight the repository handed to the catalog. */
+    private val boardHighlights = ArrayList<app.thebox.core.sports.hub.VideoEntry>()
 
     private fun TestScope.harness(signals: Signals = Signals(), espnVideo: Boolean = true): H {
         val mono = MonoClock { testScheduler.currentTime }
@@ -101,7 +103,9 @@ class GameDetailRepositoryNflTest {
         store.update(SportsDomain) { SportsPrefs() }
         store.update(SportsFollowDomain) { SportsFollowDoc(pollPhaseMs = 1_500L) }
         val fetcher = FakeFetcher(mono)
-        val repo = GameDetailRepositoryImpl(fetcher, store, Awake(), signals, backgroundScope, mono, { wall }, Random(3), onTrim = { trims++ }, espnVideo = espnVideo)
+        val repo = GameDetailRepositoryImpl(fetcher, store, Awake(), signals, backgroundScope, mono, { wall }, Random(3), onTrim = { trims++ }, espnVideo = espnVideo,
+            onBoardHighlight = { boardHighlights += it },
+        )
         runCurrent()
         return H(repo, fetcher, store, signals)
     }
@@ -214,6 +218,56 @@ class GameDetailRepositoryNflTest {
         h.repo.show(nfl(phase = GamePhase.FINAL, media = media, startUtcMs = wall - 3_600_000L))
         settle(600 + SportsConstants.HUB_DETAIL_IDLE_MS * 3)
         assertEquals(1, h.fetcher.calls.size)
+    }
+
+    /**
+     * (§20, GB @ LAR 2026-11-26) The summary never lists the highlight; it appears on the board while the panel is shown.
+     * The view model forwards the newer snapshot (same game, same phase): the wait ends at once (no more summary reads
+     * for a highlight the summary will never list), the published clip list gains the board's highlight first, and the
+     * entry goes to the catalog. The repository's cache keeps the summary's own list.
+     */
+    @Test fun aHighlightOnlyOnTheBoardEndsTheWaitJoinsTheClipsAndTheCatalog() = runTest {
+        val h = harness()
+        val plays = listOf(GameClip(50600428L, ClipKind.PLAY, "Kyren Williams walks in for a Rams TD", 24_000L, wall - 9_000_000L, null, wall + 86_400_000L, null))
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.FINAL, clips = plays), now), false, okBox(now)) }
+        h.repo.show(nfl(id = "401873079", phase = GamePhase.LIVE))
+        settle(600)
+        h.repo.show(nfl(id = "401873079", phase = GamePhase.FINAL))
+        runCurrent()
+        settle(SportsConstants.HUB_DETAIL_IDLE_MS)
+        val a = h.fetcher.calls.size
+        settle(SportsConstants.HUB_DETAIL_IDLE_MS)
+        val n0 = h.fetcher.calls.size
+        assertEquals("still waiting: one read per 5 min", a + 1, n0)
+        assertEquals(plays, h.ready.detail.clips)
+        assertTrue(boardHighlights.isEmpty())
+        // The board's highlight (the board's full entry).
+        val clip = GameClip(50601743L, ClipKind.RECAP, "Rams pick up important home win over the Packers", 80_000L, wall - 60_000L, wall - 62_000L, wall + 2 * 86_400_000L, "https://img.invalid/50601743.jpg")
+        val entry = app.thebox.core.sports.hub.VideoEntry(clip, "https://clips.invalid/50601743/playlist.m3u8")
+        h.repo.show(nfl(id = "401873079", phase = GamePhase.FINAL, media = GameMedia(clip.videoId, null, 0, clip.expiresMs, entry)))
+        runCurrent()
+        assertEquals("published at once, no request", n0, h.fetcher.calls.size)
+        assertEquals(listOf(clip) + plays, h.ready.detail.clips)
+        assertEquals(listOf(entry), boardHighlights)
+        // The 30 min single-play wait (§5.2) still runs from the end (the summary lists plays); once it is over, nothing
+        // more, although the 2 h highlight wait would still run if the board's highlight did not count.
+        wall += SportsConstants.HUB_NFL_PLAYS_WAIT_MS
+        settle(SportsConstants.HUB_DETAIL_IDLE_MS)
+        val n1 = h.fetcher.calls.size
+        wall += 30 * 60_000L
+        settle(SportsConstants.HUB_NFL_HIGHLIGHT_WAIT_MS)
+        assertEquals("no read waits for the summary to list the highlight", n1, h.fetcher.calls.size)
+    }
+
+    /** (§20) The kill switch: no board highlight reaches the catalog or the clip list. */
+    @Test fun theKillSwitchKeepsTheBoardHighlightOut() = runTest {
+        val h = harness(espnVideo = false)
+        h.fetcher.answer = { id, now -> DetailAnswer(ok(detail(id, GamePhase.FINAL), now), false, okBox(now)) }
+        val clip = GameClip(50601743L, ClipKind.RECAP, "t", 80_000L, null, null, wall + 86_400_000L, null)
+        h.repo.show(nfl(id = "401873079", phase = GamePhase.FINAL, media = GameMedia(clip.videoId, null, 0, clip.expiresMs, app.thebox.core.sports.hub.VideoEntry(clip, "https://clips.invalid/x.m3u8"))))
+        settle(600)
+        assertTrue(h.ready.detail.clips.isEmpty())
+        assertTrue(boardHighlights.isEmpty())
     }
 
     @Test fun theFinalWaitEndsTwoHoursAfterTheEnd() = runTest {

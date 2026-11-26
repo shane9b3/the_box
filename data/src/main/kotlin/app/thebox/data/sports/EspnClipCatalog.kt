@@ -8,8 +8,9 @@ import javax.inject.Singleton
 /**
  * (NFL hub, docs/design/m6-nfl-hub.md §4.2, §5.4; P2) The in-memory clip catalog: offered ESPN [VideoEntry]s by clip id,
  * an access-ordered LRU of `ESPN_CLIP_CATALOG_MAX`, `synchronized`. Written by `EspnDetailSource` after each summary parse
- * and by `EspnClipResolver` after a record lookup; never by the board; never persisted. The HLS URL lives only here and in
- * the `ClipStream` handed to `playClip` (`VideoEntry.toString` prints the clip id only). On `onTrimMemory` ≥ RUNNING_LOW
+ * and (§20) with the shown game's board highlight, and by `EspnClipResolver` after a record lookup; never persisted. The
+ * HLS URL lives here, in the `ClipStream` handed to `playClip` and (§20) in the board snapshot's in-memory
+ * `GameMedia.highlight` (`VideoEntry.toString` prints the clip id only). On `onTrimMemory` ≥ RUNNING_LOW
  * (the repository's `trim()`) everything but the last clip handed to the player is cleared.
  *
  * It also carries [skewMs], the last ESPN answer's `Date` − wall clock (clamped to ±`HUB_CLOCK_SKEW_MAX_MS`), so the

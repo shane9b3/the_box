@@ -80,8 +80,11 @@ internal interface HubLeagueUi {
     /** The next wall instant anything [game]'s panel or card shows changes with time alone (the offer timer); null for none. */
     fun nextOfferChange(game: GameSnapshot, detail: GameDetail?, nowMs: Long, skewMs: Long): Long? = null
 
-    /** Whether the card's "● Highlights" chip lights (§1.2). */
-    fun cardHighlights(game: GameSnapshot, nowMs: Long): Boolean {
+    /**
+     * Whether the card's "● Highlights" chip lights (§1.2). [detail]: the shown game's detail, for its card only (the NFL
+     * asks the panel's own highlight question, NFL hub §20); null for every other card.
+     */
+    fun cardHighlights(game: GameSnapshot, detail: GameDetail?, nowMs: Long): Boolean {
         val m = game.media ?: return false
         return m.recapId != null || m.condensedId != null || m.goalClips > 0
     }
@@ -97,6 +100,13 @@ internal interface HubLeagueUi {
      * re-freezes it to the new phase's slots. The NHL and the CHL keep the set for the whole visit, as before.
      */
     val refreezeOnPhaseChange: Boolean get() = false
+
+    /**
+     * (NFL hub §20) While focus is in the panel the slot set is frozen (§2.3); a change of this value re-freezes it to the
+     * default set (the NFL: whether a final's highlight is offered, so slot 1 turns into ▶ Highlights when it appears).
+     * Null (the NHL and the CHL): never.
+     */
+    fun slotSetKey(c: HubSlots.Ctx): Any? = null
 
     /** (UI M1) Whether an open Matchup sheet of [game] stays open; false closes it (focus to the first usable slot). */
     fun matchupOpen(game: GameSnapshot): Boolean = true

@@ -119,7 +119,7 @@ class NflHubPipelineDataTest {
             store.update(SportsFollowDomain) { SportsFollowDoc(pollPhaseMs = 1_500L) }
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             try {
-                val repo = GameDetailRepositoryImpl(fetcher(espn), store, Awake(), Signals(), scope, mono, { c.wallMs }, dwellMs = 0L, onTrim = espn::trimMemory)
+                val repo = GameDetailRepositoryImpl(fetcher(espn), store, Awake(), Signals(), scope, mono, { c.wallMs }, dwellMs = 0L, onTrim = espn::trimMemory, onBoardHighlight = espn::noteBoardHighlight)
                 val game = NflHubPipeline.game(c)
                 repo.show(game)
                 val ready = withTimeout(10_000L) { repo.detail.first { it is DetailState.Ready } } as DetailState.Ready
@@ -183,7 +183,45 @@ class NflHubPipelineDataTest {
                 assertEquals("$c", "Highmark Stadium", d.venue)
                 assertEquals("$c", "J. Allen" to 304, passer(home).name to passer(home).value)
             }
+            NflHubPipeline.FINAL_BOARD_HIGHLIGHT -> {
+                assertEquals("$c: the board's highlight, then the summary's five plays", listOf(50601743L, 50600428L, 50600543L, 50601135L, 50601318L, 50601532L), d.clips.map { it.videoId })
+                assertEquals("$c: 13–26", 13 to 26, d.plays.last().away to d.plays.last().home)
+                assertEquals("$c", "SoFi Stadium", d.venue)
+            }
             else -> Unit // the provisional halftime body: covered by EspnDetailMapperTest's hand-built values
+        }
+    }
+
+    /**
+     * (§20) GB @ LAR final: the summary lists five single plays and no highlight; the board lists the highlight. The
+     * repository publishes the board's highlight first in the one clip list and puts it into the catalog, so the resolver
+     * plays it with no record lookup (`info()` stays catalog-only).
+     */
+    @Test fun theBoardOnlyHighlightIsInTheClipsAndPlaysFromTheCatalog_synthesizedBoard() = runBlocking {
+        val c = NflHubPipeline.FINAL_BOARD_HIGHLIGHT
+        case = c
+        val catalog = EspnClipCatalog()
+        val espn = source(catalog)
+        val store = FakeSettingsStore()
+        store.update(SportsDomain) { SportsPrefs() }
+        store.update(SportsFollowDomain) { SportsFollowDoc(pollPhaseMs = 1_500L) }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val repo = GameDetailRepositoryImpl(fetcher(espn), store, Awake(), Signals(), scope, mono, { c.wallMs }, dwellMs = 0L, onTrim = espn::trimMemory, onBoardHighlight = espn::noteBoardHighlight)
+            repo.show(NflHubPipeline.game(c))
+            val ready = withTimeout(10_000L) { repo.detail.first { it is DetailState.Ready } } as DetailState.Ready
+            assertTrue("the summary alone has no highlight", NflHubPipeline.sourceDetail(c)!!.clips.none { it.kind == ClipKind.RECAP })
+            assertEquals(listOf(50601743L, 50600428L, 50600543L, 50601135L, 50601318L, 50601532L), ready.detail.clips.map { it.videoId })
+            assertEquals(50601743L, app.thebox.core.sports.hub.NflHighlight.offered(NflHubPipeline.game(c), ready.detail, c.wallMs + c.skewMs)?.videoId)
+            val resolver = EspnClipResolver(client, mono, endpoints = ::endpoints, catalog = catalog, wallNow = { c.wallMs })
+            val before = requests.size
+            val ref = ClipRef(50601743L, ClipKind.RECAP, c.id)
+            assertEquals("Rams pick up important home win over the Packers", (resolver.info(ref) as ClipResult.Ok).value.title)
+            val played = (resolver.stream(ref) as ClipResult.Ok).value
+            assertEquals("https://clips.invalid/50601743/playlist.m3u8", played.second.url)
+            assertEquals("no record lookup", before, requests.size)
+        } finally {
+            scope.cancel()
         }
     }
 
@@ -212,6 +250,11 @@ class NflHubPipelineDataTest {
         val none = NflHubPipeline.expected(NflHubPipeline.NO_CLIP)!!
         assertTrue(none.clips.isEmpty())
         assertEquals("J. Cook III", none.leaders.first { it.category == "rushingYards" }.let { it.home ?: it.away }!!.name)
+        val boardOnly = NflHubPipeline.expected(NflHubPipeline.FINAL_BOARD_HIGHLIGHT)!!
+        assertEquals(GamePhase.FINAL, boardOnly.fetchedPhase)
+        assertEquals(listOf(ClipKind.RECAP) + List(5) { ClipKind.PLAY }, boardOnly.clips.map { it.kind })
+        assertEquals(80_000L, boardOnly.clips.first().durationMs)
+        assertEquals(50601743L, NflHubPipeline.game(NflHubPipeline.FINAL_BOARD_HIGHLIGHT).media?.highlight?.clip?.videoId)
         val names = NflHubPipeline.expected(NflHubPipeline.NAMES_AND_INJURIES)!!
         assertEquals("A. St. Brown", names.leaders.first { it.category == "receivingYards" }.away!!.name)
         assertEquals("St. Brown", EspnDetailMapper.leaderSurname("A. St. Brown"))
