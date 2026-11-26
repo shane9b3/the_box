@@ -162,9 +162,9 @@ private fun SettingRow(s: SettingText, c: PickerChoice, focused: Boolean, height
         val value = s.value ?: return@Row
         Spacer(Modifier.width(12.dp))
         if (s.logo != null) {
-            val league = (c as? PickerChoice.ScoreLeagueRow)?.league ?: League.NHL
-            // An empty code: nothing shows while the mark loads, or if it never does (no loader in tests).
-            HubLogo(TeamLine(abbrev = "", name = "", score = null, logo = s.logo), league, ScoreSheetMetrics.LEAGUE_LOGO, ScoreSheetMetrics.LEAGUE_LOGO, align = Alignment.Center)
+            // An empty code: nothing shows while the mark loads, or if it never does (no loader in tests). Always fetched as
+            // a non-CHL logo: a league mark is not on the CHL team-logo host, whose URL check would refuse it.
+            HubLogo(TeamLine(abbrev = "", name = "", score = null, logo = s.logo), League.NHL, ScoreSheetMetrics.LEAGUE_LOGO_W, ScoreSheetMetrics.LEAGUE_LOGO, align = Alignment.CenterEnd)
             Spacer(Modifier.width(10.dp))
         }
         if (s.chip) {

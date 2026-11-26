@@ -207,8 +207,10 @@ class ScoreSheetPlanTest {
     @Test fun theSettingsRowsSplitIntoLabelAndValue() {
         assertEquals(SettingText("League", "NFL", logo = ScoreSheetText.NFL_LOGO), ScoreSheetText.setting(res, PickerChoice.ScoreLeagueRow(League.NFL)))
         assertEquals(SettingText("League", "NHL", logo = ScoreSheetText.NHL_LOGO), ScoreSheetText.setting(res, PickerChoice.ScoreLeagueRow(League.NHL)))
-        assertEquals(SettingText("League", "CHL"), ScoreSheetText.setting(res, PickerChoice.ScoreLeagueRow(League.OHL)))
-        assertEquals(SettingText("CHL league", "OHL"), ScoreSheetText.setting(res, PickerChoice.ScoreChlRow(League.OHL)))
+        assertEquals(SettingText("League", "CHL", logo = ScoreSheetText.CHL_LOGO), ScoreSheetText.setting(res, PickerChoice.ScoreLeagueRow(League.OHL)))
+        assertEquals(SettingText("CHL league", "OHL", logo = ScoreSheetText.OHL_LOGO), ScoreSheetText.setting(res, PickerChoice.ScoreChlRow(League.OHL)))
+        assertEquals(ScoreSheetText.WHL_LOGO, ScoreSheetText.setting(res, PickerChoice.ScoreChlRow(League.WHL))?.logo)
+        assertEquals(ScoreSheetText.QMJHL_LOGO, ScoreSheetText.setting(res, PickerChoice.ScoreChlRow(League.QMJHL))?.logo)
         assertEquals(SettingText("Corner", "Top right"), ScoreSheetText.setting(res, PickerChoice.ScoreCornerRow(ScoreCorner.TOP_RIGHT)))
         assertEquals(SettingText("Delay", "Off", chip = true), ScoreSheetText.setting(res, PickerChoice.ScoreDelayRow(0)))
         assertEquals(SettingText("Delay", "10 s", chip = true), ScoreSheetText.setting(res, PickerChoice.ScoreDelayRow(10)))

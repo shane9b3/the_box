@@ -39,6 +39,8 @@ internal object ScoreSheetMetrics {
     const val TEAM_LOGO = 32
     const val LOGO_GAP = 8
     const val LEAGUE_LOGO = 32
+    /** League marks are fitted into a wider slot: the OHL and QMJHL word marks are about 3:1 and 4:3. */
+    const val LEAGUE_LOGO_W = 64
     const val MARKER_W = 20
     const val MARKER_H = 14
     const val MARKER_GAP = 12
@@ -247,10 +249,26 @@ internal object ScoreSheetText {
     /** The NFL's league mark, on the ESPN logo host the NFL team logos use (`EspnScoreSource.LOGO_BASE`, not reachable from :ui). */
     const val NFL_LOGO = "https://a.espncdn.com/i/teamlogos/leagues/500/nfl.png"
 
+    // (Owner 2026-11-26) The CHL's marks, from the leagues' own site (chl.ca's media host; the lead checked each answers
+    // 200 with an alpha PNG). They are CMS uploads, so one may move: the row then shows its name alone, as before.
+    const val CHL_LOGO = "https://media.chl.ca/wp-content/uploads/2024/09/17174020/chl_logo.png"
+    const val OHL_LOGO = "https://media.chl.ca/wp-content/uploads/sites/5/2023/05/25210408/logo_OHL_lg_white-1.png"
+    const val WHL_LOGO = "https://media.chl.ca/wp-content/uploads/sites/6/2023/08/18153056/Western_Hockey_League.svg_.png"
+    const val QMJHL_LOGO = "https://media.chl.ca/wp-content/uploads/sites/2/2024/02/05230527/logo_q_lg_white.png"
+
+    /** The League row's mark: the group's. */
     fun leagueLogo(group: LeagueGroup): String? = when (group) {
         LeagueGroup.NHL -> NHL_LOGO
         LeagueGroup.NFL -> NFL_LOGO
-        LeagueGroup.CHL -> null
+        LeagueGroup.CHL -> CHL_LOGO
+    }
+
+    /** The "CHL league" row's mark: the shown CHL league's own; null for any other league. */
+    fun chlLeagueLogo(league: League): String? = when (league) {
+        League.OHL -> OHL_LOGO
+        League.WHL -> WHL_LOGO
+        League.QMJHL -> QMJHL_LOGO
+        else -> null
     }
 
     fun title(res: Resources, delay: Boolean, locale: Locale = Locale.getDefault()): String =
@@ -261,7 +279,7 @@ internal object ScoreSheetText {
         is PickerChoice.ScoreLeagueRow -> SettingText(
             res.getString(R.string.sports_picker_league_label), PlayerText.groupName(res, c.league.group), logo = leagueLogo(c.league.group),
         )
-        is PickerChoice.ScoreChlRow -> SettingText(res.getString(R.string.sports_picker_chl_label), PlayerText.leagueName(res, c.league))
+        is PickerChoice.ScoreChlRow -> SettingText(res.getString(R.string.sports_picker_chl_label), PlayerText.leagueName(res, c.league), logo = chlLeagueLogo(c.league))
         is PickerChoice.ScoreCornerRow -> SettingText(res.getString(R.string.sports_picker_corner_label), SportsText.corner(res, c.corner))
         is PickerChoice.ScoreDelayRow -> SettingText(res.getString(R.string.sports_picker_delay_label), SportsText.delay(res, c.delaySec), chip = true)
         is PickerChoice.ScoreStyleRow -> SettingText(res.getString(R.string.sports_picker_style_label), PlayerText.styleName(res, c.style))

@@ -85,13 +85,13 @@ class ScoreSheetLayoutTest {
     /** A stand-in logo (a colour disc with a light rim), seeded into the card cache at the sheet's slot sizes. */
     private fun seed(url: String?, colour: Int) {
         url ?: return
-        for (s in listOf(ScoreSheetMetrics.TEAM_LOGO, ScoreSheetMetrics.LEAGUE_LOGO)) {
+        for ((w, s) in listOf(ScoreSheetMetrics.TEAM_LOGO to ScoreSheetMetrics.TEAM_LOGO, ScoreSheetMetrics.LEAGUE_LOGO_W to ScoreSheetMetrics.LEAGUE_LOGO)) {
             val b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
             val c = Canvas(b)
             val p = Paint(Paint.ANTI_ALIAS_FLAG)
             p.color = 0xFFF2F2F2.toInt(); c.drawOval(1f, 1f, s - 1f, s - 1f, p)
             p.color = colour; c.drawOval(4f, 4f, s - 4f, s - 4f, p)
-            CardLogoCache.put(url, s, s, b.asImageBitmap())
+            CardLogoCache.put(url, w, s, b.asImageBitmap())
         }
     }
 
