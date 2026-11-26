@@ -782,6 +782,21 @@ Xtream (`xc:<stream id>`) and URL keys do not change.
 
 ---
 
+### 6.8 The player's programmes (added 2026-11-26, owner report)
+
+The owner saw the event in the full guide while the player's info bar, its channel list and the recent channels said
+"No information" or the provider's "No Event Today" on the same channel. Cause: those three read `ProgrammeFeed`
+(`ProgrammeFeedImpl`, the `box-player-epg` thread), and only the guide's pager applied the overlay.
+
+Fix: `ProgrammeFeedImpl` lays `GuideChannel.event` over every answer (`range`, `nowFor`, `at`, `around`) with the same
+rules as §6.1 and §6.2, in the pure `EventProgrammes` (`core/.../full/feed/`): a real listing wins; a placeholder is
+clipped around the event; the event answers with no listing, no EPG reference and no generation. It is applied after the
+query, so the busy fallback gets it too and the feed's caches keep the listings as read. Start over on such a channel
+now starts at the event's start (it used to fail with "no programme").
+
+Not done: §6.3's texts for an empty slot and for the time after an event's estimated end are still guide-only; the
+player says "No information" there.
+
 ## 7. Search (`GuideSearchImpl`, `SearchScreen`)
 
 1. **Programmes from the guide (existing).** Hits whose title is a placeholder (`EpgFiller`) are dropped, everywhere.

@@ -284,6 +284,39 @@ class ProgrammeFeedImplTest {
         assertEquals(-1, f.around(hourly, now, now).nowIndex)
     }
 
+    // ------------------------------------------------------------------------------------------------ name events
+
+    private fun nameEvent(start: Int, end: Int) = app.thebox.core.events.ChannelEvent(
+        app.thebox.core.events.ChannelEvent.Kind.EVENT, "London Knights vs Erie Otters", null, start, end, app.thebox.core.events.EventZoneSource.EXPLICIT,
+    )
+
+    /** Owner report 2026-11-26: an event channel has no guide data at all, and the player still shows its event. */
+    @Test
+    fun aNameEventAnswersWithNoGenerationAndNoEpgReference() = runBlocking {
+        val ch = noEpg.copy(event = nameEvent(now - 30, now + 150))
+        for (f in listOf(feed(store("empty")), feed(built()))) {
+            assertEquals("London Knights vs Erie Otters", f.at(ch, now)?.title)
+            assertEquals(listOf("London Knights vs Erie Otters", null), f.nowFor(listOf(ch, noEpg), now).map { it?.title })
+            assertEquals(listOf("London Knights vs Erie Otters"), f.range(ch, now, now + 60).map { it.title })
+            val slice = f.around(ch, now, now - 60)
+            assertEquals(0, slice.nowIndex)
+            assertEquals(now - 30 to now + 150, slice.programmes[0].startMin to slice.programmes[0].endMin)
+        }
+    }
+
+    @Test
+    fun aRealListingBeatsTheNameEventAndAnUpcomingEventIsNext() = runBlocking {
+        val f = feed(built())
+        val live = hourly.copy(event = nameEvent(now - 30, now + 150))
+        assertEquals("Show hour $now", f.at(live, now)?.title)
+        assertEquals("Show hour $now", f.around(live, now, now - 60).let { it.programmes[it.nowIndex].title })
+        // The "gap" channel has nothing from now - 30 to now + 30: an event there is on now; one later is the next entry.
+        assertEquals("London Knights vs Erie Otters", f.at(gap.copy(event = nameEvent(now - 30, now + 30)), now)?.title)
+        val later = f.around(noEpg.copy(event = nameEvent(now + 120, now + 300)), now, now - 60)
+        assertEquals(-1, later.nowIndex)
+        assertEquals(listOf("London Knights vs Erie Otters"), later.programmes.map { it.title })
+    }
+
     // ------------------------------------------------------------------------------------------------ busy, close
 
     @Test

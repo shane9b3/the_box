@@ -52,6 +52,8 @@ class ProgrammeFeedImpl(
     /** Test hook: the reader factory (defaults to [EpgStore.openReader]). */
     private val openReader: () -> EpgReader? = store::openReader,
     private val busyRetryMs: Long = BUSY_RETRY_MS,
+    /** (Event channels §6.8) The placeholder-listing test of the event overlay; tests inject one. */
+    private val isFiller: (String) -> Boolean = app.thebox.core.events.EpgFiller::isFiller,
 ) : ProgrammeFeed {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, THREAD_NAME).apply { isDaemon = true } }
     private val dispatcher = executor.asCoroutineDispatcher()
@@ -83,7 +85,16 @@ class ProgrammeFeedImpl(
 
     // ------------------------------------------------------------------------------------------------ API
 
-    override suspend fun range(channel: GuideChannel, fromMin: Int, toMin: Int, limit: Int): List<ProgrammeInfo> =
+    // (Event channels §6.8, owner report 2026-11-26) Every answer below gets the channel's name event laid over it
+    // ([EventProgrammes], the guide's rules) after the query, so it also holds with no generation, no EPG reference and
+    // on the busy fallback. The `last` cache keeps the listings as read.
+
+    override suspend fun range(channel: GuideChannel, fromMin: Int, toMin: Int, limit: Int): List<ProgrammeInfo> {
+        if (limit <= 0 || toMin <= fromMin) return emptyList()
+        return EventProgrammes.overlay(channel, rangeListed(channel, fromMin, toMin, limit), fromMin, toMin, isFiller).take(limit)
+    }
+
+    private suspend fun rangeListed(channel: GuideChannel, fromMin: Int, toMin: Int, limit: Int): List<ProgrammeInfo> =
         query(
             onBusy = { cachedOf(channel).filter { it.endMin > fromMin && it.startMin < toMin }.take(limit) },
             empty = emptyList(),
@@ -95,7 +106,12 @@ class ProgrammeFeedImpl(
             list.take(limit)
         }
 
-    override suspend fun nowFor(channels: List<GuideChannel>, atMin: Int): List<ProgrammeInfo?> =
+    override suspend fun nowFor(channels: List<GuideChannel>, atMin: Int): List<ProgrammeInfo?> {
+        val listed = nowListed(channels, atMin)
+        return List(channels.size) { i -> EventProgrammes.at(channels[i], atMin, listed.getOrNull(i), isFiller) }
+    }
+
+    private suspend fun nowListed(channels: List<GuideChannel>, atMin: Int): List<ProgrammeInfo?> =
         query(
             onBusy = { channels.map { ch -> cachedOf(ch).firstOrNull { it.startMin <= atMin && atMin < it.endMin } } },
             empty = List(channels.size) { null },
@@ -122,6 +138,9 @@ class ProgrammeFeedImpl(
         }
 
     override suspend fun at(channel: GuideChannel, atMin: Int): ProgrammeInfo? =
+        EventProgrammes.at(channel, atMin, atListed(channel, atMin), isFiller)
+
+    private suspend fun atListed(channel: GuideChannel, atMin: Int): ProgrammeInfo? =
         query(onBusy = { cachedOf(channel).firstOrNull { it.startMin <= atMin && atMin < it.endMin } }, empty = null) { r ->
             val id = idOf(r, channel) ?: return@query null
             val shift = channel.epgShiftMin
@@ -133,13 +152,15 @@ class ProgrammeFeedImpl(
             d.toProgrammeInfo().copy(rawStartMin = merged.rawStart, startMin = merged.start, endMin = merged.end, flags = merged.cleanFlags)
         }
 
-    override suspend fun around(channel: GuideChannel, atMin: Int, fromMin: Int, before: Int, after: Int): ProgrammeSlice =
-        query(onBusy = { slice(cachedOf(channel), atMin, before, after) }, empty = EMPTY_SLICE) { r ->
-            val id = idOf(r, channel) ?: return@query EMPTY_SLICE
-            val list = programmes(r, id, channel.epgShiftMin, minOf(fromMin, atMin), atMin + AROUND_AHEAD_MIN)
-            remember(channel, list)
-            slice(list, atMin, before, after)
+    override suspend fun around(channel: GuideChannel, atMin: Int, fromMin: Int, before: Int, after: Int): ProgrammeSlice {
+        val from = minOf(fromMin, atMin)
+        val to = atMin + AROUND_AHEAD_MIN
+        val list = query(onBusy = { cachedOf(channel) }, empty = emptyList()) { r ->
+            val id = idOf(r, channel) ?: return@query emptyList()
+            programmes(r, id, channel.epgShiftMin, from, to).also { remember(channel, it) }
         }
+        return slice(EventProgrammes.overlay(channel, list, from, to, isFiller), atMin, before, after)
+    }
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
