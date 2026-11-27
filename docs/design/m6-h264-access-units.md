@@ -261,3 +261,74 @@ AUD-less, AUD-less + SEI, filler, awkward PES layouts) and Media3's own TS sampl
 samples out equal pictures in for every fixture, and no sample without a slice reaches the track output. Release
 counter per review S3 (slice-less samples joined, per tune) in diagnostics only. Device gate: Sony, tunneling off,
 TS 720/1080, HLS and a hub clip at in = out = rendered with the diagnostic switch cleared.
+
+## Implementation record (2026-11-26)
+
+**Built.**
+- `player/.../engine/SlicelessSampleJoiner.kt`:
+  - `SlicelessSampleJoiner` (a `TrackOutput`): an Annex-B start-code scan of every `sampleData` byte, carried across
+    calls. Slice header positions (types 1, 2, 5) go into a fixed 1024-entry ring, and a sample `[W−offset−size,
+    W−offset)` with no slice in it is held. The next sample commits `(t₂, flags₁|flags₂, size₁+size₂, offset₂)`.
+  - A held sample is dropped on `reset()` (extractor seek), at end of input or end of an HLS segment, and when the next
+    sample is not contiguous.
+  - It activates only on `video/avc` in container `video/mp2t` (so HLS fMP4 is never scanned). Bytes written before
+    the format are scanned, because `H264Reader` writes its first PES chunk before the format.
+  - Also in the file: `SlicelessJoiningOutput` (wraps video tracks only), `SlicelessJoinCounter`, and the HLS wrappers
+    `SlicelessJoiningHlsExtractorFactory` and `SlicelessJoiningChunkExtractor`. The chunk extractor delegates
+    `isPackedAudioExtractor`/`isReusable`, re-wraps `recreate()`, and resets on `onTruncatedSegmentParsed`. The
+    factory forwards the subtitle and codec configuration calls and `getOutputTextFormat`.
+- TS chain (`TsExtractorsFactory.kt`): `TsExtractor` → joiner → `DeadTrackGuard` → period. The guard's stuck-audio
+  check, audio repair and pre-format replay therefore see whole access units. `GuardedTsExtractor.seek` resets the
+  joiner.
+- HLS: `MediaSourceBuilder.hlsExtractors(ctx, expose608)` is used at both call sites. `TsDebugOverrides.detectAccessUnitsOff`
+  now applies to HLS as well (`TsExtractorsFactory.debugFlags`).
+- `COMPAT_TS_FLAGS` is removed. `flagsFor(compat)` is `TS_FLAGS` at every level. Tests and the m2 amendment were
+  updated, and O-2 is marked resolved.
+- Counter: one per built source. The event log gets `SNIFF H264_AU_JOIN joined=N` at 1, 100, 1000, … joined samples.
+  It was not added to the stats overlay or to the per-tune summary.
+
+**Fixtures** (`core/src/test/resources/ts/`, generator `tools/fixtures/h264_ts_fixtures.py`, ffmpeg 4.4.4/x264,
+testsrc). The generator re-muxes ffmpeg's video PES itself. Samples out, Media3 flag on → joined (pictures):
+
+| Fixture | Progressive TS | HLS chunk |
+|---|---|---|
+| `h264_aud_sei_s1` | 89 → 30 (30) | 87 → 29 |
+| `h264_aud_s4` | 60 → 30 (30) | |
+| `h264_noaud_s1` | 30 → 30 (30) | |
+| `h264_noaud_sei_s1` | 59 → 30 (30) | 57 → 29 |
+| `h264_aud_sei_filler_s1` (3 filler NALs) | 92 → 30 (30) | 90 → 29 |
+| `h264_aud_sei_awkward` | 89 → 30 (30) | |
+| Media3 `sample_h264.ts` | 64 → 30 (its flag-off dump: 30) | |
+| Media3 `sample_h264_no_access_unit_delimiters.ts` | 6 → 3 (3) | |
+| repo `h264_aac_2s.ts` | 102 → 50 (50) | |
+
+The HLS column comes from a single segment. Media3's HLS mode itself delivers one picture fewer, so the joined output
+equals the reader's slice samples. Media3's "no AUD" asset in fact carries AUDs, and its own flag-on dump (6 samples)
+records the split.
+
+**Tests.**
+- `SlicelessSampleJoinerTest`, run through the real `TsExtractor`/`H264Reader` and `DefaultHlsExtractorFactory`. It
+  checks, per fixture:
+  - samples out equal pictures in;
+  - every sample holds exactly one slice with `first_mb_in_slice == 0`;
+  - the bytes equal the reader's bytes, and only a trailing slice-less run may be missing;
+  - the output is a contiguous run of the ES;
+  - times and flags equal those of the reader's slice samples.
+- Unit cases: a start code straddling calls, the header byte alone, `offset ≠ 0` with a slice in the offset bytes,
+  slices written before the format, a seek drop, a scanner restart after a seek, non-H.264 tracks (H.265, MPEG-2,
+  H.264 in MP4), two slice-less samples in a row, a stream ending on a held sample, a gap, the `DataReader` path, and
+  counter milestones.
+- `TsExtractorsFactoryTest`: guarded vs plain, where video is now 50 pictures and other tracks are identical; compat
+  level 1 keeps the flag.
+
+**Deviations from the ruling.**
+- (a) Type 2 (partition A) counts as a slice, as in `H264Reader`. This only makes the joiner more conservative.
+- (b) Safety valve: after 32 consecutive slice-less samples the run is committed as one sample instead of being held
+  forever.
+- (c) A ring overflow answers "has a slice", which is the safe direction.
+- (d) In HLS a held sample is dropped at the end of each segment rather than joined across chunks. That only loses
+  trailing filler or end-of-sequence NALs, and it keeps HLS chunk bookkeeping per chunk.
+- (e) The fixtures live in `:core`'s shared TS resource root, which `:player`'s host tests read, next to the README.
+
+**Not verified here.** No device or emulator run (the Sony and emulator gates in §6 are open). The MTK decoder's
+acceptance of filler at the front of a picture is unverified. No interlaced (PAFF) fixture was made.
