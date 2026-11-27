@@ -60,6 +60,17 @@ class HockeyTechEndpoints internal constructor(
     /** `F` of §2.1: the league's Firebase subtree, ending in `/`. */
     fun firebase(league: League): String = "$firebaseBase${client(league)}/"
 
+    /**
+     * (CHL hub commit 0, docs/design/m6-chl-hub.md §4.4 d) A player's headshot: `{logoBase}{client}/240x240/{id}.jpg` for
+     * a digits-only [playerId] (at most 12 digits), else null. Built here, not in the pure mapper, so a debug build's
+     * override serves it from the fake panel (`{origin}/leaguestat/`). `ChlDetailSource` passes `{ headshot(league, it) }`
+     * to `ChlDetailMapper`; a missing image draws the empty disc.
+     */
+    fun headshot(league: League, playerId: String): String? {
+        if (!PLAYER_ID.matches(playerId)) return null
+        return "$logoBase${client(league)}/240x240/$playerId.jpg"
+    }
+
     /** Never prints the key (L6). */
     override fun toString(): String = "HockeyTechEndpoints(${Redact.host(feedUrl)}, ${Redact.host(firebaseBase)}, ${Redact.host(logoBase)})"
 
@@ -103,5 +114,6 @@ class HockeyTechEndpoints internal constructor(
         }
 
         private const val TAG = "HockeyTechEndpoints"
+        private val PLAYER_ID = Regex("""\d{1,12}""")
     }
 }

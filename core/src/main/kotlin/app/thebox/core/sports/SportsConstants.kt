@@ -978,6 +978,25 @@ object SportsConstants {
     const val HUB_NFL_INJURIES_PER_TEAM = 6
     /** The in-memory clip catalog's LRU size (§4.2). */
     const val ESPN_CLIP_CATALOG_MAX = 64
+
+    // ---- (CHL hub commit 0, docs/design/m6-chl-hub.md §5)
+
+    /**
+     * The CHL hub's build-time kill switch (§0 D7, as [ESPN_VIDEO_ENABLED]): false = every CHL game is `BoardOnly` and the
+     * CHL panel is today's board-only one, with no detail request. Commit 0 lands it false; the integration of P1–P3 sets
+     * it true, its default from then on. There is no user setting.
+     */
+    const val CHL_HUB_ENABLED = false
+    /** The later live step (§7): a live CHL game reads `gamesummary`. False in this milestone (live stays board rows). */
+    const val CHL_HUB_LIVE_ENABLED = false
+    /** CHL final: re-read every `HUB_DETAIL_IDLE_MS` while the three stars are missing, for this long after the end. */
+    const val HUB_CHL_STARS_WAIT_MS = 3_600_000L
+    /** The mapped league-table ranks of a (league, season) are re-read when older than this (§4.1). */
+    const val HUB_CHL_TABLES_TTL_MS = 1_800_000L
+    /** A partial CHL answer (a goalie or table read failed) is re-read no later than this after it (§4.1). */
+    const val HUB_CHL_PARTIAL_RETRY_MS = 120_000L
+    /** The CHL leagues whose `gamesummary` tracks hits (`totalHits`; `current_season.sopt_track_hits`): the Hits row. */
+    val CHL_HITS_LEAGUES: Set<League> = setOf(League.QMJHL)
 }
 
 /**

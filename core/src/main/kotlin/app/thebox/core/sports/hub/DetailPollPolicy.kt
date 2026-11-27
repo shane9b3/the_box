@@ -198,6 +198,22 @@ data class DetailCadence(
             gameLengthMs = SportsConstants.HUB_NFL_GAME_LENGTH_MS,
             phaseChangeFloorMs = SportsConstants.HUB_NFL_REFETCH_FLOOR_MS,
         )
+
+        /**
+         * (CHL hub commit 0, docs/design/m6-chl-hub.md §4.2) The CHL's: pre-game every 30 min; the final re-read every
+         * `HUB_DETAIL_IDLE_MS` while the three stars are missing ([FinalFacts.recapPosted] = `stars.isNotEmpty()`), for
+         * at most `HUB_CHL_STARS_WAIT_MS` after the end; a phase change is due at once (15 s floor). [liveMs] is unused in
+         * v1: the repository publishes `BoardOnly` for a CHL game live, in a break or postponed, before the policy runs.
+         */
+        val CHL = DetailCadence(
+            preMs = SportsConstants.HUB_NFL_PRE_MS,
+            liveMs = SportsConstants.DAY_POLL_LIVE_MS,
+            liveAligned = false,
+            finalWaitMs = SportsConstants.HUB_CHL_STARS_WAIT_MS,
+            playsWaitMs = null,
+            gameLengthMs = NHL_GAME_LENGTH_MS,
+            phaseChangeFloorMs = SportsConstants.HUB_NFL_REFETCH_FLOOR_MS,
+        )
     }
 }
 

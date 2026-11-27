@@ -110,6 +110,13 @@ internal interface HubLeagueUi {
 
     /** (UI M1) Whether an open Matchup sheet of [game] stays open; false closes it (focus to the first usable slot). */
     fun matchupOpen(game: GameSnapshot): Boolean = true
+
+    /**
+     * (CHL hub commit 0, docs/design/m6-chl-hub.md §3.3, §4.5 #1) The Box score sheet's error text for this league, or
+     * null for the sheet's own rule (today's text; the NHL and the NFL). The CHL (P3): `sports_hub_error_box_score_chl`
+     * with the league's short name.
+     */
+    fun boxScoreError(res: Resources, game: GameSnapshot): String? = null
 }
 
 /** (§6.6) Whose words a league's texts use. */
@@ -120,6 +127,11 @@ internal enum class HubSource {
     ESPN,
     /** No detail source (the CHL: the board only). */
     NONE,
+    /**
+     * (CHL hub commit 0, §0 D4) HockeyTech `lscluster` (the CHL's pre-game and final detail): the `*_chl` texts, worded
+     * with the league's short name. `ChlHubUi` switches from [NONE] to this with `CHL_HUB_ENABLED` (P3).
+     */
+    HOCKEYTECH,
 }
 
 /**

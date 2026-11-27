@@ -1,6 +1,8 @@
 // Contract (Sports Hub commit 0): docs/design/m6-sports-hub.md §4.1 (detail), §5.1 (channel link), §6.1 (video).
 // (NFL hub commit 0) docs/design/m6-nfl-hub.md §6.1: appended, defaulted members for the NFL; the NHL leaves them at
 // their defaults.
+// (CHL hub commit 0) docs/design/m6-chl-hub.md §5: appended, defaulted members for the CHL (pre-game and final only);
+// the NHL and the NFL leave them at their defaults.
 // Names are frozen; changes go through the lead. Every enum here is append-only.
 package app.thebox.core.sports.hub
 
@@ -80,6 +82,17 @@ data class GameDetail(
      * absent from the map counts its kept lines.
      */
     val injuryCounts: Map<Side, Int> = emptyMap(),
+    /**
+     * (CHL hub §2.3) The final's attendance (`gs.meta.attendance`, a count > 0), drawn in the caption as
+     * `sports_hub_caption_venue_attendance`; null = none (the caption is the venue alone). The NHL and NFL leave it null.
+     */
+    val attendance: Int? = null,
+    /**
+     * (CHL hub §3.1, §2.2) [leaders] are **season** totals (the CHL's `leadingScorers`), not the NHL's last five games: the
+     * Matchup header is "Leaders · this season" and the summary line uses the `_season` string. Data-driven: no league
+     * check in a shared sheet.
+     */
+    val leadersSeason: Boolean = false,
 ) {
     /** (NFL hub §6.1) The league-neutral scoring list: the NHL's goals, else the NFL's scoring plays. */
     val scoring: List<ScoringEvent> get() = if (goals.isNotEmpty()) goals else plays
@@ -207,6 +220,11 @@ data class GoalItem(
     override val home: Int,
     val clipId: Long?,
     val headshot: String?,
+    /**
+     * (CHL hub commit 0, §2.2) The feed marks this goal the game winner (`game_winning == "1"`). The CHL's final summary
+     * line uses the first goal so marked, else `HubSummary.winningGoal`; the NHL leaves it false (its rule is unchanged).
+     */
+    val gameWinning: Boolean = false,
 ) : ScoringEvent {
     override val clock: String get() = timeInPeriod
 }
@@ -272,13 +290,35 @@ data class Leader(val name: String, val value: Int, val headshot: String?, val l
 
 data class LeaderPair(val category: String, val away: Leader?, val home: Leader?)
 
-data class Goalie(val name: String, val record: String?, val gaa: Double?, val svPct: Double?, val headshot: String?)
+/**
+ * [starting] (CHL hub §3.1, B1): tonight's lineup marks this goalie as the starter (`start == "1"`); the Matchup sheet
+ * shows the "Starting" mark. Never inferred: the NHL and the NFL leave it false.
+ */
+data class Goalie(
+    val name: String,
+    val record: String?,
+    val gaa: Double?,
+    val svPct: Double?,
+    val headshot: String?,
+    val starting: Boolean = false,
+)
 
 data class GoaliePair(val away: List<Goalie>, val home: List<Goalie>)
 
 data class SeriesFacts(val awayWins: Int, val homeWins: Int, val meetingsPlayed: Int)
 
-data class BoxScore(val away: TeamBox, val home: TeamBox)
+/**
+ * [periods] / [periodShots] (CHL hub §3.3): the hockey line score, goals and shots per period in game order (1st, 2nd,
+ * 3rd, OT…; no total column: the sheet adds T). When both are non-empty the Box score sheet draws the two-row line score
+ * with `periodWord` labels; empty (the NHL, the NFL) = no hockey line score, exactly as before. Both lists carry the
+ * same labels in the same order.
+ */
+data class BoxScore(
+    val away: TeamBox,
+    val home: TeamBox,
+    val periods: List<PeriodScore> = emptyList(),
+    val periodShots: List<PeriodScore> = emptyList(),
+)
 
 /** [tables] (NFL hub §3.5): the NFL's Passing, Rushing and Receiving tables; the NHL keeps [skaters] / [goalies]. */
 data class TeamBox(val skaters: List<SkaterLine>, val goalies: List<GoalieLine>, val tables: List<BoxTable> = emptyList())
@@ -315,10 +355,27 @@ interface GameDetailSource {
 sealed interface DetailState {
     data object None : DetailState
     data class Loading(val id: GameId) : DetailState
-    /** [stale]: older than 2 × the phase's poll interval (A-S7). */
-    data class Ready(val detail: GameDetail, val fetchedAtMono: Long, val failing: Boolean, val stale: Boolean) : DetailState
+    /**
+     * [stale]: older than 2 × the phase's poll interval (A-S7).
+     *
+     * [partial] (CHL hub commit 0, §4.1, §4.4 a): the newest answer kept what loaded while a secondary read failed (a CHL
+     * pre-game's `topgoalies` or league table), so ranks or goalie stats are missing. It is **not** a failure: [failing]
+     * stays false and the panel shows no error text; the repository re-reads within `HUB_CHL_PARTIAL_RETRY_MS`. The NHL
+     * and the NFL never set it.
+     */
+    data class Ready(
+        val detail: GameDetail,
+        val fetchedAtMono: Long,
+        val failing: Boolean,
+        val stale: Boolean,
+        val partial: Boolean = false,
+    ) : DetailState
     data class Failed(val id: GameId, val kind: FailKind) : DetailState
-    /** CHL: the panel uses the board's `BoardExtras` only. */
+    /**
+     * The panel uses the board's `BoardExtras` only: every league without a detail source, and (CHL hub §0 D5) a CHL game
+     * whose effective phase is LIVE, INTERMISSION or POSTPONED (no detail request), or any CHL game while
+     * `SportsConstants.CHL_HUB_ENABLED` is false.
+     */
     data class BoardOnly(val id: GameId) : DetailState
 }
 

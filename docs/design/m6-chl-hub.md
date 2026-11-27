@@ -676,3 +676,32 @@ in full. What changed from the proposer draft:
 | Highlights | "Sanctioned feed only" (Q2). |
 | Found while reconciling | The NHL's leader labels say "last 5 games", which is wrong for CHL season totals: new `_season` strings. `HubHeadshot` shows an empty disc, not initials, for a missing image (the draft said initials). Review N5 assumed the board gives the team ids, but `ChlGameFacts` carries none (only `TeamLine.abbrev`). So the preview goes first, then the other four reads (≤ 3 in flight), and the score source stays untouched. |
 | Not taken up | The review's N1 extras (current streak, goalie decisions, shootout counts, season splits, rookie, most PIM) stay out of v1: no NHL-parity slot shows them. |
+
+---
+
+## 12. Commit 0 rulings (2026-11-27)
+
+Commit 0 landed the contracts of §4.4–§5 with `CHL_HUB_ENABLED = false`: every CHL game is still `BoardOnly`, no CHL
+detail request is made, and the NHL, NFL and CHL panels, score bug and board are unchanged. Where the body left a
+contract detail open, commit 0 decided it as below. These rulings are frozen for P1–P3; changes go through the lead.
+
+| # | Item | Ruling |
+|---|---|---|
+| R1 | Mapper signatures | `preview` and `summary` take the **`GameId` first**: `preview(id, pv, awayGoalies, homeGoalies, ranks, playoff, headshot)`, `summary(id, gs, headshot)` (the league is `id.league`). §4.3's draft had no id for `preview`, and the body has none at its top level. `ranks(standard, special)` is as drafted. Each mapper input is the **whole decoded body** (`{"GC":…}`, `{"SiteKit":…}`); the tables are the decoded arrays with the JSONP stripped. |
+| R2 | Partial state | Besides `DetailAnswer.partial` (`:data`), `DetailState.Ready` gains `partial: Boolean = false`. P2 publishes `Ready(failing = false, partial = true)`; P3 shows no error for it (rows without ranks, names without stats). |
+| R3 | Game winner | `GoalItem.gameWinning: Boolean = false` (appended). The CHL summary uses the first goal so marked, else `HubSummary.winningGoal` (§2.2). The NHL leaves it false and keeps its rule. |
+| R4 | Field formats | Stated in `ChlDetailMapper`'s KDoc and pinned by `ChlHubFixtures`: names "K. Dietsch" (NHL.com's form), `*Last` = `last_name`; team codes upper-cased as the board's `TeamLine.abbrev` (QMJHL "Chi" → "CHI"); every rate 0..1, a zero denominator null; `Ranked.value` the raw double (rounding is the UI's); `Last10(record, null, null)`; a first meeting `SeriesFacts(0, 0, 0)`; `Star.rank` = `mvps` index + 1; `RecentGame.score` winner first, away side's games first. Detail scores and `serverDateMs` stay null in the mapper. |
+| R5 | Goalie order with a lineup (B1 rule 1) | Starter first; then by the goalie's `topgoalies` `games_played` (int) descending; goalies without a `topgoalies` row after, in feed order (a stable sort). This is what gives §3.1's "LDN Cooke, then Jaswal" (the feed lists Jaswal first). |
+| R6 | `phaseHint` | For a CHL game the repository passes the **effective** phase to `ChlDetailSource.detailAnswer` (P2, CHL branch only; the NHL and NFL keep the board phase). SCHEDULED / PRE → the pre-game reads; FINAL → `gamesummary`; anything else → `Failed(HTTP_OTHER)` without a request. |
+| R7 | Transport | `HockeyTechHttp` (`:data`, internal) holds the moved `call`/`read`/`Raw` and the companion's `statusKind`, `clampRetryAfter`, `headerBytes` (the score source keeps delegating members, so its tests are unchanged). Added: `lscluster(endpoints, league) { params }` (the caller's parameters in order, then `key`, `client_code`); `element(raw)` (one `( … )` stripped; only an object or an array is a body); `json(url, cap = MAX_BODY_BYTES): JsonAnswer` with `HockeyTechScoreSource.feed`'s error mapping (401/403 and the "Invalid key" / "Client access denied" bodies REFUSED, 404 HTTP_OTHER, cap / non-JSON BAD_BODY, 429, 5xx). `JsonAnswer` prints no URL or key. The score source's `feed()` and `parse` are unchanged. |
+| R8 | `ChlDetailSource` | `@Singleton`, constructor-injected like `EspnDetailSource` (no `SportsModule` binding is needed; `GameDetailSource` stays bound to the NHL's). Internal constructor `(client, mono, endpoints, mapPreview, mapSummary, mapRanks, callTimeoutMs)`, the mappers defaulting to `ChlDetailMapper`'s, so P2 tests with stand-ins before P1 lands. Entry points `detailAnswer(id, phaseHint)`, `boxScore(id)` (never a request: the loop answers from the final's parse), `trimMemory()` (wired into the repository's `onTrim`). The stub answers `Failed(HTTP_OTHER)`. |
+| R9 | Routing | `DetailFetcher.of(nhl, espn, chl)` routes OHL / WHL / QMJHL to `chl` (an exhaustive `when`). With the switch off, `detailed()` is unchanged, so the loop never calls it. |
+| R10 | Headshots | `HockeyTechEndpoints.headshot(league, playerId)`: 1–12 digits only, else null; under `logoBase`, so the debug override serves it from `{origin}/leaguestat/{client}/240x240/{id}.jpg` (P2's fake panel route). |
+| R11 | Fakes | `core/src/testFixtures/.../hub/ChlHubFixtures.kt`: fixture paths, `text` / `obj` / `table` loaders, the fake headshot builder `HEADSHOT` (`https://headshots.test/…`), and the expected `GameDetail` / `BoxScore` of all six fixture games (`preOhl29246`, `preWhl1023348`, `preQmjhl32953`, `finalOhl29239` + `boxOhl29239`, `finalWhl1023337` + `boxWhl1023337`, `finalOtQmjhl32952` + `boxOtQmjhl32952`). They restate §2–§3 under R4–R5 (the box skaters are the fixtures' trimmed 5 per side). The lead owns the file: P1 compares against it and reports a disagreement; the worked examples decide. |
+| R12 | Strings | The 12 keys of §5, English only, in `strings_sports_hub.xml`; unused until P3. |
+| R13 | `HubSource.HOCKEYTECH` | Added; `ChlHubUi` keeps `NONE` until P3 switches it with `CHL_HUB_ENABLED`. No existing `when` over `HubSource` is exhaustive, so nothing else changed. |
+
+Tests added in commit 0: `data/.../HockeyTechHttpTest.kt` (JSONP array and object on the fixtures, one wrapper only,
+the cap, `lscluster` parameters, the error mapping, nothing printed carries a key or the URL, headshot URLs) and
+`core/.../hub/ChlHubContractsTest.kt` (the cadence, the switches off, the appended defaults, the stub, the fakes' key
+worked-example values).

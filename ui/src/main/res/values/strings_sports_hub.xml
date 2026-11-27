@@ -653,4 +653,24 @@
     <string name="sports_hub_reason_matchup_failed">ESPN didn\'t send the matchup details. It tries again on its own; check back shortly.</string>
     <!-- (UI M1) After kick-off the Matchup (season leaders, the week's injury report) is not offered; Scoring takes its slot. -->
     <string name="sports_hub_reason_matchup_after_kickoff">The matchup is shown before kick-off only. Open Scoring for this game\'s plays.</string>
+
+    <!-- (CHL hub commit 0, docs/design/m6-chl-hub.md §5) The CHL's pre-game and final detail from HockeyTech. %1$s is the
+         league's short name (sports_league_ohl / _whl / _qmjhl). Each failure carries a reason and a next step. -->
+    <string name="sports_hub_error_detail_retry_chl">Couldn\'t load game stats from the %1$s. Trying again automatically. Select Retry to try now.</string>
+    <string name="sports_hub_error_detail_back_chl">Couldn\'t load game stats from the %1$s. Trying again automatically. To try now, press Back, then OK, then select Retry.</string>
+    <string name="sports_hub_error_detail_limited_chl">The %1$s is limiting requests right now. Stats load again in a few minutes.</string>
+    <string name="sports_hub_error_detail_changed_chl">The %1$s changed how it sends game stats. Scores still update; stats need an app update.</string>
+    <string name="sports_hub_error_box_score_chl">Couldn\'t load the box score from the %1$s. Select Retry, or press Back to close.</string>
+    <!-- The final's media caption: %1$s = the venue, %2$s = the attendance, grouped ("2,801"). -->
+    <string name="sports_hub_caption_venue_attendance">%1$s · Attendance %2$s</string>
+    <!-- A postponed CHL game's reason line under the board's state line (no detail request). -->
+    <string name="sports_hub_postponed_chl">The %1$s lists this game as postponed. Its new date shows here once the league sets it.</string>
+    <!-- Season totals (the CHL's leaders), where the NHL's labels say "last 5 games". -->
+    <string name="sports_hub_summary_points_leaders_season">Points leaders</string>
+    <string name="sports_hub_matchup_leaders_season">Leaders · this season</string>
+    <!-- The Matchup sheet's mark on the goalie tonight's lineup names as the starter. -->
+    <string name="sports_hub_matchup_starting">Starting</string>
+    <!-- The hockey line score's two row labels in the Box score sheet. -->
+    <string name="sports_hub_box_row_goals">Goals</string>
+    <string name="sports_hub_box_row_shots">Shots</string>
 </resources>

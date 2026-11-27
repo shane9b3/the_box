@@ -20,28 +20,23 @@ import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.SportsDays
 import app.thebox.core.sports.TeamLine
 import app.thebox.core.sports.isChl
+import app.thebox.data.sports.HockeyTechHttp.Raw
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import okhttp3.Call
-import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import okhttp3.Response
-import java.io.IOException
 import java.time.Instant
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
-import kotlin.coroutines.resume
 
 /**
  * (CHL §2, docs/design/m6-chl-leagues.md) One CHL league's [ScoreSource]: HockeyTech's keyed `lscluster` for the day list,
@@ -107,10 +102,14 @@ class HockeyTechScoreSource internal constructor(
         require(league.isChl) { "HockeyTechScoreSource serves the CHL leagues only, not $league" }
     }
 
-    private val client: OkHttpClient = WireMeter.install(client.newBuilder(), client)
-        .callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS)
-        .cache(null)
-        .build()
+    /** (CHL hub commit 0) The transport, moved to [HockeyTechHttp] verbatim; this client as before. */
+    private val http = HockeyTechHttp(
+        WireMeter.install(client.newBuilder(), client)
+            .callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS)
+            .cache(null)
+            .build(),
+        mono,
+    )
 
     private val endpointsOf = endpoints
 
@@ -531,7 +530,7 @@ class HockeyTechScoreSource internal constructor(
             .addQueryParameter("fmt", "json")
             .addQueryParameter("lang", "en")
             .build()
-        val raw = call(url, SportsConstants.MAX_BODY_BYTES, emptyMap())
+        val raw = http.call(url, SportsConstants.MAX_BODY_BYTES, emptyMap())
         val out: Feed = when (raw) {
             is Raw.Failed -> Feed.Failed(raw.fetch)
             is Raw.NotModified -> Feed.Failed(Fetch.Failed(FailKind.HTTP_OTHER, null, raw.receivedMono))
@@ -574,7 +573,7 @@ class HockeyTechScoreSource internal constructor(
             headers["X-Firebase-ETag"] = "true"
             known?.let { headers["If-None-Match"] = it.etag }
         }
-        return when (val raw = call(url, SportsConstants.CHL_NODE_MAX_BYTES, headers)) {
+        return when (val raw = http.call(url, SportsConstants.CHL_NODE_MAX_BYTES, headers)) {
             is Raw.Failed -> NodeAnswer.Failed(raw.fetch, raw.cause, raw.wire)
             is Raw.NotModified -> if (etags && known != null) {
                 NodeAnswer.Ok(known.body, known.etag, raw.receivedMono, raw.serverDateMs, raw.wire)
@@ -589,86 +588,6 @@ class HockeyTechScoreSource internal constructor(
             }
         }
     }
-
-    // ------------------------------------------------------------------ transport
-
-    private sealed interface Raw {
-        /** Bytes on the wire: the body off the socket plus the request and response header bytes (lead ruling S2). */
-        val wire: Long
-
-        class Body(val text: String, val etag: String?, val receivedMono: Long, val serverDateMs: Long?, override val wire: Long) : Raw
-        class NotModified(val receivedMono: Long, val serverDateMs: Long?, override val wire: Long) : Raw
-
-        /** Another status; [retryAfterRawS] unclamped (the kind decides the clamp, [failed]). */
-        class Status(val code: Int, val retryAfterRawS: Long?, val receivedMono: Long, override val wire: Long) : Raw {
-            fun failed(refusedOn: Set<Int>): Fetch.Failed {
-                val kind = statusKind(code, refusedOn)
-                return Fetch.Failed(kind, clampRetryAfter(retryAfterRawS, kind), receivedMono)
-            }
-        }
-
-        /** No usable answer: no response (TIMEOUT / IO, [cause] the exception's class name) or a body over the cap. */
-        class Failed(val fetch: Fetch.Failed, val cause: String?, override val wire: Long = 0) : Raw
-    }
-
-    /**
-     * `enqueue` under the coroutine (cancelling it cancels the call); the body is read on OkHttp's thread with the response
-     * open, capped at [cap] before decoding. Never throws but cancellation: any other failure is [Raw.Failed].
-     */
-    private suspend fun call(url: HttpUrl, cap: Long, headers: Map<String, String>): Raw {
-        val wire = WireBytes()
-        val b = Request.Builder().url(url).header("Accept", "application/json")
-        for ((k, v) in headers) b.header(k, v)
-        val request = WireMeter.tag(b, wire).build()
-        val raw: Raw = suspendCancellableCoroutine { cont ->
-            val c = client.newCall(request)
-            cont.invokeOnCancellation { c.cancel() }
-            c.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (cont.isActive) cont.resume(Raw.Failed(Fetch.Failed(NhlScoreSource.ioKind(e), null, mono.nowMs()), e.javaClass.simpleName))
-                }
-
-                override fun onResponse(call: Call, response: Response) {
-                    val r = try {
-                        response.use { read(it, cap) }
-                    } catch (e: IOException) { // the body broke off mid-read
-                        Raw.Failed(Fetch.Failed(NhlScoreSource.ioKind(e), null, mono.nowMs()), e.javaClass.simpleName)
-                    } catch (e: RuntimeException) { // never let a bug kill OkHttp's thread, and never carry its message
-                        Raw.Failed(Fetch.Failed(FailKind.BAD_BODY, null, mono.nowMs()), e.javaClass.simpleName)
-                    }
-                    if (cont.isActive) cont.resume(r)
-                }
-            })
-        }
-        // (Update interval §3.2) The listener wrote the body's wire bytes when `response.use` closed it.
-        val body = wire.bytes ?: 0L
-        return when (raw) {
-            is Raw.Body -> Raw.Body(raw.text, raw.etag, raw.receivedMono, raw.serverDateMs, raw.wire + body)
-            is Raw.NotModified -> Raw.NotModified(raw.receivedMono, raw.serverDateMs, raw.wire + body)
-            is Raw.Status -> Raw.Status(raw.code, raw.retryAfterRawS, raw.receivedMono, raw.wire + body)
-            is Raw.Failed -> raw
-        }
-    }
-
-    /** The response, with its header bytes in `wire` (the body's are added by [call]). */
-    private fun read(res: Response, cap: Long): Raw {
-        val received = mono.nowMs()
-        val date = NhlScoreSource.serverDateMs(res)
-        val headers = headerBytes(res)
-        return when (val code = res.code) {
-            200 -> {
-                if (res.body.contentLength() > cap) return overCap(received, headers)
-                val source = res.body.source()
-                if (source.request(cap + 1)) return overCap(received, headers)
-                Raw.Body(source.buffer.readUtf8(), res.header("ETag")?.trim()?.takeIf { it.isNotEmpty() }, received, date, headers)
-            }
-            304 -> Raw.NotModified(received, date, headers)
-            else -> Raw.Status(code, res.header("Retry-After")?.trim()?.toLongOrNull()?.coerceAtLeast(0L), received, headers)
-        }
-    }
-
-    private fun overCap(received: Long, headers: Long) =
-        Raw.Failed(Fetch.Failed(FailKind.BAD_BODY, null, received), "over cap", headers)
 
     // ------------------------------------------------------------------ helpers
 
@@ -733,7 +652,7 @@ class HockeyTechScoreSource internal constructor(
         internal const val LIVE_PARALLEL = 3
 
         /** (Lead ruling S1) The longest `Retry-After` honoured on a REFUSED answer; every other kind is clamped to 300 s. */
-        internal const val REFUSED_RETRY_AFTER_MAX_S = 3_600L
+        internal const val REFUSED_RETRY_AFTER_MAX_S = HockeyTechHttp.REFUSED_RETRY_AFTER_MAX_S
 
         /** (Review L2) Yesterday, today and tomorrow. */
         private const val BOARDS_MAX = 3
@@ -745,41 +664,16 @@ class HockeyTechScoreSource internal constructor(
         private val GAME_ID = Regex("""\d{1,12}""")
         /** (§3.5) After the JPEG swap every CHL logo is a PNG named by team id (and a season suffix). */
         private val LOGO_FILE = Regex("""[0-9]+(_[0-9]+)?\.png""")
-        private val REFUSED_TEXTS = listOf("Invalid key", "Client access denied")
+        private val REFUSED_TEXTS = HockeyTechHttp.REFUSED_TEXTS
 
-        internal fun statusKind(code: Int, refusedOn: Set<Int>): FailKind = when (code) {
-            in refusedOn -> FailKind.REFUSED
-            429 -> FailKind.HTTP_429
-            in 500..599 -> FailKind.HTTP_5XX
-            else -> FailKind.HTTP_OTHER
-        }
+        /** (CHL hub commit 0) Moved to [HockeyTechHttp]; kept here for the existing callers and tests. */
+        internal fun statusKind(code: Int, refusedOn: Set<Int>): FailKind = HockeyTechHttp.statusKind(code, refusedOn)
 
-        /**
-         * (Lead ruling S1) `Retry-After` in s: REFUSED waits `max(300 s, Retry-After)` (the machine and the repository take
-         * the max), so up to [REFUSED_RETRY_AFTER_MAX_S] gets through; every other kind is clamped to
-         * [SportsConstants.BACKOFF_MAX_MS], as the NHL and NFL sources do.
-         */
-        internal fun clampRetryAfter(rawS: Long?, kind: FailKind): Int? {
-            rawS ?: return null
-            val max = if (kind == FailKind.REFUSED) REFUSED_RETRY_AFTER_MAX_S else SportsConstants.BACKOFF_MAX_MS / 1000
-            return rawS.coerceIn(0L, max).toInt()
-        }
+        /** (CHL hub commit 0) Moved to [HockeyTechHttp.clampRetryAfter]. */
+        internal fun clampRetryAfter(rawS: Long?, kind: FailKind): Int? = HockeyTechHttp.clampRetryAfter(rawS, kind)
 
-        /**
-         * (Lead ruling S2) The header bytes of one exchange as HTTP/1.1 puts them on the wire: the request line and headers
-         * actually sent (the network request, after the interceptors and OkHttp's bridge headers), the status line and the
-         * network response's headers, and the two blank lines.
-         */
-        internal fun headerBytes(res: Response): Long {
-            val net = res.networkResponse ?: res
-            val req = net.request
-            val target = req.url.encodedPath.length + (req.url.encodedQuery?.let { it.length + 1 } ?: 0)
-            val requestLine = req.method.length + 1 + target + 1 + HTTP11.length + 2
-            val statusLine = HTTP11.length + 1 + 3 + 1 + net.message.length + 2
-            return requestLine + req.headers.byteCount() + 2 + statusLine + net.headers.byteCount() + 2
-        }
-
-        private const val HTTP11 = "HTTP/1.1"
+        /** (CHL hub commit 0) Moved to [HockeyTechHttp.headerBytes]. */
+        internal fun headerBytes(res: Response): Long = HockeyTechHttp.headerBytes(res)
 
         private fun <K, V> lru(max: Int) = object : LinkedHashMap<K, V>(16, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean = size > max

@@ -48,8 +48,18 @@ import kotlin.random.Random
  * One detail answer: the [fetch] and whether the landing half failed (the NHL detail then lacks its landing facts).
  * (NFL hub commit 0, docs/design/m6-nfl-hub.md §5.5) Moved here from `NhlDetailSource`; [box] (P2): the box score mapped
  * from the same ESPN summary, so the Box score sheet never makes a second parse.
+ *
+ * [partial] (CHL hub commit 0, docs/design/m6-chl-hub.md §4.1, §4.4 a): an `Ok` [fetch] that kept what loaded while a
+ * secondary read failed (a CHL pre-game's `topgoalies` or league table). Not a failure: [landingFailed] stays false, the
+ * repository publishes `DetailState.Ready(failing = false, partial = true)` and re-reads at
+ * `min(normal next, receivedMono + HUB_CHL_PARTIAL_RETRY_MS)` (P2). The NHL and the NFL never set it.
  */
-internal data class DetailAnswer(val fetch: Fetch<GameDetail>, val landingFailed: Boolean, val box: Fetch.Ok<BoxScore>? = null)
+internal data class DetailAnswer(
+    val fetch: Fetch<GameDetail>,
+    val landingFailed: Boolean,
+    val box: Fetch.Ok<BoxScore>? = null,
+    val partial: Boolean = false,
+)
 
 /** The repository's view of the detail sources (a seam for the loop's tests). */
 internal interface DetailFetcher {
@@ -58,20 +68,21 @@ internal interface DetailFetcher {
 
     companion object {
         /**
-         * (NFL hub commit 0, §6.5) Routes by league: NHL → [nhl], NFL → [espn]. Anything else answers `HTTP_OTHER` without
-         * a request (the loop never asks: those games are BoardOnly).
+         * (NFL hub commit 0, §6.5) Routes by league: NHL → [nhl], NFL → [espn]; (CHL hub commit 0) OHL, WHL, QMJHL →
+         * [chl]. The loop asks [chl] only for a detailed CHL game (`SportsConstants.CHL_HUB_ENABLED`, pre-game or final);
+         * until then those games are BoardOnly and never reach it.
          */
-        fun of(nhl: NhlDetailSource, espn: EspnDetailSource): DetailFetcher = object : DetailFetcher {
+        fun of(nhl: NhlDetailSource, espn: EspnDetailSource, chl: ChlDetailSource): DetailFetcher = object : DetailFetcher {
             override suspend fun detail(id: GameId, phaseHint: GamePhase?): DetailAnswer = when (id.league) {
                 League.NHL -> nhl.detailAnswer(id, phaseHint)
                 League.NFL -> espn.detailAnswer(id, phaseHint)
-                else -> DetailAnswer(Fetch.Failed(FailKind.HTTP_OTHER, null, ScoreRepositoryImpl.ELAPSED.nowMs()), false)
+                League.OHL, League.WHL, League.QMJHL -> chl.detailAnswer(id, phaseHint)
             }
 
             override suspend fun boxScore(id: GameId): Fetch<BoxScore> = when (id.league) {
                 League.NHL -> nhl.boxScore(id)
                 League.NFL -> espn.boxScore(id)
-                else -> Fetch.Failed(FailKind.HTTP_OTHER, null, ScoreRepositoryImpl.ELAPSED.nowMs())
+                League.OHL, League.WHL, League.QMJHL -> chl.boxScore(id)
             }
         }
     }
@@ -119,18 +130,22 @@ class GameDetailRepositoryImpl internal constructor(
      */
     private val onBoardHighlight: (VideoEntry) -> Unit = {},
 ) : GameDetailRepository {
-    /** (NFL hub) Built with both sources; [DetailFetcher.of] routes by league. */
+    /** (NFL hub) Built with the sources; [DetailFetcher.of] routes by league. (CHL hub commit 0) + [ChlDetailSource]. */
     @Inject constructor(
         source: NhlDetailSource,
         espn: EspnDetailSource,
+        chl: ChlDetailSource,
         store: SettingsStore,
         awake: Optional<DeviceAwake>,
         signals: SportsSignals,
         @ApplicationScope scope: CoroutineScope,
         wall: WallClock,
     ) : this(
-        DetailFetcher.of(source, espn), store, awake.orElse(DeviceAwake.ALWAYS), signals, scope, ScoreRepositoryImpl.ELAPSED, wall::now,
-        onTrim = espn::trimMemory,
+        DetailFetcher.of(source, espn, chl), store, awake.orElse(DeviceAwake.ALWAYS), signals, scope, ScoreRepositoryImpl.ELAPSED, wall::now,
+        onTrim = {
+            espn.trimMemory()
+            chl.trimMemory()
+        },
         onBoardHighlight = espn::noteBoardHighlight,
     )
 
