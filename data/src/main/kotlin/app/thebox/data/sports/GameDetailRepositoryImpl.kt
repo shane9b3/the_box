@@ -129,6 +129,12 @@ class GameDetailRepositoryImpl internal constructor(
      * so `info()` stays catalog-only and `stream()` plays it without a record lookup, even when the summary never lists it.
      */
     private val onBoardHighlight: (VideoEntry) -> Unit = {},
+    /**
+     * (CHL hub P2, docs/design/m6-chl-hub.md §4.1, D5, D7) `SportsConstants.CHL_HUB_ENABLED`: on, an OHL / WHL / QMJHL game
+     * is fetched through [ChlDetailSource] before the game and at the final (BoardOnly live, in a break and postponed);
+     * off, every CHL game is BoardOnly without a request, exactly as before.
+     */
+    private val chlHub: Boolean = SportsConstants.CHL_HUB_ENABLED,
 ) : GameDetailRepository {
     /** (NFL hub) Built with the sources; [DetailFetcher.of] routes by league. (CHL hub commit 0) + [ChlDetailSource]. */
     @Inject constructor(
@@ -192,7 +198,7 @@ class GameDetailRepositoryImpl internal constructor(
     override suspend fun boxScore(id: GameId): Fetch<BoxScore> {
         val g = gateSnapshot
         if (!g.online) return Fetch.Failed(FailKind.OFFLINE, null, mono.nowMs())
-        if (!g.open || !detailed(id.league)) return Fetch.Failed(FailKind.HTTP_OTHER, null, mono.nowMs())
+        if (!g.open || !isDetailed(id.league)) return Fetch.Failed(FailKind.HTTP_OTHER, null, mono.nowMs())
         if (id.league != League.NHL) {
             // (NFL hub §5.5, arch M4) Through the loop: the slot, or the shown game's next (shared) parse.
             val answer = CompletableDeferred<Fetch<BoxScore>>()
@@ -242,7 +248,8 @@ class GameDetailRepositoryImpl internal constructor(
 
     // ---- loop state (touched only inside the loop)
 
-    private class Entry(val ok: Fetch.Ok<GameDetail>, val landingFailed: Boolean)
+    /** [partial] (CHL hub §4.1): the answer kept what loaded while a secondary read failed (Ready, not failing). */
+    private class Entry(val ok: Fetch.Ok<GameDetail>, val landingFailed: Boolean, val partial: Boolean = false)
 
     /** (NFL hub §5.5) The last parsed box score, keyed `league:id`; one slot (≤ 32 KB). */
     private var boxSlot: Pair<String, Fetch.Ok<BoxScore>>? = null
@@ -407,7 +414,7 @@ class GameDetailRepositoryImpl internal constructor(
         lastFailKind = null
         force = false
         lagTries = 0
-        dwellUntil = if (game != null && detailed(game.id.league)) mono.nowMs() + dwellMs else null
+        dwellUntil = if (game != null && isDetailed(game.id.league)) mono.nowMs() + dwellMs else null
     }
 
     private fun cancelInFlight() {
@@ -428,6 +435,11 @@ class GameDetailRepositoryImpl internal constructor(
             return
         }
         val k = key(id)
+        // (CHL hub §4.1) The CHL box score exists only in the final's parse: never a request for it before the game.
+        if (isChl(id.league) && phase(game, cache[k]) != GamePhase.FINAL) {
+            answer.complete(Fetch.Failed(FailKind.HTTP_OTHER, null, now))
+            return
+        }
         val slot = boxSlot?.takeIf { it.first == k }?.second
         if (slot != null && boxFresh(game, slot, now)) {
             answer.complete(slot)
@@ -466,7 +478,7 @@ class GameDetailRepositoryImpl internal constructor(
         val k = key(id)
         when (val f = a.fetch) {
             is Fetch.Ok -> {
-                cache[k] = Entry(if (a.landingFailed) keepLanding(f, cache[k]) else f, a.landingFailed)
+                cache[k] = Entry(if (a.landingFailed) keepLanding(f, cache[k]) else f, a.landingFailed, a.partial)
                 failures = 0
                 lastFailMono = null
                 retryAfterS = null
@@ -530,6 +542,22 @@ class GameDetailRepositoryImpl internal constructor(
 
     private fun gate(): DetailGate = DetailGate(sportsOn, isAwake, isForeground, isOnline, paused)
 
+    private fun isDetailed(league: League): Boolean = detailed(league, chlHub)
+
+    /**
+     * The shown game gets no detail request: a league without a source, or (CHL hub D5, §2.5) a CHL game whose effective
+     * phase is LIVE, INTERMISSION or POSTPONED (the live read is a later step behind `CHL_HUB_LIVE_ENABLED`, §7, with
+     * its own source branch). Checked before the policy, so a postponed game's first-fetch rule never applies.
+     */
+    private fun boardOnly(game: GameSnapshot): Boolean {
+        if (!isDetailed(game.id.league)) return true
+        if (!isChl(game.id.league)) return false
+        return when (phase(game, cache[key(game.id)])) {
+            GamePhase.LIVE, GamePhase.INTERMISSION, GamePhase.POSTPONED -> true
+            GamePhase.SCHEDULED, GamePhase.PRE, GamePhase.FINAL -> false
+        }
+    }
+
     private fun updateGate() {
         gateSnapshot = gate()
     }
@@ -543,7 +571,9 @@ class GameDetailRepositoryImpl internal constructor(
             _detail.value = DetailState.None
             return
         }
-        if (!detailed(game.id.league)) {
+        if (boardOnly(game)) {
+            // (CHL hub D5) A CHL game that went live (or postponed) while a pre-game read was in flight: dropped.
+            if (inFlight != null) cancelInFlight()
             _detail.value = DetailState.BoardOnly(game.id)
             return
         }
@@ -570,17 +600,24 @@ class GameDetailRepositoryImpl internal constructor(
     private fun policyNextAt(game: GameSnapshot, now: Long): Long? {
         val entry = cache[key(game.id)]
         val phase = phase(game, entry)
-        return DetailPollPolicy.nextAt(
+        val at = DetailPollPolicy.nextAt(
             cadence(game.id.league), gate(), entry?.ok, phase, entry?.ok?.value?.fetchedPhase, finalFacts(game, entry), failures, lastFailMono,
             retryAfterS, refused(), pollPhaseMs, jitter, now, lagTries,
         )
+        // (CHL hub §4.1) A partial answer re-reads at min(normal next, received + HUB_CHL_PARTIAL_RETRY_MS); back-off
+        // (failures > 0) and the closed gate (at == null) still win.
+        if (entry == null || !entry.partial || failures > 0 || !gate().open) return at
+        val retry = entry.ok.receivedMono + SportsConstants.HUB_CHL_PARTIAL_RETRY_MS
+        return if (at == null) retry else minOf(at, retry)
     }
 
     private fun launchFetch(children: CoroutineScope, game: GameSnapshot) {
         force = false
         val myGen = ++gen
         val id = game.id
-        val hint = game.phase
+        // (CHL hub C0 ruling R6) The CHL source is told the effective phase (board ∨ cached detail); the NHL and NFL keep
+        // the board's.
+        val hint = if (isChl(id.league)) phase(game, cache[key(id)]) else game.phase
         inFlight = children.launch {
             val answer = try {
                 fetcher.detail(id, hint)
@@ -605,6 +642,7 @@ class GameDetailRepositoryImpl internal constructor(
                     fetchedAtMono = entry.ok.receivedMono,
                     failing = failures > 0 || entry.landingFailed || !isOnline,
                     stale = DetailPollPolicy.isStale(cadence(game.id.league), entry.ok.receivedMono, phase, finalFacts(game, entry), now),
+                    partial = entry.partial,
                 )
             }
             !isOnline -> DetailState.Failed(game.id, FailKind.OFFLINE)
@@ -625,7 +663,7 @@ class GameDetailRepositoryImpl internal constructor(
 
     private fun nextWake(now: Long): Long? {
         val game = shown ?: return null
-        if (!detailed(game.id.league)) return null
+        if (boardOnly(game)) return null
         val entry = cache[key(game.id)]
         val stale = entry?.let {
             val phase = phase(game, it)
@@ -654,6 +692,8 @@ class GameDetailRepositoryImpl internal constructor(
      */
     private fun recapPosted(game: GameSnapshot, entry: Entry?): Boolean {
         val d = entry?.ok?.value
+        // (CHL hub §4.2) The CHL's final wait is for the three stars (no video feed).
+        if (isChl(game.id.league)) return d?.stars?.isNotEmpty() == true
         if (game.id.league != League.NFL) return d?.recapId != null || game.media?.recapId != null
         // (Code review 2026-11-26, data #6) The kill switch: the app offers no ESPN video, so there is nothing to wait for.
         if (!espnVideo) return true
@@ -711,11 +751,21 @@ class GameDetailRepositoryImpl internal constructor(
         /** A regulation NHL game's usual length, start to final horn, for a game first seen already final. */
         internal val GAME_LENGTH_MS = DetailCadence.NHL.gameLengthMs
 
-        /** (NFL hub §5.2) The leagues with a detail source; every other league is BoardOnly. */
-        internal fun detailed(league: League): Boolean = league == League.NHL || league == League.NFL
+        /**
+         * (NFL hub §5.2) The leagues with a detail source; every other league is BoardOnly. (CHL hub P2) The CHL leagues
+         * too while [chlHub] (`SportsConstants.CHL_HUB_ENABLED`) is on.
+         */
+        internal fun detailed(league: League, chlHub: Boolean = SportsConstants.CHL_HUB_ENABLED): Boolean =
+            league == League.NHL || league == League.NFL || (chlHub && isChl(league))
 
-        /** (NFL hub §5.2) The league's detail cadence. */
-        internal fun cadence(league: League): DetailCadence = if (league == League.NFL) DetailCadence.NFL else DetailCadence.NHL
+        internal fun isChl(league: League): Boolean = league == League.OHL || league == League.WHL || league == League.QMJHL
+
+        /** (NFL hub §5.2) The league's detail cadence; (CHL hub §4.2) [DetailCadence.CHL] for OHL, WHL, QMJHL. */
+        internal fun cadence(league: League): DetailCadence = when (league) {
+            League.NFL -> DetailCadence.NFL
+            League.OHL, League.WHL, League.QMJHL -> DetailCadence.CHL
+            League.NHL -> DetailCadence.NHL
+        }
 
         /** (NFL hub §5.2, arch m8) The key of every per-game map: an NHL and an ESPN id never collide. */
         internal fun key(id: GameId): String = "${id.league}:${id.id}"
