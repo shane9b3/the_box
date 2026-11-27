@@ -52,14 +52,6 @@ class ChlHubContractsTest {
         assertFalse(ChlHubFixtures.finalOhl29239().goals.first().gameWinning)
     }
 
-    @Test fun theStubReturnsNullUntilP1() {
-        val pv = ChlHubFixtures.obj(ChlHubFixtures.PREVIEW_OHL_29246)
-        val id = ChlHubFixtures.preOhl29246().id
-        assertNull(ChlDetailMapper.preview(id, pv, null, null, null, false) { null })
-        assertNull(ChlDetailMapper.summary(id, ChlHubFixtures.obj(ChlHubFixtures.SUMMARY_OHL_29239)) { null })
-        assertNull(ChlDetailMapper.ranks(ChlHubFixtures.table(ChlHubFixtures.TABLE_OHL), null))
-    }
-
     @Test fun theFakesCarryTheWorkedExamples() {
         val pre = ChlHubFixtures.preOhl29246()
         assertEquals(Ranked(87.0 / 24, 12), pre.season!!.homeGa) // "3.63 (12th)"
