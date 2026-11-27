@@ -178,6 +178,7 @@ fun GoalsSheet(
                         val q = scoringQueue(rows, i)
                         when {
                             q.isNotEmpty() -> onPlay(q, 0)
+                            row.noVideo -> Unit
                             row.event is GoalItem -> onMissingClip()
                             else -> onPlayNoVideo()
                         }
@@ -233,6 +234,11 @@ internal sealed interface ScoringRow {
         val desc: String,
         val icon: RowIcon,
         val clip: ClipRef? = null,
+        /**
+         * (CHL hub §3.2) The league has no video at all (the CHL): the row is drawn at full strength with no ▶ or duration,
+         * and OK does nothing (no "video not posted yet" toast for a video that never comes). The NHL and the NFL: false.
+         */
+        val noVideo: Boolean = false,
     ) : ScoringRow
 
     /** A video row (Game highlights, a More videos clip, the NHL's recap and condensed game). */
@@ -391,7 +397,7 @@ private fun EventRowView(
     onClick: () -> Unit,
 ) {
     val goal = row.event as? GoalItem
-    val dim = goal != null && row.clip == null
+    val dim = goal != null && row.clip == null && !row.noVideo
     HubSheetRow(requester, first, last, key = row.key, height = ROW_H, dimmed = dim, description = row.desc.takeIf { it.isNotEmpty() }, onClick = onClick) { color ->
         when (val icon = row.icon) {
             is RowIcon.Headshot -> HubHeadshot(icon.url, goal?.scorer.orEmpty(), 64.dp)
@@ -405,7 +411,7 @@ private fun EventRowView(
             Line(row.line1, GuideUi.sans(26, FontWeight.SemiBold, color))
             Line(row.line2, GuideUi.sans(22, FontWeight.Medium, GuideUi.secondary(color, focusedOf(color), 0.70f)))
         }
-        if (goal != null && !dim) Line(clipDuration(info?.durationMs) ?: "▶", GuideUi.mono(22, FontWeight.Medium, color))
+        if (goal != null && !dim && !row.noVideo) Line(clipDuration(info?.durationMs) ?: "▶", GuideUi.mono(22, FontWeight.Medium, color))
     }
 }
 

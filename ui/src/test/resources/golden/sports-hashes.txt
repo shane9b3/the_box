@@ -1787,3 +1787,17 @@ f3942bc456a2116c64a53fc29038841c8257b4f42a623a0b5406fe1155d77834  sports-tab/nfl
 25482624a409df5d923e4e65299824bcee2aef8aab969630a193da934067a4af  sports-tab/nfl-hub-scoring-highlight-only.png
 3f2995a36ef8adbf1c614a51e4511ac504e50c17e86f07375e91ba8a9dc8dee5  sports-tab/nfl-hub-scoring-live-empty.png
 ad51ae962b4376dda4d34541e2543529eb6c4f99355f099bc59cb1860734a946  sports-tab/nfl-hub-scoring-no-video.png
+# 2026-11-27 (CHL hub P3, docs/design/m6-chl-hub.md §6): 9 new entries sports-tab/chl-*.png (ChlSheetsTest, with
+#   ChlHubUi.enabled on and the commit-0 ChlHubFixtures fakes): the panel pre-game (OHL 29246, WHL 1023348), final (OHL
+#   29239 with catch-up, WHL 1023337 without, QMJHL 32952 in OT with hits) and postponed; the QMJHL Matchup (both
+#   starters); the OHL Goals and Box score sheets. Each PNG looked at before recording; two runs hashed equal. Every
+#   existing hash is unchanged (sportsHashGate: all 1700 equal before these lines were added).
+8ed72bbd79b0bad6ec3998fef79b939f1c305b65247f037b5d0aa2c0eb9f939d  sports-tab/chl-box-final-ohl.png
+d9f9fb5047eebf38092602e1e5f6f7abd0d6b0df7ec3a0bf003974eeef23beb2  sports-tab/chl-goals-final-ohl.png
+08d39f8c209016f5cb1e21aef6ca335ce4653427e261856b5447ddcb02bbcc6c  sports-tab/chl-hub-final-nocatchup-whl.png
+fed893789d13dfb3172399a70479ca4b92f747deb0a770a9162507df88f99cee  sports-tab/chl-hub-final-ohl.png
+99cd6d037ae1c14122616828aa0b2eca708e420257861dafdac34bad0a65a84b  sports-tab/chl-hub-final-ot-qmjhl.png
+1fa5dc367e450ef4e2188c41ee39912a0625a25d4733fd6be7713b84ae2ab744  sports-tab/chl-hub-postponed.png
+16a02cfb769270387999355a6f2cf090654eeaa70e66d84c726471dbb131371b  sports-tab/chl-hub-pre-ohl.png
+ea0e48573f629078a8cc42b0c984433d063e1438f2ad16306747fcfa8828bf17  sports-tab/chl-hub-pre-whl.png
+329b935f7ed57b0b65096556c31cfc3c7c416cea50d54e31bf9d341ef058004a  sports-tab/chl-matchup-qmjhl.png

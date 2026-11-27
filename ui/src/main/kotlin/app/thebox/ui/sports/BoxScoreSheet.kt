@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -85,10 +86,18 @@ fun BoxScoreSheet(
     val res = LocalResources.current
     var side by rememberSaveable { mutableStateOf(Side.AWAY) }
     val tabs = remember { Side.entries.associateWith { FocusRequester() } }
-    val team: TeamBox? = (box as? Fetch.Ok)?.value?.let { if (side == Side.AWAY) it.away else it.home }
+    val whole: BoxScore? = (box as? Fetch.Ok)?.value
+    val team: TeamBox? = whole?.let { if (side == Side.AWAY) it.away else it.home }
     val failed = box is Fetch.Failed || box is Fetch.NotFound
     val nfl = game.id.league.group == app.thebox.core.sports.LeagueGroup.NFL
+    // (CHL hub §3.3, S6) Data rules, never a league check: no TOI column when no skater of either team has one.
+    val toi = whole == null || skaterToiShown(whole)
     val rows = remember(team, failed, nfl) { boxRows(team, failed, nfl) }
+    val skaterCols = if (toi) SKATER_COLS else SKATER_COLS.dropLast(1)
+    val errorText = remember(game, nfl) {
+        HubLeagues.of(game.id.league.group).boxScoreError(res, game)
+            ?: res.getString(if (nfl) R.string.sports_hub_error_box_score_espn else R.string.sports_hub_error_box_score)
+    }
     val focusable = rows.indices.filter { rows[it].focusable }
     val requesters = remember(side, rows.size) { List(rows.size) { FocusRequester() } }
     val listState = rememberLazyListState()
@@ -118,6 +127,8 @@ fun BoxScoreSheet(
         },
         header = {
             if (nfl) LineScore(res, game)
+            // (CHL hub §3.3) The hockey line score when the box carries goals and shots by period (the NHL and NFL: none).
+            whole?.takeIf { hockeyLineScoreShown(it) }?.let { HockeyLineScore(res, game, it) }
             Row(Modifier.padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 for (s in Side.entries) {
                     BoxTab(
@@ -140,14 +151,14 @@ fun BoxScoreSheet(
                 val last = focusable.lastOrNull() == i
                 when (row) {
                     BoxRow.Loading -> Line(res.getString(R.string.sports_hub_stat_none), GuideUi.sans(26, color = GuideUi.Fg70), Modifier.padding(horizontal = 16.dp))
-                    BoxRow.Error -> Line(res.getString(if (nfl) R.string.sports_hub_error_box_score_espn else R.string.sports_hub_error_box_score), GuideUi.sans(24, color = GuideUi.Fg70), Modifier.padding(horizontal = 16.dp), maxLines = 3)
+                    BoxRow.Error -> Line(errorText, GuideUi.sans(24, color = GuideUi.Fg70), Modifier.padding(horizontal = 16.dp), maxLines = 3)
                     BoxRow.Retry -> HubSheetRow(reqs[i], first, last, key = "retry", height = 56, upTarget = tabs.getValue(side), onClick = onRetry) { c ->
                         Line(res.getString(R.string.sports_hub_slot_retry), GuideUi.sans(26, FontWeight.SemiBold, c), Modifier.testTag(BOX_SCORE_RETRY_TAG))
                     }
                     is BoxRow.Section -> Line(res.getString(row.title), GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg70), Modifier.padding(start = 16.dp, top = 8.dp))
                     BoxRow.SkaterHeader -> TableRow(GuideUi.Fg70, header = true) { c ->
                         Cell(res.getString(R.string.sports_hub_box_player), c, null)
-                        for ((s, w) in SKATER_COLS) Cell(res.getString(s), c, w)
+                        for ((s, w) in skaterCols) Cell(res.getString(s), c, w)
                     }
                     BoxRow.GoalieHeader -> TableRow(GuideUi.Fg70, header = true) { c ->
                         Cell(res.getString(R.string.sports_hub_box_goalies), c, null)
@@ -155,7 +166,7 @@ fun BoxScoreSheet(
                     }
                     is BoxRow.Skater -> HubSheetRow(reqs[i], first, last, key = "sk:$i", height = ROW_H, upTarget = tabs.getValue(side), onClick = {}) { c ->
                         Line(playerCell(res, row.line.name, row.line.pos), GuideUi.sans(26, FontWeight.Medium, c), Modifier.weight(1f))
-                        skaterValues(row.line).zip(SKATER_COLS).forEach { (v, col) -> Cell(v, c, col.second) }
+                        skaterValues(row.line).zip(skaterCols).forEach { (v, col) -> Cell(v, c, col.second) }
                     }
                     is BoxRow.Goalie -> HubSheetRow(reqs[i], first, last, key = "gk:$i", height = ROW_H, upTarget = tabs.getValue(side), onClick = {}) { c ->
                         Line(row.line.name, GuideUi.sans(26, FontWeight.Medium, c), Modifier.weight(1f))
@@ -218,7 +229,7 @@ internal fun boxRows(team: TeamBox?, failed: Boolean, nfl: Boolean = false): Lis
         }
         return@buildList
     }
-    val (defence, forwards) = team.skaters.partition { it.pos.equals("D", ignoreCase = true) }
+    val (defence, forwards) = team.skaters.partition { isDefence(it.pos) }
     add(BoxRow.SkaterHeader)
     if (forwards.isNotEmpty()) {
         add(BoxRow.Section(R.string.sports_hub_box_forwards))
@@ -232,6 +243,39 @@ internal fun boxRows(team: TeamBox?, failed: Boolean, nfl: Boolean = false): Lis
         add(BoxRow.GoalieHeader)
         team.goalies.forEach { add(BoxRow.Goalie(it)) }
     }
+}
+
+/** (CHL hub §3.3) "D", and HockeyTech's "LD" / "RD", are the defence group; NHL.com only ever sends "D". */
+internal fun isDefence(pos: String): Boolean = pos.trim().uppercase(Locale.ROOT).let { it == "D" || it == "LD" || it == "RD" }
+
+/** (CHL hub §3.3) The skaters' TOI column is drawn unless no skater of either team has a time (HockeyTech tracks none). */
+internal fun skaterToiShown(box: BoxScore): Boolean = (box.away.skaters + box.home.skaters).let { all -> all.isEmpty() || all.any { it.toi != null } }
+
+/** (CHL hub §3.3) The hockey line score is drawn when the box carries goals and shots by period. */
+internal fun hockeyLineScoreShown(box: BoxScore): Boolean = box.periods.isNotEmpty() && box.periodShots.isNotEmpty()
+
+/**
+ * (CHL hub §3.3) The hockey line score's cells: the period words ("1st", "2nd", "3rd", "OT", never "Q%d") and "T"; per
+ * team a Goals row and a Shots row, the total added. The shots follow the goals' labels (the same periods in order).
+ */
+internal data class HockeyLine(val team: String, val label: String, val cells: List<String>)
+
+internal fun hockeyLineScore(res: Resources, game: GameSnapshot, box: BoxScore): Pair<List<String>, List<HockeyLine>> {
+    val heads = box.periods.map { SportsText.periodWord(res, it.label) } + res.getString(R.string.sports_hub_row_total)
+    // The goals' total is the board's final score when it has one (a shootout winner's extra goal is in no period).
+    fun cells(list: List<app.thebox.core.sports.hub.PeriodScore>, away: Boolean, total: Int?): List<String> {
+        val byLabel = list.associateBy { it.label }
+        val values = box.periods.map { p -> byLabel[p.label]?.let { if (away) it.away else it.home } }
+        return values.map { it?.toString() ?: NONE } + (total ?: values.filterNotNull().sum()).toString()
+    }
+    val goals = res.getString(R.string.sports_hub_box_row_goals)
+    val shots = res.getString(R.string.sports_hub_box_row_shots)
+    return heads to listOf(
+        HockeyLine(game.away.abbrev, goals, cells(box.periods, true, game.away.score)),
+        HockeyLine("", shots, cells(box.periodShots, true, null)),
+        HockeyLine(game.home.abbrev, goals, cells(box.periods, false, game.home.score)),
+        HockeyLine("", shots, cells(box.periodShots, false, null)),
+    )
 }
 
 /** "C. McDavid · C" (the contract carries no sweater number, so `sports_hub_box_player_cell` is not used). */
@@ -323,6 +367,39 @@ private fun LineScore(res: Resources, game: GameSnapshot) {
         }
     }
 }
+
+internal const val BOX_HOCKEY_LINE_SCORE_TAG = "hub_box_hockey_line_score"
+
+/**
+ * (CHL hub §3.3) The hockey line score (not focusable): the period words and T across, then per team a Goals and a Shots
+ * row (the abbreviation on the Goals row), 22 px tabular, rows 34 tall (36 from Larger up, as the NFL's line score).
+ */
+@Composable
+private fun HockeyLineScore(res: Resources, game: GameSnapshot, box: BoxScore) {
+    val (heads, lines) = remember(box, game) { hockeyLineScore(res, game, box) }
+    val h = if (app.thebox.core.settings.UiTextScale.factor > 1.05f) 36 else 34
+    androidx.compose.foundation.layout.Column(Modifier.padding(bottom = 12.dp).testTag(BOX_HOCKEY_LINE_SCORE_TAG)) {
+        val rows = listOf(Triple("", "", heads) to GuideUi.Fg70) + lines.map { Triple(it.team, it.label, it.cells) to GuideUi.Fg }
+        rows.forEachIndexed { i, (cells, ink) ->
+            val (team, label, values) = cells
+            // A hairline between the two teams.
+            val m = if (i == 3) Modifier.drawBehindTop() else Modifier
+            Row(m.height(h.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(team, Modifier.width(96.dp), style = GuideUi.sans(22, FontWeight.SemiBold, ink), maxLines = 1)
+                Text(label, Modifier.width(112.dp), style = GuideUi.sans(22, FontWeight.Medium, if (i == 0) ink else GuideUi.Fg70), maxLines = 1)
+                values.forEachIndexed { k, v ->
+                    val total = k == values.lastIndex
+                    Text(v, Modifier.width(72.dp), style = GuideUi.mono(22, if (total && i > 0) FontWeight.SemiBold else FontWeight.Medium, ink), maxLines = 1, textAlign = TextAlign.End)
+                }
+            }
+        }
+    }
+}
+
+/** A 1 px White08 line along the top edge (a flat draw: no layer, no clip). */
+private fun Modifier.drawBehindTop(): Modifier = this.then(
+    Modifier.drawBehind { drawLine(GuideUi.White08, androidx.compose.ui.geometry.Offset(0f, 0.5f), androidx.compose.ui.geometry.Offset(size.width, 0.5f), 1f) },
+)
 
 /** A table cell: 22/500 tabular, right-aligned in [width] design px; null width = the flexible name column. */
 @Composable

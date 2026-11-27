@@ -256,6 +256,69 @@ class HubPanelFitTest {
         }
     }
 
+    // ================================================================== (CHL hub P3, docs/design/m6-chl-hub.md §2, §6.2 item 9)
+
+    /** Every CHL pre-game and final fixture keeps its media floor at every size, and its stat rows fit the 664 px row. */
+    @Test fun everyChlPanelFitsAtEverySize() = ChlHubTestKit.enabled {
+        val k = ChlHubTestKit
+        val fx = app.thebox.core.sports.hub.ChlHubFixtures
+        val models = listOf(
+            k.model(k.preOhl(), fx.preOhl29246()), k.model(k.preWhl(), fx.preWhl1023348()), k.model(k.preQmjhl(), fx.preQmjhl32953()),
+            k.model(k.finalOhl(), fx.finalOhl29239()), k.model(k.finalWhl(), fx.finalWhl1023337()), k.model(k.finalQmjhl(), fx.finalOtQmjhl32952()),
+            k.model(k.finalQmjhl(), fx.finalOtQmjhl32952(), match = MatchState.Done(emptyList())),
+        )
+        val report = StringBuilder("CHL panels (media px; widest side value + label px of 664) at 0.9 / 1.0 / 1.1 / 1.2:\n")
+        for (m in models) {
+            val g = m.game!!
+            report.append("  ${g.id.league} ${g.id.id} ${g.phase}:")
+            for (f in factors) {
+                val c = nflContent(m, f)
+                assertTrue("${g.id} at $f: ${c.plan}", c.plan.ok)
+                val w = weighted(f)
+                // The row as `Stats` lays it out: the side columns widen symmetrically to the widest value.
+                val side = c.rows.maxOf { maxOf(w(it.away, 24, 500), w(it.home, 24, 500)) }.coerceAtLeast(HubPanelPlan.INNER_W / 4f)
+                val label = c.rows.maxOf { w(it.label, 24, 500) }
+                assertTrue("${g.id} at $f: 2 × $side + $label", 2 * side + label <= HubPanelPlan.INNER_W)
+                report.append(" ${c.plan.mediaH} (${Math.round(2 * side + label)})")
+            }
+            report.append('\n')
+        }
+        println(report)
+        // The QMJHL final's five rows at Largest keep both summary lines' room or give line 2 up before the floor.
+        val ot = nflContent(models[5], 1.2f)
+        assertEquals(5, ot.rows.size)
+        assertTrue(ot.plan.mediaH >= HubPanelPlan.ART_FLOOR)
+    }
+
+    @Test fun everyChlSlotSetFitsAtEverySize() {
+        fun sl(a: SlotAction, l: SlotLabel, n: Int = 0, enabled: Boolean = true) = HubSlot(a, l, enabled, n)
+        val goals = sl(SlotAction.GOALS, SlotLabel.GOALS_N, 12)
+        val box = sl(SlotAction.BOX_SCORE, SlotLabel.BOX_SCORE)
+        val sets = linkedMapOf(
+            "▶ Watch from start · Goals (12) · Box score" to listOf(sl(SlotAction.WATCH_FROM_START, SlotLabel.WATCH_FROM_START), goals, box),
+            "▶ Watch from start · ↻ Retry · Goals (12)" to listOf(sl(SlotAction.WATCH_FROM_START, SlotLabel.WATCH_FROM_START), sl(SlotAction.RETRY, SlotLabel.RETRY), goals),
+            "↻ Retry · Goals (12) · Box score" to listOf(sl(SlotAction.RETRY, SlotLabel.RETRY), goals, box),
+            "Goals (12) · Box score" to listOf(goals, box),
+            "Following ✓ · Channels (36) · Matchup" to listOf(sl(SlotAction.FOLLOW, SlotLabel.FOLLOWING), sl(SlotAction.CHANNEL, SlotLabel.CHANNELS_N, 36), sl(SlotAction.MATCHUP, SlotLabel.MATCHUP)),
+        )
+        for ((name, slots) in sets) for (f in factors) {
+            val w = slotRowWidth(slots, f)
+            assertTrue("$name at $f: $w px", w <= HubPanelPlan.INNER_W)
+        }
+    }
+
+    /** The final caption's fallbacks keep the longest fixture venue on the 632 px art line at every size (22/500). */
+    @Test fun theChlFinalCaptionFitsTheArt() {
+        val fx = app.thebox.core.sports.hub.ChlHubFixtures
+        for (d in listOf(fx.finalOhl29239(), fx.finalWhl1023337(), fx.finalOtQmjhl32952())) for (f in factors) {
+            val caption = ChlHubUi.finalCaption(res, d, java.util.Locale.US, f)!!
+            val w = weighted(f)(caption, 22, 500)
+            assertTrue("\"$caption\" at $f: $w of 632", w <= 632f)
+        }
+        assertEquals("Scotiabank Saddledome · Attendance 2,226", ChlHubUi.finalCaption(res, fx.finalWhl1023337(), java.util.Locale.US, 1.2f))
+        assertEquals("Scotiabank Saddledome - Calgary, AB · Attendance 2,226", ChlHubUi.finalCaption(res, fx.finalWhl1023337(), java.util.Locale.US, 1.0f))
+    }
+
     @Test fun theFittedLinesNeverExceedTheLine() {
         val now = NflHubTestKit.AFTER_FINAL
         val g = NflHubTestKit.mnfFinal()

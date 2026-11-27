@@ -621,7 +621,26 @@ internal object HubPanelContents {
      * slot → "Select Retry"; else a final game with a usable Watch recap → "Select Watch recap"; else (the slots were frozen
      * before the failure, so slot 1 is still Follow, or Watch recap is off) → Back, then OK, lands on Retry.
      */
-    fun failureText(res: Resources, kind: FailKind?, slots: List<HubSlot>, final: Boolean, source: HubSource = HubSource.NHL_COM): String {
+    fun failureText(
+        res: Resources,
+        kind: FailKind?,
+        slots: List<HubSlot>,
+        final: Boolean,
+        source: HubSource = HubSource.NHL_COM,
+        /** (CHL hub §4.5 #3) The game's league: [HubSource.HOCKEYTECH]'s texts name it ("the OHL"). Defaulted. */
+        league: app.thebox.core.sports.League? = null,
+    ): String {
+        if (source == HubSource.HOCKEYTECH) {
+            val name = ChlHubUi.shortName(res, league)
+            return when (kind) {
+                FailKind.HTTP_429, FailKind.REFUSED -> res.getString(R.string.sports_hub_error_detail_limited_chl, name)
+                FailKind.BAD_BODY -> res.getString(R.string.sports_hub_error_detail_changed_chl, name)
+                FailKind.OFFLINE -> res.getString(R.string.sports_hub_error_detail_offline)
+                else ->
+                    if (slots.any { it.action == SlotAction.RETRY && it.usable }) res.getString(R.string.sports_hub_error_detail_retry_chl, name)
+                    else res.getString(R.string.sports_hub_error_detail_back_chl, name)
+            }
+        }
         val espn = source == HubSource.ESPN
         return res.getString(
             when (kind) {
@@ -997,6 +1016,10 @@ private fun Stats(c: PanelContent) {
         )
         return
     }
+    // (CHL hub P3) A side value wider than its quarter of the row ("68.3% (20th)" at Largest) widens both side columns
+    // to the widest value, symmetrically, out of the label's half. Rows whose values fit keep the 1 : 2 : 1 weights
+    // exactly as before (every NHL and NFL golden draws this branch).
+    val sideW = statSideWidth(c.rows)
     c.rows.forEachIndexed { i, r ->
         val awayInk = if (c.loading) GuideUi.Fg.copy(alpha = 0.4f) else if (r.better == Side.HOME) GuideUi.Fg70 else GuideUi.Fg
         val homeInk = if (c.loading) GuideUi.Fg.copy(alpha = 0.4f) else if (r.better == Side.AWAY) GuideUi.Fg70 else GuideUi.Fg
@@ -1006,12 +1029,30 @@ private fun Stats(c: PanelContent) {
                 .semantics(mergeDescendants = true) { contentDescription = r.desc },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Line(r.away, GuideUi.sans(24, FontWeight.Medium, awayInk), Modifier.weight(1f))
+            val side = if (sideW == null) Modifier.weight(1f) else Modifier.width(sideW)
+            Line(r.away, GuideUi.sans(24, FontWeight.Medium, awayInk), side)
             Line(r.label, GuideUi.sans(24, FontWeight.Medium, GuideUi.Fg55).copy(textAlign = TextAlign.Center), Modifier.weight(2f))
-            Line(r.home, GuideUi.sans(24, FontWeight.Medium, homeInk).copy(textAlign = TextAlign.End), Modifier.weight(1f))
+            Line(r.home, GuideUi.sans(24, FontWeight.Medium, homeInk).copy(textAlign = TextAlign.End), side)
         }
     }
 }
+
+/** The side columns' width when a value is wider than a quarter of the 664 px row; null = the 1 : 2 : 1 weights. */
+@Composable
+private fun statSideWidth(rows: List<PanelRow>): androidx.compose.ui.unit.Dp? {
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val density = LocalDensity.current
+    val factor = UiTextScale.factor
+    return remember(rows, density, factor) {
+        val style = GuideUi.sans(24, FontWeight.Medium)
+        val need = rows.maxOfOrNull { r -> maxOf(w(measurer, r.away, style), w(measurer, r.home, style)) } ?: 0
+        val quarter = with(density) { (HubPanelPlan.INNER_W / 4).dp.toPx() }
+        if (need <= quarter) null else with(density) { (need + 1).toDp() }
+    }
+}
+
+private fun w(measurer: androidx.compose.ui.text.TextMeasurer, text: String, style: TextStyle): Int =
+    measurer.measure(text, style, maxLines = 1, softWrap = false).size.width
 
 /** The summary (§6.7): line 1 may wrap to two lines, then line 2 is not drawn (U-S8). */
 @Composable

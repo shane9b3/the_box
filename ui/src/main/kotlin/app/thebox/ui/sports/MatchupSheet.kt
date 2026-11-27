@@ -1,8 +1,12 @@
 package app.thebox.ui.sports
 
 import android.content.res.Resources
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.shape.RoundedCornerShape
+import app.thebox.ui.theme.DesignTokens
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -51,7 +55,7 @@ fun MatchupSheet(
 ) {
     val res = LocalResources.current
     val nfl = game.id.league.group == app.thebox.core.sports.LeagueGroup.NFL
-    val rows = remember(detail, game, nfl) { if (nfl) nflMatchupRows(res, game, detail) else matchupRows(detail) }
+    val rows = remember(detail, game, nfl) { if (nfl) nflMatchupRows(res, game, detail) else matchupRows(detail, res, game) }
     val focusable = rows.indices.filter { rows[it].focusable }
     HubSheetFrame(
         title = res.getString(R.string.sports_hub_sheet_matchup, game.away.abbrev, game.home.abbrev),
@@ -153,15 +157,7 @@ internal fun nflMatchupRows(res: Resources, game: app.thebox.core.sports.GameSna
             add(MatchupRow.NflLeaders(cat, p.away, p.home))
         }
     }
-    val sep = res.getString(R.string.sports_hub_summary_sep)
-    val recent = listOf(app.thebox.core.sports.Side.AWAY to away, app.thebox.core.sports.Side.HOME to home).mapNotNull { (side, name) ->
-        val games = d.recent.filter { it.side == side }
-        if (games.isEmpty()) null else MatchupRow.Recent(name.nickname, games.joinToString(sep) { recentText(res, it) })
-    }
-    if (recent.isNotEmpty()) {
-        add(MatchupRow.Header(R.string.sports_hub_matchup_last5))
-        addAll(recent)
-    }
+    addAll(recentRows(res, game, d))
     val max = app.thebox.core.sports.SportsConstants.HUB_NFL_INJURIES_PER_TEAM
     val injuries = listOf(app.thebox.core.sports.Side.AWAY to away, app.thebox.core.sports.Side.HOME to home).mapNotNull { (side, name) ->
         d.injuries.filter { it.side == side }.takeIf { it.isNotEmpty() }?.let { Triple(name, it, d.injuryCounts[side] ?: it.size) }
@@ -282,13 +278,19 @@ internal fun nflLeaderLine(res: Resources, category: String, l: Leader): String 
     return parts.joinToString(sep).ifEmpty { none }
 }
 
-/** §6.4: the three leader rows (Points, Goals, Assists, in that order when present), then up to two goalies per team. */
-internal fun matchupRows(d: GameDetail): List<MatchupRow> = buildList {
+/**
+ * §6.4: the three leader rows (Points, Goals, Assists, in that order when present), then up to two goalies per team.
+ *
+ * (CHL hub §3.1, review S6) Driven by data the NHL never fills, never by the league: the Leaders header says "this season"
+ * when [GameDetail.leadersSeason]; a goalie with `Goalie.starting` carries the Starting mark (drawn by the cell); and,
+ * given [res] and [game], a Last 5 section (the NFL's rows) when [GameDetail.recent] is non-empty.
+ */
+internal fun matchupRows(d: GameDetail, res: Resources? = null, game: GameSnapshot? = null): List<MatchupRow> = buildList {
     if (!hasMatchupRows(d)) return@buildList
     val order = listOf("points", "goals", "assists")
     val leaders = d.leaders.sortedBy { p -> order.indexOf(p.category.lowercase(Locale.ROOT)).let { if (it < 0) order.size else it } }
     if (leaders.isNotEmpty()) {
-        add(MatchupRow.Header(R.string.sports_hub_matchup_leaders))
+        add(MatchupRow.Header(if (d.leadersSeason) R.string.sports_hub_matchup_leaders_season else R.string.sports_hub_matchup_leaders))
         leaders.forEach { add(MatchupRow.Leaders(it)) }
     }
     val g = d.goalies
@@ -297,6 +299,21 @@ internal fun matchupRows(d: GameDetail): List<MatchupRow> = buildList {
         val n = maxOf(g.away.size, g.home.size).coerceAtMost(2)
         for (i in 0 until n) add(MatchupRow.Goalies(g.away.getOrNull(i), g.home.getOrNull(i)))
     }
+    if (res != null && game != null && d.recent.isNotEmpty()) addAll(recentRows(res, game, d))
+}
+
+/** (NFL hub §3.6; CHL hub §3.1) "Last 5 games", then one row per team that has any, oldest first. */
+private fun recentRows(res: Resources, game: GameSnapshot, d: GameDetail): List<MatchupRow> {
+    val sep = res.getString(R.string.sports_hub_summary_sep)
+    val sides = listOf(
+        app.thebox.core.sports.Side.AWAY to HubNames.of(game.id.league, game.away),
+        app.thebox.core.sports.Side.HOME to HubNames.of(game.id.league, game.home),
+    )
+    val rows = sides.mapNotNull { (side, name) ->
+        val games = d.recent.filter { it.side == side }
+        if (games.isEmpty()) null else MatchupRow.Recent(name.nickname, games.joinToString(sep) { recentText(res, it) })
+    }
+    return if (rows.isEmpty()) emptyList() else listOf(MatchupRow.Header(R.string.sports_hub_matchup_last5)) + rows
 }
 
 /** Whether [matchupRows] has anything to show (the MATCHUP slot's enabled rule, HubSlots.forAction). */
@@ -349,8 +366,32 @@ private fun GoalieCell(res: Resources, g: Goalie?, color: Color, modifier: Modif
         if (g == null) return@Row
         HubHeadshot(g.headshot, g.name, 64.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Line(g.name, GuideUi.sans(24, FontWeight.SemiBold, color))
-            Line(goalieLine(res, g), GuideUi.sans(22, FontWeight.Medium, GuideUi.secondary(color, focusedOf(color), 0.70f)))
+            // (CHL hub §3.1, B1) "Starting" only when tonight's lineup marks him; never inferred.
+            if (g.starting) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Line(g.name, GuideUi.sans(24, FontWeight.SemiBold, color), Modifier.weight(1f, fill = false))
+                    StartingMark(res, color)
+                }
+            } else {
+                Line(g.name, GuideUi.sans(24, FontWeight.SemiBold, color))
+            }
+            // (CHL hub §3.1) A goalie the stats read did not list (a failed read, no table for his team) has his name only.
+            val line = goalieLine(res, g)
+            if (line.isNotEmpty()) Line(line, GuideUi.sans(22, FontWeight.Medium, GuideUi.secondary(color, focusedOf(color), 0.70f)))
         }
+    }
+}
+
+internal const val MATCHUP_STARTING_TAG = "hub_matchup_starting"
+
+/** (CHL hub §3.1) The Starting mark: 22/600 in a 1 px outlined pill, in the row's ink (dark on a focused row). */
+@Composable
+private fun StartingMark(res: Resources, color: Color) {
+    val shape = RoundedCornerShape(DesignTokens.Radii.Pill)
+    Box(
+        Modifier.testTag(MATCHUP_STARTING_TAG).border(1.dp, color.copy(alpha = 0.55f), shape).padding(horizontal = 10.dp, vertical = 1.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Line(res.getString(R.string.sports_hub_matchup_starting), GuideUi.sans(22, FontWeight.SemiBold, color))
     }
 }
