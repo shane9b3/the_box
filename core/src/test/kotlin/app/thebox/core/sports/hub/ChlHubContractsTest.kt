@@ -12,12 +12,12 @@ import kotlin.test.assertTrue
 
 /**
  * (CHL hub commit 0, docs/design/m6-chl-hub.md §4.2, §5) The frozen contracts: the CHL cadence's numbers, the kill
- * switch off, the appended members' defaults, and that the fixture fakes load and agree with the worked examples' key
+ * switches (hub on since the integration, live off), the appended members' defaults, and that the fixture fakes load and agree with the worked examples' key
  * values. `ChlDetailMapperTest` (P1) owns the mapper's behaviour.
  */
 class ChlHubContractsTest {
-    @Test fun theKillSwitchesAreOffInCommit0() {
-        assertFalse(SportsConstants.CHL_HUB_ENABLED)
+    @Test fun theHubIsOnAndLiveIsOffSinceTheIntegration() {
+        assertTrue(SportsConstants.CHL_HUB_ENABLED)
         assertFalse(SportsConstants.CHL_HUB_LIVE_ENABLED)
         assertEquals(setOf(League.QMJHL), SportsConstants.CHL_HITS_LEAGUES)
     }

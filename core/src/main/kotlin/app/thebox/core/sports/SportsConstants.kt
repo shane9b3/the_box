@@ -983,10 +983,11 @@ object SportsConstants {
 
     /**
      * The CHL hub's build-time kill switch (§0 D7, as [ESPN_VIDEO_ENABLED]): false = every CHL game is `BoardOnly` and the
-     * CHL panel is today's board-only one, with no detail request. Commit 0 lands it false; the integration of P1–P3 sets
-     * it true, its default from then on. There is no user setting.
+     * CHL panel is today's board-only one, with no detail request. Commit 0 landed it false; the integration of P1–P3 set
+     * it true, its default from then on. There is no user setting. `:data` (`GameDetailRepositoryImpl.detailed`) and
+     * `:ui` (`ChlHubUi.enabled`) both read this one constant, so the data and the panel cannot disagree.
      */
-    const val CHL_HUB_ENABLED = false
+    const val CHL_HUB_ENABLED = true
     /** The later live step (§7): a live CHL game reads `gamesummary`. False in this milestone (live stays board rows). */
     const val CHL_HUB_LIVE_ENABLED = false
     /** CHL final: re-read every `HUB_DETAIL_IDLE_MS` while the three stars are missing, for this long after the end. */
@@ -995,6 +996,11 @@ object SportsConstants {
     const val HUB_CHL_TABLES_TTL_MS = 1_800_000L
     /** A partial CHL answer (a goalie or table read failed) is re-read no later than this after it (§4.1). */
     const val HUB_CHL_PARTIAL_RETRY_MS = 120_000L
+    /**
+     * (CHL hub integration) At most this many 120 s re-reads after partial answers in a row; then the phase's own cadence
+     * (30 min pre-game), so a secondary read that keeps failing never re-reads the set every 2 min while the panel is open.
+     */
+    const val HUB_CHL_PARTIAL_RETRIES = 3
     /** The CHL leagues whose `gamesummary` tracks hits (`totalHits`; `current_season.sopt_track_hits`): the Hits row. */
     val CHL_HITS_LEAGUES: Set<League> = setOf(League.QMJHL)
 }

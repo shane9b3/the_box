@@ -168,23 +168,45 @@ class SportsViewModelHubTest {
      * (Code review 2026-11-26, UI m11) The CHL's final rules, unchanged from `main` (`ChlHubUi.slots`): no catch-up airing,
      * no slot at all and OK on the card does nothing; a catch-up airing, ▶ Watch from start alone.
      */
-    @Test fun aFinalChlGameOffersWatchFromStartOnlyWithACatchUpAiring() {
+    @Test fun aFinalChlGameWithTheHubSwitchedOffOffersWatchFromStartOnlyWithACatchUpAiring() {
+        // The kill switch's off position, stated explicitly (the build default is on since the CHL hub integration).
+        ChlHubUi.enabled = false
+        try {
+            val r = FakeScoreRepository(SportsPrefs(league = League.OHL))
+            val chlFinal = SportsFixtures.game(id = "C1", phase = GamePhase.FINAL, league = League.OHL, finalKind = PeriodKind.REG, clock = null)
+            r.board(chlFinal, day = "1969-12-31")
+            val m = vm(r)
+            m.onCardFocused("C1")
+            assertEquals(listOf<SlotAction?>(null, null, null), m.actions())
+            assertNull("nothing to enter", m.enterPanel("C1"))
+            // With a catch-up airing: Watch from start, and nothing else.
+            matcher.answers[chlFinal.id] = listOf(candidate(airing = GuideFixtures.info(100, 280)))
+            val n = vm(r)
+            n.onCardFocused("C1")
+            assertEquals(0, n.enterPanel("C1"))
+            assertEquals(listOf<SlotAction?>(SlotAction.WATCH_FROM_START, null, null), n.actions())
+            val effects = collect(n)
+            n.onSlot(0)
+            assertTrue(effects.single() is SportsEffect.PlayArchive)
+        } finally {
+            ChlHubUi.enabled = app.thebox.core.sports.SportsConstants.CHL_HUB_ENABLED
+        }
+    }
+
+    @Test fun aFinalChlGameWithTheHubOnOffersGoalsAndBoxScoreAndWatchFromStartFirstWithACatchUpAiring() {
+        // (CHL hub §2.4, Q7) The build default: Goals · Box score · empty; with a catch-up airing ▶ From start first.
+        assertTrue(ChlHubUi.enabled)
         val r = FakeScoreRepository(SportsPrefs(league = League.OHL))
         val chlFinal = SportsFixtures.game(id = "C1", phase = GamePhase.FINAL, league = League.OHL, finalKind = PeriodKind.REG, clock = null)
         r.board(chlFinal, day = "1969-12-31")
         val m = vm(r)
         m.onCardFocused("C1")
-        assertEquals(listOf<SlotAction?>(null, null, null), m.actions())
-        assertNull("nothing to enter", m.enterPanel("C1"))
-        // With a catch-up airing: Watch from start, and nothing else.
+        assertEquals(listOf(SlotAction.GOALS, SlotAction.BOX_SCORE, null), m.actions())
         matcher.answers[chlFinal.id] = listOf(candidate(airing = GuideFixtures.info(100, 280)))
         val n = vm(r)
         n.onCardFocused("C1")
         assertEquals(0, n.enterPanel("C1"))
-        assertEquals(listOf<SlotAction?>(SlotAction.WATCH_FROM_START, null, null), n.actions())
-        val effects = collect(n)
-        n.onSlot(0)
-        assertTrue(effects.single() is SportsEffect.PlayArchive)
+        assertEquals(listOf(SlotAction.WATCH_FROM_START, SlotAction.GOALS, SlotAction.BOX_SCORE), n.actions())
     }
 
     @Test fun aFinalNflGameOffersWatchFromStartOnlyWithACatchUpAiring() {

@@ -299,6 +299,12 @@ class GameDetailRepositoryImpl internal constructor(
      * behind the board's FINAL); `DetailPollPolicy.nextAt` stops forcing the 15 s re-read after `HUB_NFL_PHASE_LAG_TRIES`.
      */
     private var lagTries = 0
+    /**
+     * (CHL hub integration) Partial answers in a row for the shown game. The 120 s partial re-read applies only while this
+     * is ≤ `HUB_CHL_PARTIAL_RETRIES`; a secondary read that keeps failing (a team without a `topgoalies` answer, a table
+     * view down) then falls back to the phase's own cadence instead of re-reading the whole set every 2 min for good.
+     */
+    private var partialTries = 0
 
     private var sportsOn = false
     private var pollPhaseMs = SportsConstants.POLL_PHASE_MIN_MS
@@ -414,6 +420,7 @@ class GameDetailRepositoryImpl internal constructor(
         lastFailKind = null
         force = false
         lagTries = 0
+        partialTries = 0
         dwellUntil = if (game != null && isDetailed(game.id.league)) mono.nowMs() + dwellMs else null
     }
 
@@ -490,6 +497,7 @@ class GameDetailRepositoryImpl internal constructor(
                 shown?.let(::noteEnd)
                 val g = shown
                 lagTries = if (g != null && g.id == id && DetailPollPolicy.lagging(phase(g, cache[k]), f.value.fetchedPhase)) lagTries + 1 else 0
+                partialTries = if (a.partial && g != null && g.id == id) partialTries + 1 else 0
             }
             Fetch.NotFound -> failed(FailKind.HTTP_OTHER, mono.nowMs(), null)
             is Fetch.Failed -> failed(f.kind, f.receivedMono, f.retryAfterS)
@@ -605,8 +613,9 @@ class GameDetailRepositoryImpl internal constructor(
             retryAfterS, refused(), pollPhaseMs, jitter, now, lagTries,
         )
         // (CHL hub §4.1) A partial answer re-reads at min(normal next, received + HUB_CHL_PARTIAL_RETRY_MS); back-off
-        // (failures > 0) and the closed gate (at == null) still win.
-        if (entry == null || !entry.partial || failures > 0 || !gate().open) return at
+        // (failures > 0) and the closed gate (at == null) still win; (integration) for at most HUB_CHL_PARTIAL_RETRIES
+        // partial answers in a row.
+        if (entry == null || !entry.partial || failures > 0 || !gate().open || partialTries > SportsConstants.HUB_CHL_PARTIAL_RETRIES) return at
         val retry = entry.ok.receivedMono + SportsConstants.HUB_CHL_PARTIAL_RETRY_MS
         return if (at == null) retry else minOf(at, retry)
     }

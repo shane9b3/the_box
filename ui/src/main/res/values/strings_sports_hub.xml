@@ -673,4 +673,11 @@
     <!-- The hockey line score's two row labels in the Box score sheet. -->
     <string name="sports_hub_box_row_goals">Goals</string>
     <string name="sports_hub_box_row_shots">Shots</string>
+    <!-- (CHL hub integration) The CHL final's one-line game-winning goal when the full sentence does not fit, so the three
+         stars keep the summary's second line. The label, then " · ", then the text. %1$s = scorer and season goal number
+         ("Dietsch (2)"), %2$s = the assists ("Houben", "Houben and Roy"), %3$s = when ("3rd 10:53", "OT 2:41"). -->
+    <string name="sports_hub_summary_winning_goal_short">GWG</string>
+    <string name="sports_hub_summary_winning_goal_assisted">%1$s from %2$s, %3$s</string>
+    <!-- Unassisted, or when the assists do not fit: %1$s scorer and goal number, %2$s when. -->
+    <string name="sports_hub_summary_winning_goal_solo">%1$s, %2$s</string>
 </resources>

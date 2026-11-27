@@ -107,8 +107,8 @@ class GameDetailRepositoryChlTest {
     // ---------------------------------------------------------------- the switch (D7, R9)
 
     @Test fun switchOffEveryChlGameIsBoardOnlyWithoutARequest() = runTest {
-        assertFalse("commit 0 / P2 leave the switch off", SportsConstants.CHL_HUB_ENABLED)
-        assertFalse(GameDetailRepositoryImpl.detailed(League.OHL))
+        // The kill switch's off position, stated explicitly (the build default is on since the integration).
+        assertFalse(GameDetailRepositoryImpl.detailed(League.OHL, chlHub = false))
         val h = harness(chlHub = false)
         for (p in GamePhase.entries) {
             for (l in listOf(League.OHL, League.WHL, League.QMJHL)) {
@@ -120,6 +120,11 @@ class GameDetailRepositoryChlTest {
         assertTrue(h.fetcher.calls.isEmpty())
         assertEquals(FailKind.HTTP_OTHER, (h.repo.boxScore(GameId(League.QMJHL, "29246")) as Fetch.Failed).kind)
         assertEquals(0, h.fetcher.boxCalls)
+    }
+
+    @Test fun theBuildDefaultIsOnAndTheRepositoryFollowsIt() {
+        assertTrue(SportsConstants.CHL_HUB_ENABLED)
+        for (l in listOf(League.OHL, League.WHL, League.QMJHL)) assertTrue(GameDetailRepositoryImpl.detailed(l))
     }
 
     @Test fun switchOnTheLeaguesAreDetailedWithTheChlCadence() {
@@ -165,6 +170,23 @@ class GameDetailRepositoryChlTest {
         assertEquals(2, h.fetcher.calls.size)
         settle(1)
         assertEquals(3, h.fetcher.calls.size)
+    }
+
+    @Test fun partialAnswersInARowReReadFastAtMostThreeTimesThenThePreGameCadence() = runTest {
+        // (Integration) A secondary read that never recovers must not re-read the whole set every 2 min for good.
+        val h = harness()
+        h.fetcher.answer = { id, hint, now -> chlAnswer(id, hint, now).copy(partial = true) }
+        h.repo.show(ohl(GamePhase.SCHEDULED))
+        settle(dwell + 3 * SportsConstants.HUB_NFL_PRE_MS)
+        val p = SportsConstants.HUB_CHL_PARTIAL_RETRY_MS
+        val pre = SportsConstants.HUB_NFL_PRE_MS
+        assertEquals(listOf(0L, p, 2 * p, 3 * p, 3 * p + pre, 3 * p + 2 * pre).map { dwell + it }, h.times)
+        assertTrue(h.ready.partial)
+        assertFalse(h.ready.failing)
+        // Another game starts its own count.
+        h.repo.show(ohl(GamePhase.SCHEDULED, id = "29247"))
+        settle(dwell + p)
+        assertEquals(listOf(0L, p).map { h.times[6] + it }, h.times.drop(6))
     }
 
     @Test fun aFailureWithNothingCachedIsFailedWithItsKindAndBacksOff() = runTest {

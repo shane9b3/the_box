@@ -34,11 +34,21 @@ import java.util.Locale
  */
 internal object ChlHubUi : HubLeagueUi {
     /**
-     * `SportsConstants.CHL_HUB_ENABLED` (§0 D7): false = today's board-only CHL panel. A `var` only so the screen tests can
-     * draw the detail screens while the build switch is still off (the integration sets the constant true); production code
-     * never writes it.
+     * `SportsConstants.CHL_HUB_ENABLED` (§0 D7): false = today's board-only CHL panel.
+     *
+     * (CHL hub integration) Read through, never copied: the getter is the constant unless a **test** set [testOverride], so
+     * the panel and `GameDetailRepositoryImpl.detailed` (`:data`, the same constant) can never disagree in production
+     * (data on and UI off, or the reverse). Only test sources write the override; `ChlHubUiSwitchTest` scans `src/main`
+     * to keep it so.
      */
-    @Volatile internal var enabled: Boolean = SportsConstants.CHL_HUB_ENABLED
+    internal var enabled: Boolean
+        get() = testOverride ?: SportsConstants.CHL_HUB_ENABLED
+        @androidx.annotation.VisibleForTesting set(value) {
+            testOverride = value.takeIf { it != SportsConstants.CHL_HUB_ENABLED }
+        }
+
+    /** A screen test's switch position (null = the build's). Never written by production code. */
+    @Volatile private var testOverride: Boolean? = null
 
     override val detailed: Boolean get() = enabled
     override val source: HubSource get() = if (enabled) HubSource.HOCKEYTECH else HubSource.NONE
@@ -157,10 +167,10 @@ internal object ChlHubUi : HubLeagueUi {
                 else if (d != null) {
                     // (R3) The feed's game-winning flag first, else the NHL's rule.
                     val goal = d.goals.firstOrNull { it.gameWinning } ?: HubSummary.winningGoal(g, d)
-                    if (goal != null) out += line(res.getString(R.string.sports_hub_summary_winning_goal), HubPanelContents.goalSentence(res, goal))
+                    if (goal != null) out += winningGoalLine(res, goal, measure)
                 }
                 val stars = d?.stars.orEmpty().sortedBy { it.rank }.map { it.lastName }.filter { it.isNotBlank() }
-                if (stars.isNotEmpty()) out += SummaryLine(res.getString(R.string.sports_hub_summary_stars), res.getString(R.string.sports_hub_summary_stars) + " " + stars.joinToString(", "))
+                if (stars.isNotEmpty()) out += SummaryLine(res.getString(R.string.sports_hub_summary_stars), res.getString(R.string.sports_hub_summary_stars) + " " + stars.joinToString(", "), oneLine = true)
             }
             else -> if (d != null) {
                 d.series?.let { s ->
@@ -180,6 +190,42 @@ internal object ChlHubUi : HubLeagueUi {
             }
         }
         return SummarySpec(out)
+    }
+
+    /**
+     * (CHL hub integration, owner: the final always shows the three stars) The game-winning goal on **one** line, so the
+     * stars keep line 2: the first of these that fits the 664 px line at the drawn size (label 600 + text 400 at 24 px):
+     * 1. "Game-winning goal · Dietsch (2nd) from Houben, 3rd period 10:53." (the NHL's sentence);
+     * 2. "GWG · Dietsch (2) from Houben, 3rd 10:53";
+     * 3. "GWG · Dietsch (2), 3rd 10:53" (no assists).
+     * Only when none fits (never with the fixtures' names at Largest) the last one ellipsizes. A shortened line is spoken
+     * as the full sentence.
+     */
+    internal fun winningGoalLine(res: Resources, goal: GoalItem, measure: Measure): SummaryLine {
+        val sep = res.getString(R.string.sports_hub_summary_sep)
+        val long = res.getString(R.string.sports_hub_summary_winning_goal)
+        val sentence = long + sep + HubPanelContents.goalSentence(res, goal)
+        val short = res.getString(R.string.sports_hub_summary_winning_goal_short)
+        val name = goal.scorerTotal?.let { res.getString(R.string.sports_hub_goal_line1, goal.scorerLast, it) } ?: goal.scorerLast
+        val at = goalWhen(res, goal)
+        val assists = when (goal.assistsLast.size) {
+            0 -> null
+            1 -> goal.assistsLast[0]
+            else -> res.getString(R.string.sports_hub_and, goal.assistsLast[0], goal.assistsLast[1])
+        }
+        val candidates = buildList {
+            add(SummaryLine(long, sentence, oneLine = true))
+            if (assists != null) add(SummaryLine(short, short + sep + res.getString(R.string.sports_hub_summary_winning_goal_assisted, name, assists, at), oneLine = true, desc = sentence))
+            add(SummaryLine(short, short + sep + res.getString(R.string.sports_hub_summary_winning_goal_solo, name, at), oneLine = true, desc = sentence))
+        }
+        return candidates.firstOrNull { summaryWidth(it, measure) <= HubPanelPlan.INNER_W } ?: candidates.last()
+    }
+
+    /** Label (600) + text (400) at 24 px, as `Summary` draws a line (the label is the start of [SummaryLine.text]). */
+    private fun summaryWidth(line: SummaryLine, measure: Measure): Float {
+        val label = line.label
+        return if (label.isNotEmpty() && line.text.startsWith(label)) measure(label, 24, 600) + measure(line.text.removePrefix(label), 24, 400)
+        else measure(line.text, 24, 400)
     }
 
     /**

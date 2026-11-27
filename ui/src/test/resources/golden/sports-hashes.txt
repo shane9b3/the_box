@@ -1792,11 +1792,14 @@ ad51ae962b4376dda4d34541e2543529eb6c4f99355f099bc59cb1860734a946  sports-tab/nfl
 #   29239 with catch-up, WHL 1023337 without, QMJHL 32952 in OT with hits) and postponed; the QMJHL Matchup (both
 #   starters); the OHL Goals and Box score sheets. Each PNG looked at before recording; two runs hashed equal. Every
 #   existing hash is unchanged (sportsHashGate: all 1700 equal before these lines were added).
+# 2026-11-27 (CHL hub integration): 3 CHL finals re-recorded (chl-hub-final-ohl, -nocatchup-whl, -ot-qmjhl): the
+#   game-winning goal on one line ("GWG · …" when the sentence does not fit) so the three stars keep line 2. Every
+#   other hash (NHL, NFL, Stacked, the other CHL entries) is unchanged.
 8ed72bbd79b0bad6ec3998fef79b939f1c305b65247f037b5d0aa2c0eb9f939d  sports-tab/chl-box-final-ohl.png
 d9f9fb5047eebf38092602e1e5f6f7abd0d6b0df7ec3a0bf003974eeef23beb2  sports-tab/chl-goals-final-ohl.png
-08d39f8c209016f5cb1e21aef6ca335ce4653427e261856b5447ddcb02bbcc6c  sports-tab/chl-hub-final-nocatchup-whl.png
-fed893789d13dfb3172399a70479ca4b92f747deb0a770a9162507df88f99cee  sports-tab/chl-hub-final-ohl.png
-99cd6d037ae1c14122616828aa0b2eca708e420257861dafdac34bad0a65a84b  sports-tab/chl-hub-final-ot-qmjhl.png
+ef0e58287a51065fe35b2284f541fd80ee6755855adea3c41bd8659ede4e6bb9  sports-tab/chl-hub-final-nocatchup-whl.png
+9f0a58d1331be9a003353d8fd31b133d07999c2aa0f51b4369f9303edb791916  sports-tab/chl-hub-final-ohl.png
+c7f7e8d68097edebec58ac8a9e1081977cbec554f1d647b52ee1538c47f92f54  sports-tab/chl-hub-final-ot-qmjhl.png
 1fa5dc367e450ef4e2188c41ee39912a0625a25d4733fd6be7713b84ae2ab744  sports-tab/chl-hub-postponed.png
 16a02cfb769270387999355a6f2cf090654eeaa70e66d84c726471dbb131371b  sports-tab/chl-hub-pre-ohl.png
 ea0e48573f629078a8cc42b0c984433d063e1438f2ad16306747fcfa8828bf17  sports-tab/chl-hub-pre-whl.png

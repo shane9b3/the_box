@@ -705,3 +705,92 @@ Tests added in commit 0: `data/.../HockeyTechHttpTest.kt` (JSONP array and objec
 the cap, `lscluster` parameters, the error mapping, nothing printed carries a key or the URL, headshot URLs) and
 `core/.../hub/ChlHubContractsTest.kt` (the cadence, the switches off, the appended defaults, the stub, the fakes' key
 worked-example values).
+
+---
+
+## 13. Integration record (2026-11-27)
+
+Branch `chl-hub-int` (commit 0 + P1 + P2 + P3, merged cleanly at a06aeee7). No adb, no emulator, no request to a real
+host: the fixtures over MockWebServer and the local fake panel only.
+
+**Turned on.** `SportsConstants.CHL_HUB_ENABLED = true` (still a build-time kill switch). Tests that assumed false now
+state the position they test: `ChlHubContractsTest` asserts on; `GameDetailRepositoryChlTest` tests the off position
+with `detailed(league, chlHub = false)` and the harness's `chlHub = false`, plus a new test that the build default is on;
+`SportsViewModelHubTest`'s CHL-final slot test is split into an explicit "hub switched off" case (`ChlHubUi.enabled =
+false`) and a "hub on" case (Goals · Box score · empty; ▶ From start first with a catch-up airing).
+
+**Wiring checked in code.**
+- DI: `GameDetailRepositoryImpl`'s `@Inject` constructor takes `ChlDetailSource`, whose `@Inject` constructor passes no
+  mappers, so the defaults are `ChlDetailMapper::preview / ::summary / ::ranks`; the headshot builder is
+  `{ endpoints.headshot(league, it) }` (`HockeyTechEndpoints`, so the debug override serves `{origin}/leaguestat/…`).
+  `DetailFetcher.of` routes OHL / WHL / QMJHL to it; `onTrim` reaches `chl.trimMemory()`.
+- Routing: `detailed()` is true for the CHL with the switch on; LIVE / INTERMISSION / POSTPONED are BoardOnly before the
+  policy; the hint is the effective phase (R6).
+- View model: `buildPanel` maps `Ready` (partial or not) to `DetailKind.READY` with `failing` as published (a partial is
+  `failing = false`, so no error text), `Failed(kind)` to FAILED with the kind, `BoardOnly` to BOARD_ONLY. Followed for
+  OHL 29246 (preview → `pre()` → mapper → `Ready(partial)` → `ChlHubUi.rows/summary`) and OHL 29239 (gamesummary →
+  `final()` → `Ready` + box slot → final rows, GWG/stars, Box score sheet from the same parse).
+
+**New tests.**
+- `data/.../ChlHubEndToEndTest` (5): the six fixture bodies over HTTP → real `ChlDetailSource` (default mappers, real
+  headshot builder) → real repository loop → `DetailState`, equal to the `ChlHubFixtures` values (headshots on the
+  endpoints' host); the three finals' box scores from the one `gamesummary`; tables failing → partial `Ready` without
+  ranks, not failing, filled by the 120 s re-read; a postponed-looking game (below).
+- `ui/.../ChlHubRealMapperTest` (3): the OHL pre-game and final panels and the Matchup, Goals and Box score sheets drawn
+  from the real mapper's output at Default and Largest: nothing cut or outside the panel / sheet; every final (three
+  leagues) draws the stars on line 2 with the winning goal on one line. Review PNGs: `ui/build/chl-hub/real-*.png`.
+- `ui/.../ChlHubUiSwitchTest` (2): the switch reads the constant; no production source writes it.
+
+**Seams resolved.**
+- (a) Tables without `fmt=json`: transport, parser and fake panel agree. The source sends the captured request (no
+  `fmt`); `HockeyTechHttp.element` strips the one `( … )`; the fake panel answers `([ … ])` as
+  `application/javascript` whatever the `fmt`, as the captures. The end-to-end test asserts no `fmt` on `statviewfeed`.
+  Whether the real host answers plain JSON with `fmt=json` is not needed and not checked.
+- (b) Postponed: `HockeyTechMapper.classify` maps status 1 (the only postponed marking seen, `game_status
+  "Postponed"`) to SCHEDULED, so the board never says POSTPONED for the CHL and the reason line cannot show. No status
+  mapping was invented. Such a game reads as a scheduled one: Ready, no crash, no box request, the 30 min pre-game
+  cadence (end-to-end test, also with the fake panel's `hub_postponed` bodies). Found on the way: a partial answer
+  re-read the whole set every 120 s **for as long as the secondary read kept failing** (the fixtures' NIAG goalies, a
+  table view down). Fixed: `SportsConstants.HUB_CHL_PARTIAL_RETRIES = 3` fast re-reads per game, then the phase's own
+  cadence (`GameDetailRepositoryImpl.partialTries`; test `partialAnswersInARowReReadFastAtMostThreeTimes…`). **Lead to
+  ratify** (it bounds §4.1's 120 s rule). **Open:** a captured postponed CHL game; until then `sports_hub_postponed_chl`
+  and the postponed golden are reachable only from a POSTPONED board phase that the CHL mapper never produces.
+- (c) `ChlHubUi.enabled` is no longer a copy: its getter is `testOverride ?: SportsConstants.CHL_HUB_ENABLED`, the setter
+  is `@VisibleForTesting`, and `ChlHubUiSwitchTest` scans `ui`, `app` and `data` main sources for any write. Data
+  (`GameDetailRepositoryImpl.detailed`) and UI read the one constant.
+- (d) Three stars at the final: the owner asked for them, and a wrapped winning-goal sentence dropped line 2 (OHL and
+  QMJHL). The CHL final's winning-goal line is now always one line, the first that fits 664 px as drawn (label 600 +
+  text 400 at 24 px × the text size): "Game-winning goal · Dietsch (2nd) from Houben, 3rd period 10:53." → "GWG ·
+  Dietsch (2) from Houben, 3rd 10:53" → "GWG · Dietsch (2), 3rd 10:53"; a shortened line is spoken as the full
+  sentence. The stars line is `oneLine`. New strings `sports_hub_summary_winning_goal_short`, `…_assisted`, `…_solo`.
+  The NHL's summary is untouched.
+- (e) P1 choices against the fixtures: every `save_percentage` in the captures is a 0..1 fraction (".879", "1.000" maps
+  to 1.0), so the "> 1 → ÷ 100" branch is a guard no capture reaches; no `lastGames` entry has equal goal counts or a
+  missing `winner`, so T is a never-seen fallback (W/L come from `winner` first); no captured goal row is dropped (all
+  have `period_id` and a scorer), and the running scores end at the finals (5–3, 4–3, 5–4 OT). Counting a dropped row
+  keeps the later rows' scores true to the board. All three are kept.
+
+**Fake panel.** Started locally (`--sports --sports-chl`, `sports_chl_hub: true`), each new route curled once for all
+three leagues (4 previews, 8 `topgoalies`, the evicted final's and the postponed game's `gamesummary`, both tables, one
+headshot: 200 `image/jpeg`; an unknown id 404). All 48 bodies went through the real mapper in a throwaway JVM test (not
+kept): every preview SCHEDULED with records, ranks, leaders and goalies (starter marked where the lineup says); the
+finals FINAL with goals, one GWG, three stars, venue, attendance and box (QMJHL with Hits); the postponed
+`gamesummary` SCHEDULED. Not built by P2 and still open: the `chl_hub=fixtures` mode and the `pulled_goalie` switch
+(§6.1). A fake-panel leader id (9884, copied from a fixture) has no headshot there (empty disc, as designed).
+
+**Goldens.** Three hashes re-recorded, each PNG looked at: `sports-tab/chl-hub-final-ohl.png` ("GWG · Dietsch (2) from
+Houben, 3rd 10:53" / "Stars: Manza, Bowes, Dietsch"), `chl-hub-final-nocatchup-whl.png`, `chl-hub-final-ot-qmjhl.png`.
+Every NHL, NFL, Stacked and other CHL hash is unchanged.
+
+**Gate (2026-11-27, this host).** `lintAll` clean (no new issues). Unit tests, 0 failures: `:core` 5023 (2 skipped),
+`:data` 1033 (5 skipped, incl. the real-host `HockeyTechWireProbe`), `:player` 662, `:ui` 1266, `:app` 115.
+`:ui:sportsHashGate` 1730 PNGs: the three finals above differed as intended and were re-recorded, then the gate passed.
+`:app:assembleDebug` built. Fake panel Python: `test_sports*.py` 187, `test_fakepanel.py` 151, `test_events.py` 9, all OK.
+
+**Still open.**
+- A captured postponed CHL game (status / `game_status`), and so the reason line (b).
+- The `HUB_CHL_PARTIAL_RETRIES` bound needs the lead's ruling (b).
+- The emulator checklist §6.2 (not run here: no device); the fake panel's `chl_hub=fixtures` mode and `pulled_goalie`
+  switch that §6.2 assumes were not built by P2.
+- Everything in §10 (live `gamesummary`, shootouts, playoff preview, `lastGames` OT marker, headshot host's answer for a
+  missing photo, the uncaptured tables).
