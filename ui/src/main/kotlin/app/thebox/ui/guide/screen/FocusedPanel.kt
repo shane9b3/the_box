@@ -60,14 +60,14 @@ const val FOCUSED_PANEL_TAG = "focused_panel"
 const val FOCUSED_PANEL_NEW_TAG = "focused_panel_new"
 const val FOCUSED_PANEL_LIVE_TAG = "focused_panel_live"
 const val PANEL_DESCRIPTION_TAG = "focused_panel_description"
-/** The meta row (genre, ON NOW); absent when it would be empty. */
+/** The meta row (genre); absent when there is no genre. */
 const val PANEL_META_TAG = "focused_panel_meta"
 
 /**
  * The focused-programme panel, top-aligned in the header region under the tabs (docs/design/m3-guide.md §3.9.1,
  * §3.15; owner request 2026-11-09). Drawn from [GuideUiState.panel]; the description only arrives after the 150 ms
  * debounce (B2.8). (owner ruling 2026-11-01) No buttons. (owner request 2026-11-09,
- * docs/decisions/2026-11-09-guide-panel-description.md) The meta row shows the genre and ON NOW only (no channel number,
+ * docs/decisions/2026-11-09-guide-panel-description.md) The meta row shows the genre only (no ON NOW chip since 2026-11-26, no channel number,
  * name or catch-up days, although [PanelState] still carries them), and the description fills the rest of the header
  * area: all of it when it fits; otherwise it scrolls slowly when [scrollDescription] is on (and the system animations
  * are on), or ends in an ellipsis.
@@ -252,16 +252,9 @@ private const val PANEL_POSTER_H = 300
 @Composable
 private fun MetaRow(panel: PanelState) {
     // (owner request 2026-11-09) No channel number, name or catch-up days; an empty row takes no space.
-    val genre = panel.genre?.takeIf { it.isNotBlank() }
-    if (genre == null && !panel.onNow) return
+    // (owner request 2026-11-26) No ON NOW chip either: the owner does not need it, and the row cost the description a line.
+    val genre = panel.genre?.takeIf { it.isNotBlank() } ?: return
     Row(Modifier.testTag(PANEL_META_TAG), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        genre?.let { g -> Line(g, GuideUi.sans(24, color = GuideUi.Fg70)) }
-        if (panel.onNow) {
-            Box(
-                Modifier
-                    .background(DesignTokens.Colors.OnNowFill, RoundedCornerShape(DesignTokens.Radii.Pill))
-                    .padding(horizontal = 10.dp, vertical = 3.dp),
-            ) { Line(stringResource(R.string.guide_on_now), GuideUi.sans(22, FontWeight.SemiBold, DesignTokens.Colors.AccentText, 0.06f)) }
-        }
+        Line(genre, GuideUi.sans(24, color = GuideUi.Fg70))
     }
 }

@@ -349,13 +349,16 @@ internal class SettingsRowKeys(private val page: PageModel) {
         ?.let { "r:${it.id.key}" } ?: "i:$index"
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class) // LocalBringIntoViewSpec
 @Composable
 private fun Rows(ui: SettingsUiState, page: PageModel, list: LazyListState, modifier: Modifier) {
     val count = rowCount(page)
     // Keys: the RowId (rows rebuild without recomposing unchanged ones, §5 item 2); a duplicate id or an unloaded row
     // falls back to its index so a bad page can never crash the LazyColumn.
     val keys = remember(page) { SettingsRowKeys(page) }
-    LaunchedEffect(page.route, ui.top, ui.cursor, ui.choice, count) {
+    // (owner finding 2026-11-26) Keyed on the open option list's row, not its focused option: moving between options
+    // re-ran the reveal (back to `top`) and then the option's own bring-into-view, so the page jumped up and down.
+    LaunchedEffect(page.route, ui.top, ui.cursor, ui.choice?.row, count) {
         if (count > 0) revealCursor(list, ui.top.coerceIn(0, count - 1), ui.cursor.coerceIn(0, count - 1))
     }
     val pageFocus = ui.pane == Pane.PAGE && !overlayOpen(ui)
@@ -369,6 +372,7 @@ private fun Rows(ui: SettingsUiState, page: PageModel, list: LazyListState, modi
             else -> i
         }
     }
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides NearestEdgeBringIntoView) {
     LazyColumn(modifier.fillMaxSize(), state = list, verticalArrangement = Arrangement.spacedBy(SettingsUi.ROW_GAP.dp), userScrollEnabled = false) {
         items(count, key = { keys.keyAt(shown(it)) }) { slot ->
             val i = shown(slot)
@@ -383,6 +387,23 @@ private fun Rows(ui: SettingsUiState, page: PageModel, list: LazyListState, modi
                     moving = ui.move?.row == row.id,
                 )
             }
+        }
+    }
+    }
+}
+
+/**
+ * (owner finding 2026-11-26) Scrolls only as far as needed to show the focused option. On TV devices Compose's default
+ * keeps the focused child at a pivot 30 % down the viewport, so the whole page slid on every move between options.
+ */
+internal object NearestEdgeBringIntoView : androidx.compose.foundation.gestures.BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val trailing = offset + size
+        return when {
+            offset >= 0f && trailing <= containerSize -> 0f // wholly visible
+            offset < 0f && trailing > containerSize -> 0f // larger than the viewport and covering it
+            kotlin.math.abs(offset) < kotlin.math.abs(trailing - containerSize) -> offset
+            else -> trailing - containerSize
         }
     }
 }

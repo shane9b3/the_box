@@ -120,7 +120,7 @@ class FocusedPanelTest {
         rule.onNodeWithText("101").assertDoesNotExist()
         rule.onNodeWithText("Catch-up", substring = true).assertDoesNotExist()
         rule.onNodeWithText("News").assertExists() // the genre stays
-        rule.onNodeWithText("ON NOW", ignoreCase = true).assertExists()
+        rule.onNodeWithText("ON NOW", ignoreCase = true).assertDoesNotExist() // owner request 2026-11-26
         val tabs = rule.onNodeWithTag(HEADER_TABS_TAG).fetchSemanticsNode().boundsInRoot
         val panel = rule.onNodeWithTag(FOCUSED_PANEL_TAG).fetchSemanticsNode().boundsInRoot
         assertEquals("the panel starts 16 px under the tabs", tabs.bottom + 16f, panel.top, 0.5f)
@@ -132,8 +132,10 @@ class FocusedPanelTest {
     }
 
     @Test fun anEmptyMetaRowTakesNoSpace() {
-        show(panel(short, genre = null, onNow = false), scroll = true)
+        // On now with no genre (the owner's provider): no row, so the title is the first line.
+        show(panel(short, genre = null, onNow = true), scroll = true)
         rule.onNodeWithTag(PANEL_META_TAG).assertDoesNotExist()
+        rule.onNodeWithText("ON NOW", ignoreCase = true).assertDoesNotExist()
         val panel = rule.onNodeWithTag(FOCUSED_PANEL_TAG).fetchSemanticsNode().boundsInRoot
         val title = rule.onNodeWithText("Evening News").fetchSemanticsNode().boundsInRoot
         assertEquals("the title is the panel's first line", panel.top, title.top, 0.5f)
