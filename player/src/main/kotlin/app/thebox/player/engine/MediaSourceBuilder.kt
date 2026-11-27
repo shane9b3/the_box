@@ -52,7 +52,7 @@ internal class UnsupportedStreamFormatException(val format: StreamFormat, val sc
  * | Format | Source | Transport | `MediaItem` URI |
  * |---|---|---|---|
  * | TS (also UNKNOWN) | progressive, [TsExtractorsFactory] (compat level, dead-track guard) | `liveTs` (live), `http` (archive) | session placeholder |
- * | HLS | `HlsMediaSource`, chunkless, `DefaultHlsExtractorFactory(TS_FLAGS)` | `http` | real URL (relative segment URLs) |
+ * | HLS | `HlsMediaSource`, chunkless, `DefaultHlsExtractorFactory(TS_FLAGS)` behind [SlicelessJoiningHlsExtractorFactory] | `http` | real URL (relative segment URLs) |
  * | PROGRESSIVE_OTHER | progressive, `DefaultExtractorsFactory` | `http` | session placeholder |
  * | DASH | none: [UnsupportedStreamFormatException] | | |
  * | Clip ([ClipMedia], Sports Hub §6.5) | HLS as above (VOD) or progressive MP4, plus side-loaded WebVTT ([clipSource]) | `http` | as HLS / session placeholder |
@@ -132,7 +132,7 @@ internal class MediaSourceBuilder(
                 val source: MediaSource = HlsMediaSource.Factory(factory)
                     .setAllowChunklessPreparation(true)
                     .setLoadErrorHandlingPolicy(policyFor(if (isArchive) LoadOrigin.ARCHIVE else LoadOrigin.HLS_MANIFEST))
-                    .setExtractorFactory(DefaultHlsExtractorFactory(HLS_TS_FLAGS, /* exposeCea608WhenMissingDeclarations = */ true))
+                    .setExtractorFactory(hlsExtractors(ctx, exposeCea608WhenMissingDeclarations = true))
                     .createMediaSource(item)
                 MediaSourceWithTelemetry(source, telemetry)
             }
@@ -163,7 +163,7 @@ internal class MediaSourceBuilder(
                 .setAllowChunklessPreparation(true)
                 .setLoadErrorHandlingPolicy(policyFor(LoadOrigin.HLS_MANIFEST))
                 // A clip's captions are the declared or side-loaded ones; no phantom CEA-608 track.
-                .setExtractorFactory(DefaultHlsExtractorFactory(HLS_TS_FLAGS, /* exposeCea608WhenMissingDeclarations = */ false))
+                .setExtractorFactory(hlsExtractors(ctx, exposeCea608WhenMissingDeclarations = false))
                 .createMediaSource(
                     MediaItem.Builder().setUri(ctx.resolved.url.toUri()).setMediaId(ctx.tuneId.toString()).setMimeType(MimeTypes.APPLICATION_M3U8).build(),
                 )
@@ -215,12 +215,29 @@ internal class MediaSourceBuilder(
             // (device finding 2026-10-18) The controller turns this into FailureSignal.AudioTimestampsStuck.
             onStuckAudio = { pid -> ctx.onEvent(PlaybackEventType.STALL, STUCK_AUDIO_CODE, "pid=$pid") },
             repairAudioTimestamps = ctx.repairAudioTimestamps,
+            joinCounter = joinCounter(ctx),
         )
+
+    /**
+     * HLS segments: `DefaultHlsExtractorFactory` with [HLS_TS_FLAGS] (debug override applied), its TS chunks' H.264
+     * tracks behind the slice-less sample joiner (m6 H.264 access units). fMP4, packed audio and WebVTT pass through.
+     */
+    internal fun hlsExtractors(ctx: StreamSessionContext, exposeCea608WhenMissingDeclarations: Boolean): SlicelessJoiningHlsExtractorFactory =
+        SlicelessJoiningHlsExtractorFactory(
+            DefaultHlsExtractorFactory(TsExtractorsFactory.debugFlags(HLS_TS_FLAGS), exposeCea608WhenMissingDeclarations),
+            joinCounter(ctx),
+        )
+
+    /** One count per built source; the event log gets `H264_AU_JOIN joined=N` at 1, 100, 1 000, … joined samples. */
+    private fun joinCounter(ctx: StreamSessionContext) =
+        SlicelessJoinCounter { n -> ctx.onEvent(PlaybackEventType.SNIFF, AU_JOIN_CODE, "joined=$n") }
 
     companion object {
         const val SESSION_SCHEME = "thebox-session"
         const val DEAD_TRACK_CODE = "DEAD_TRACK"
         const val STUCK_AUDIO_CODE = "STUCK_AUDIO_PTS"
+        /** (m6 H.264 access units) Slice-less H.264 samples joined to the next sample, at milestone counts. */
+        const val AU_JOIN_CODE = "H264_AU_JOIN"
 
         /** HLS live speed band (§3.1.3). */
         const val HLS_LIVE_MIN_SPEED = 0.97f

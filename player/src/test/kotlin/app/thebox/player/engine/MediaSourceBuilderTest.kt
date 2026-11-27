@@ -113,7 +113,9 @@ class MediaSourceBuilderTest {
         assertEquals(listOf("http"), transport.calls)
         assertEquals(listOf(LoadOrigin.HLS_MANIFEST), origins)
         assertTrue(field<Boolean>(hls, HlsMediaSource::class.java, "allowChunklessPreparation"))
-        val extractorFactory = field<Any>(hls, HlsMediaSource::class.java, "extractorFactory") as DefaultHlsExtractorFactory
+        // m6 H.264 access units: the default factory sits behind the slice-less sample joiner, flag still on.
+        val joining = field<Any>(hls, HlsMediaSource::class.java, "extractorFactory") as SlicelessJoiningHlsExtractorFactory
+        val extractorFactory = joining.delegate as DefaultHlsExtractorFactory
         assertEquals(TsExtractorsFactory.TS_FLAGS, field<Int>(extractorFactory, DefaultHlsExtractorFactory::class.java, "payloadReaderFactoryFlags"))
     }
 

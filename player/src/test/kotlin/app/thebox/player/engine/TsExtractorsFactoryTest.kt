@@ -48,12 +48,25 @@ class TsExtractorsFactoryTest {
         assertEquals(TsExtractor.MODE_MULTI_PMT, modeOf(TsExtractorsFactory(TsCompat.MULTI_PMT)))
     }
 
+    /** m6 H.264 access units (review S5/S6): compat level 1 is `MODE_MULTI_PMT` only; the flag stays on. */
+    @Test
+    fun compatLevelKeepsAccessUnitDetection() {
+        assertEquals(TsExtractorsFactory.TS_FLAGS, TsExtractorsFactory.flagsFor(TsCompat.DEFAULT))
+        assertEquals(TsExtractorsFactory.TS_FLAGS, TsExtractorsFactory.flagsFor(TsCompat.MULTI_PMT))
+        val ts = TsExtractorsFactory(TsCompat.MULTI_PMT).createExtractors().single().underlyingImplementation
+        val payloadFactory = TsExtractor::class.java.getDeclaredField("payloadReaderFactory").apply { isAccessible = true }.get(ts)
+        val flags = DefaultTsPayloadReaderFactory::class.java.getDeclaredField("flags").apply { isAccessible = true }.getInt(payloadFactory)
+        assertEquals(TsExtractorsFactory.TS_FLAGS, flags)
+    }
+
     @Test
     fun theDebugOverrideTurnsOffOnlyAccessUnitDetection() {
         // Follow-up 2026-10-14 (O-1 diagnosis): compat level and PMT mode untouched.
         try {
             app.thebox.player.debug.PlayerDebugHooks.detectAccessUnitsOff = true
             assertEquals(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES, TsExtractorsFactory.flagsFor(TsCompat.DEFAULT))
+            assertEquals(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES, TsExtractorsFactory.flagsFor(TsCompat.MULTI_PMT))
+            assertEquals("HLS too", DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES, TsExtractorsFactory.debugFlags(MediaSourceBuilder.HLS_TS_FLAGS))
             assertEquals(TsExtractor.MODE_SINGLE_PMT, modeOf(TsExtractorsFactory(TsCompat.DEFAULT)))
             assertEquals(TsExtractor.MODE_MULTI_PMT, modeOf(TsExtractorsFactory(TsCompat.MULTI_PMT)))
         } finally {
@@ -182,13 +195,23 @@ class TsExtractorsFactoryTest {
         assertTrue("ends as soon as every track has a format, long before the grace", guarded.endedAtBytes in 1 until 64 * 1024)
         assertTrue(guarded.dead.isEmpty())
 
-        // The pre-format bytes are replayed: the guarded output is sample-for-sample identical (first keyframe kept).
+        // The pre-format bytes are replayed: the guarded output is sample-for-sample identical (first keyframe kept),
+        // except that video samples without a slice are joined to the next sample (m6 H.264 access units): the clip's
+        // 102 Media3 samples are its 50 pictures.
         assertEquals(plain.output.numberOfTracks, guarded.output.numberOfTracks)
         for (i in 0 until plain.output.trackOutputs.size()) {
             val id = plain.output.trackOutputs.keyAt(i)
             val a = plain.output.trackOutputs.valueAt(i)
             val b = guarded.output.trackOutputs.get(id)
             assertEquals("track $id format", a.lastFormat, b.lastFormat)
+            if (b.type == C.TRACK_TYPE_VIDEO) {
+                val slices = (0 until a.sampleCount).filter { H264Bytes.sliceCount(a.getSampleData(it)) > 0 }
+                assertEquals(102, a.sampleCount)
+                assertEquals("track $id samples", 50, b.sampleCount)
+                assertEquals(slices.map { a.getSampleTimeUs(it) }, (0 until b.sampleCount).map { b.getSampleTimeUs(it) })
+                assertEquals(slices.map { a.getSampleFlags(it) }, (0 until b.sampleCount).map { b.getSampleFlags(it) })
+                continue
+            }
             assertEquals("track $id samples", a.sampleCount, b.sampleCount)
             for (s in 0 until a.sampleCount) {
                 assertEquals(a.getSampleTimeUs(s), b.getSampleTimeUs(s))
@@ -197,9 +220,11 @@ class TsExtractorsFactoryTest {
             }
         }
         val video = guarded.output.getTrackOutputsForType(C.TRACK_TYPE_VIDEO).single()
+        val plainVideo = plain.output.getTrackOutputsForType(C.TRACK_TYPE_VIDEO).single()
         val firstKey = (0 until video.sampleCount).first { (video.getSampleFlags(it) and C.BUFFER_FLAG_KEY_FRAME) != 0 }
+        val plainFirstKey = (0 until plainVideo.sampleCount).first { (plainVideo.getSampleFlags(it) and C.BUFFER_FLAG_KEY_FRAME) != 0 }
         assertTrue("the first GOP's keyframe survives (index $firstKey of ${video.sampleCount})", firstKey < 25)
-        assertEquals("the clip's first video PTS is kept", plain.output.getTrackOutputsForType(C.TRACK_TYPE_VIDEO).single().getSampleTimeUs(firstKey), video.getSampleTimeUs(firstKey))
+        assertEquals("the clip's first video PTS is kept", plainVideo.getSampleTimeUs(plainFirstKey), video.getSampleTimeUs(firstKey))
     }
 
     @Test

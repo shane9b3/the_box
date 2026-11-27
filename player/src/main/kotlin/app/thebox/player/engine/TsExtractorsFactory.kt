@@ -24,7 +24,13 @@ import java.io.EOFException
  * TS-only extractor list for a sniffed TS session (docs/design/m2-playback-core.md §3.1.3, §3.8.5): the `TsExtractor`
  * that `DefaultExtractorsFactory().setTsExtractorFlags(TS_FLAGS).setTsExtractorMode(mode)` creates (text transcoding
  * stays on), with mode `MODE_SINGLE_PMT` at [TsCompat.DEFAULT] and `MODE_MULTI_PMT` at [TsCompat.MULTI_PMT], wrapped
- * in the dead-track guard (review S5).
+ * in the dead-track guard (review S5). The compat level changes only the PMT mode; `FLAG_DETECT_ACCESS_UNITS` stays on
+ * at every level (m6 H.264 access units, lead ruling 2026-11-26).
+ *
+ * **Output chain** (reader to the period): `TsExtractor` → [SlicelessJoiningOutput] (H.264 video only: slice-less
+ * samples joined to the next sample) → [DeadTrackGuard] (lazy tracks, pre-format replay, stuck-audio check and audio
+ * timestamp repair) → the period's output. The joiner sits nearest the reader so the guard's per-sample bookkeeping
+ * sees whole access units.
  *
  * **Dead-track guard.** `ProgressiveMediaPeriod` finishes preparing only when every sample queue has a format, so a PMT
  * entry whose PID never carries a decodable stream (an unfed second audio PID, LATM `audioMuxVersion == 1`) would keep
@@ -48,6 +54,8 @@ internal class TsExtractorsFactory(
     private val onStuckAudio: ((pid: Int) -> Unit)? = null,
     /** (L33r) Regenerate every audio track's timestamps from the learned frame spacing, aligned to the video clock. */
     private val repairAudioTimestamps: Boolean = false,
+    /** (m6 H.264 access units) Slice-less H.264 samples joined, shared by every extractor of this factory. */
+    private val joinCounter: SlicelessJoinCounter? = null,
 ) : ExtractorsFactory {
 
     override fun createExtractors(): Array<Extractor> {
@@ -56,7 +64,7 @@ internal class TsExtractorsFactory(
             .setTsSubtitleFormats(SPECULATIVE_CC_FORMATS) // V8
         return defaults.createExtractors()
             .filterIsInstance<TsExtractor>()
-            .map { GuardedTsExtractor(it, graceBytes, onDeadTrack, onStuckAudio, repairAudioTimestamps) }
+            .map { GuardedTsExtractor(it, graceBytes, onDeadTrack, onStuckAudio, repairAudioTimestamps, joinCounter) }
             .toTypedArray()
     }
 
@@ -65,18 +73,16 @@ internal class TsExtractorsFactory(
         const val TS_FLAGS: Int = DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS
 
         /**
-         * (integration 2026-10-13) The compat level also drops `FLAG_DETECT_ACCESS_UNITS`: Media3's Javadoc says the flag
-         * "should be disabled if the stream contains access unit delimiters", and with AUD-carrying H.264 (ffmpeg's
-         * muxer adds AUDs) it can split one access unit into several samples. Whether a stream has AUDs is not known
-         * before the first PES, so the design default (flag on, for AUD-less broadcast encoders) stays; a channel that
-         * escalated to compat level 1 (L27) gets slice-header detection off as part of that level.
+         * The TS payload reader flags: [TS_FLAGS] at every compat level. (m6 H.264 access units, review S5/S6: the
+         * 2026-10-13 `COMPAT_TS_FLAGS`, flag off at level 1, is gone. Flag off gives AUD-less H.264 no video samples, so
+         * an AUD-less channel that escalated for an unrelated stall lost video for good. The split it worked around is
+         * now repaired by [SlicelessSampleJoiner].) Only the debug override changes the result.
          */
-        const val COMPAT_TS_FLAGS: Int = DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES
+        fun flagsFor(@Suppress("UNUSED_PARAMETER") compat: TsCompat): Int = debugFlags(TS_FLAGS)
 
-        fun flagsFor(compat: TsCompat): Int {
-            val flags = if (compat == TsCompat.MULTI_PMT) COMPAT_TS_FLAGS else TS_FLAGS
-            return if (TsDebugOverrides.detectAccessUnitsOff) flags and DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS.inv() else flags
-        }
+        /** [flags] without `FLAG_DETECT_ACCESS_UNITS` while the debug override is set (TS and HLS). */
+        fun debugFlags(flags: Int): Int =
+            if (TsDebugOverrides.detectAccessUnitsOff) flags and DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS.inv() else flags
 
         /**
          * (code review 2026-10-16, V8) One speculative CEA-608 track per H.264/H.265 stream without a caption descriptor.
@@ -109,7 +115,7 @@ internal class TsExtractorsFactory(
     }
 }
 
-/** `TsExtractor` whose output goes through a [DeadTrackGuard]. */
+/** `TsExtractor` whose output goes through a [SlicelessJoiningOutput] and then a [DeadTrackGuard]. */
 @OptIn(UnstableApi::class)
 internal class GuardedTsExtractor(
     private val delegate: TsExtractor,
@@ -117,15 +123,19 @@ internal class GuardedTsExtractor(
     private val onDeadTrack: ((Int, Int) -> Unit)?,
     private val onStuckAudio: ((Int) -> Unit)? = null,
     private val repairAudioTimestamps: Boolean = false,
+    private val joinCounter: SlicelessJoinCounter? = null,
 ) : Extractor {
     private var guard: DeadTrackGuard? = null
+    private var joining: SlicelessJoiningOutput? = null
 
     override fun sniff(input: ExtractorInput): Boolean = delegate.sniff(input)
 
     override fun init(output: ExtractorOutput) {
         val g = DeadTrackGuard(output, graceBytes, onDeadTrack, onStuckAudio, repairAudioTimestamps)
         guard = g
-        delegate.init(g)
+        val j = SlicelessJoiningOutput(g, joinCounter)
+        joining = j
+        delegate.init(j)
     }
 
     override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int {
@@ -136,10 +146,14 @@ internal class GuardedTsExtractor(
         val before = input.position
         val result = delegate.read(input, seekPosition)
         guard?.onRead((input.position - before).coerceAtLeast(0), result == Extractor.RESULT_END_OF_INPUT)
+        if (result == Extractor.RESULT_END_OF_INPUT) joining?.endOfInput()
         return result
     }
 
-    override fun seek(position: Long, timeUs: Long) = delegate.seek(position, timeUs)
+    override fun seek(position: Long, timeUs: Long) {
+        joining?.reset()
+        delegate.seek(position, timeUs)
+    }
 
     override fun release() = delegate.release()
 
@@ -404,7 +418,8 @@ internal class DeadTrackGuard(
 
 /**
  * (follow-up 2026-10-14, O-1 diagnosis) Debug-only override, set only through `app.thebox.player.debug.PlayerDebugHooks`
- * (the `debug` source set); always false in release. Turns off `FLAG_DETECT_ACCESS_UNITS` alone.
+ * (the `debug` source set); always false in release. Turns off `FLAG_DETECT_ACCESS_UNITS` alone (TS and HLS). The
+ * slice-less sample joiner stays in place; with the flag off every sample starts at an AUD and holds a slice.
  */
 internal object TsDebugOverrides {
     @Volatile var detectAccessUnitsOff: Boolean = false
