@@ -10,6 +10,7 @@ import copy
 import http.client
 import json
 import os
+import re
 import struct
 import sys
 import time
@@ -613,6 +614,322 @@ class BoardShotsTest(ChlCase):
         g = json.loads(self.feed("ohl", "gamesbydate", fetch_date=day)[2])["SiteKit"]["Gamesbydate"][0]
         self.assertGreater(int(g["visiting_shots"]), 0)
         self.assertGreater(int(g["home_shots"]), 0)
+
+
+# ---------------------------------------------------------------- CHL hub P2 (docs/design/m6-chl-hub.md section 6.1)
+HEX16 = re.compile(r"(?<![0-9a-fA-F])[0-9a-f]{16}(?![0-9a-fA-F])")
+
+
+def fixture(name):
+    with open(os.path.join(sports_chl.FIXTURES, name), encoding="utf-8") as f:
+        t = f.read().strip()
+    return json.loads(t[1:-1] if t.startswith("(") else t)
+
+
+class HubCase(ChlCase):
+    def setUp(self):
+        super().setUp()
+        self.panel.cfg["sports_chl_hub"] = True
+
+    def view(self, client, feed, key=None, **params):
+        q = {"feed": feed}
+        q.update(params)
+        q.update({"key": key or sports_chl.fake_key(client), "client_code": client})
+        return self.raw(FEED + "?" + urllib.parse.urlencode(q))
+
+    def gc(self, client, tab, gid, **kw):
+        return self.view(client, "gc", tab=tab, game_id=gid, fmt="json", lang_code="en", **kw)
+
+    def gc_json(self, client, tab, gid):
+        st, h, body = self.gc(client, tab, gid)
+        self.assertEqual(200, st, body[:200])
+        return json.loads(body)["GC"]
+
+    def goalies(self, client, team, season=None):
+        st, _, body = self.view(client, "modulekit", view="statviewtype", type="topgoalies",
+                                season_id=season or sports_chl.SEASONS[client], team_id=team, first="0", limit="10",
+                                fmt="json", lang="en")
+        return st, body
+
+    def table(self, client, special, season=None):
+        return self.view(client, "statviewfeed", view="teams", groupTeamsBy="league", context="overall",
+                         season=season or sports_chl.SEASONS[client], special="true" if special else "false",
+                         sort="power_play_pct" if special else "points", lang="en")
+
+    def game(self, client, kind):
+        return next(g for g in self.chl.games(client) if g[4] == kind)
+
+    def board(self, client):
+        day = self.chl.day(client).isoformat()
+        kit = json.loads(self.feed(client, "gamesbydate", fetch_date=day)[2])["SiteKit"]
+        return {g["game_id"]: g for g in kit["Gamesbydate"]}
+
+    def assertShape(self, tpl, got, path="$"):
+        """Every key of the fixture is there with the fixture's JSON type (a null on either side is the feed's own)."""
+        if isinstance(tpl, dict) and tpl and all(k.isdigit() for k in tpl):  # a period map ({"1": …, "4": …}): any periods
+            self.assertIsInstance(got, dict, path)
+            for v in got.values():
+                self.assertShape(next(iter(tpl.values())), v, f"{path}.n")
+        elif isinstance(tpl, dict):
+            self.assertIsInstance(got, dict, path)
+            missing = set(tpl) - set(got)
+            self.assertFalse(missing, f"{path}: missing {sorted(missing)}")
+            for k, v in tpl.items():
+                self.assertShape(v, got[k], f"{path}.{k}")
+        elif isinstance(tpl, list):
+            self.assertIsInstance(got, list, path)
+            if tpl and got:
+                for g in got:
+                    self.assertShape(tpl[0], g, f"{path}[]")
+        elif tpl is not None and got is not None:
+            self.assertEqual(type(tpl), type(got), f"{path}: {tpl!r} vs {got!r}")
+
+
+class HubRoutesTest(HubCase):
+    def test_the_hub_games_join_the_slate(self):
+        self.panel.cfg["sports_chl_hub"] = False
+        self.assertEqual(4, len(self.board("ohl")))
+        self.panel.cfg["sports_chl_hub"] = True
+        for c in sports_chl.CLIENTS:
+            b = self.board(c)
+            self.assertEqual(7, len(b))
+            gid = self.game(c, "hub_postponed")[0]
+            self.assertEqual(("1", "Postponed", "0"), (b[gid]["status"], b[gid]["game_status"], b[gid]["started"]))
+            self.assertEqual("", b[self.game(c, "hub_gp0")[0]]["game_status"])
+
+    def test_previews_use_the_boards_games_and_teams(self):
+        for c in sports_chl.CLIENTS:
+            b = self.board(c)
+            for gid, away, home, _, kind in self.chl.games(c):
+                pv = self.gc_json(c, "preview", gid)["Preview"]
+                self.assertEqual((away, home), (pv["visitor_team"]["team_id"], pv["home_team"]["team_id"]), kind)
+                self.assertEqual(b[gid]["visiting_team_code"], pv["visitor_team"]["team_code"])
+                self.assertEqual(b[gid]["home_team_code"], pv["home_team"]["team_code"])
+                self.assertEqual(sports_chl.SEASONS[c], pv["current_season"]["id"])
+                self.assertEqual("0", pv["current_season"]["playoff"])
+                v = pv["visitor_team"]
+                if away != sports_chl.GP0_TEAMS[c]:
+                    self.assertEqual(v["gp"], v["wins"] + v["losses"] + v["ot_losses"] + v["shootout_losses"])
+                    self.assertEqual(5, len(v["lastGames"]))
+                    self.assertTrue(all(x["winner"] in (x["home_team"], x["visiting_team"]) for x in v["lastGames"]))
+                    self.assertTrue(all(away in (x["home_team"], x["visiting_team"]) for x in v["lastGames"]))
+
+    def test_lineups_and_starters(self):
+        def starts(lineup):
+            return None if lineup is None else [g["start"] for g in lineup["goalies"]]
+        for c in sports_chl.CLIENTS:
+            pv = self.gc_json(c, "preview", self.game(c, "evening")[0])["Preview"]
+            self.assertEqual(["0", "1"], starts(pv["home_team"]["lineup"]))  # the backup listed first, the starter marked
+            self.assertEqual(["0", "1"], starts(pv["visiting_team"]["lineup"]))  # the visitor's lineup is its own key
+            self.assertNotIn("lineup", pv["visitor_team"])
+            pv = self.gc_json(c, "preview", self.game(c, "featured")[0])["Preview"]
+            self.assertEqual(["0", "1"], starts(pv["home_team"]["lineup"]))
+            self.assertEqual(["0", "0"], starts(pv["visiting_team"]["lineup"]))
+            pv = self.gc_json(c, "preview", self.game(c, "hub_gp0")[0])["Preview"]
+            self.assertEqual(["0", "0"], starts(pv["home_team"]["lineup"]))
+            pv = self.gc_json(c, "preview", self.game(c, "hub_nolineup")[0])["Preview"]
+            self.assertIsNone(pv["home_team"]["lineup"])
+            self.assertEqual({"lineup": None}, pv["visiting_team"])
+
+    def test_a_team_with_no_games_played(self):
+        for c in sports_chl.CLIENTS:
+            gid, away, home, _, _ = self.game(c, "hub_gp0")
+            self.assertEqual(sports_chl.GP0_TEAMS[c], away)
+            pv = self.gc_json(c, "preview", gid)["Preview"]
+            v = pv["visitor_team"]
+            self.assertEqual((0, 0, 0, 0, 0, 0, 0), (v["gp"], v["wins"], v["goals_for"], v["goals_against"], v["power_plays"],
+                                                     v["times_short_handed"], len(v["lastGames"])))
+            self.assertEqual("0-0-0-0", v["last10"])
+            self.assertEqual([], v["leadingScorers"])
+            self.assertGreater(pv["home_team"]["gp"], 0)
+            rows = json.loads(self.goalies(c, away)[1])["SiteKit"]["Statviewtype"]
+            self.assertEqual(["0", "0"], [r["games_played"] for r in rows])
+            t = json.loads(self.table(c, False)[2][1:-1])[0]["sections"][0]["data"]
+            row = next(r["row"] for r in t if r["prop"]["team_code"]["teamLink"] == away)
+            self.assertEqual("0", row["games_played"])
+        # Without the hub games that team has played.
+        self.panel.cfg["sports_chl_hub"] = False
+        pv = self.gc_json("ohl", "preview", self.game("ohl", "s3")[0])["Preview"]
+        self.assertTrue(all(t["gp"] > 0 for t in (pv["home_team"], pv["visitor_team"])))
+
+    def test_series_and_playoff(self):
+        pv = self.gc_json("whl", "preview", self.game("whl", "evening")[0])["Preview"]
+        self.assertEqual((1, 0), (pv["HeadToHeadRecord"]["home_team"]["w"], pv["HeadToHeadRecord"]["visiting_team"]["w"]))
+        self.assertEqual(1, len(pv["previous_meetings"]))
+        pv = self.gc_json("whl", "preview", self.game("whl", "hub_gp0")[0])["Preview"]
+        self.assertEqual([], pv["previous_meetings"])
+        self.admin("/admin/config", {"sports_chl_playoff": True})
+        self.assertEqual("1", self.gc_json("ohl", "preview", self.game("ohl", "evening")[0])["Preview"]["current_season"]["playoff"])
+
+    def test_a_regulation_final(self):
+        for c in sports_chl.CLIENTS:
+            gid, away, home, _, _ = self.game(c, "evicted")
+            b = self.board(c)[gid]
+            gs = self.gc_json(c, "gamesummary", gid)["Gamesummary"]
+            self.assertEqual(("4", "1", "0"), (gs["meta"]["status"], gs["meta"]["final"], gs["shootout"]))
+            self.assertEqual((away, home), (gs["meta"]["visiting_team"], gs["meta"]["home_team"]))
+            self.assertEqual((b["visiting_team_code"], b["home_team_code"]), (gs["visitor"]["team_code"], gs["home"]["team_code"]))
+            a, h = int(b["visiting_goal_count"]), int(b["home_goal_count"])
+            self.assertEqual({"visitor": a, "home": h}, gs["goalCount"])
+            self.assertEqual(a + h, len(gs["goals"]))
+            self.assertEqual(a, sum(gs["goalsByPeriod"]["visitor"].values()))
+            gw = [g for g in gs["goals"] if g["game_winning"] == "1"]
+            self.assertEqual(1, len(gw))
+            self.assertEqual("1" if h > a else "0", gw[0]["home"])
+            self.assertEqual(3, len([m for m in gs["mvps"] if m]))
+            self.assertEqual(gw[0]["goal_scorer"]["player_id"], gs["mvps"][0]["player_id"])
+            for side, other in (("visitor", "home"), ("home", "visitor")):
+                self.assertEqual(gs["totalShots"][side], sum(gs["shotsByPeriod"][side].values()))
+                on = [g for g in gs[f"{side}_team_lineup"]["goalies"] if g["seconds"] > 0]
+                self.assertEqual(1, len(on))
+                self.assertEqual(gs["totalShots"][other], on[0]["shots_against"])
+                self.assertEqual(on[0]["shots_against"] - on[0]["goals_against"], on[0]["saves"])
+                self.assertEqual("60:00", on[0]["time"])
+                self.assertEqual(1, len(gs["goalies"][side]))
+            self.assertTrue(gs["meta"]["attendance"].isdigit())
+            self.assertEqual(c == "lhjmq", gs["totalHits"]["home"] > 0)
+
+    def test_unassisted_goals_are_objects_of_nulls(self):
+        gs = self.gc_json("ohl", "gamesummary", self.game("ohl", "s3")[0])["Gamesummary"]
+        self.assertEqual(5, len(gs["goals"]))
+        nulls = [g for g in gs["goals"] if g["assist2_player"]["last_name"] is None]
+        self.assertTrue(nulls)
+        self.assertTrue(all(v is None for v in nulls[0]["assist2_player"].values()))
+        players = gs["home_team_lineup"]["players"] + gs["visitor_team_lineup"]["players"]
+        self.assertEqual(5, sum(p["goals"] for p in players))
+
+    def test_the_shootout_final_has_no_game_winner(self):
+        self.at("final so")
+        for c in sports_chl.CLIENTS:
+            gs = self.gc_json(c, "gamesummary", self.featured(c))["Gamesummary"]
+            self.assertEqual(("4", "1"), (gs["meta"]["status"], gs["shootout"]))
+            self.assertFalse([g for g in gs["goals"] if g["game_winning"] == "1"])
+            self.assertEqual(gs["goalCount"]["home"] + 1, int(gs["meta"]["home_goal_count"]))
+            self.assertEqual("4", gs["meta"]["period"])
+
+    def test_a_pre_game_summary(self):
+        gs = self.gc_json("ohl", "gamesummary", self.game("ohl", "evening")[0])["Gamesummary"]
+        self.assertEqual(("1", "0"), (gs["meta"]["status"], gs["meta"]["final"]))
+        self.assertEqual([], gs["goals"])
+        self.assertIsNone(gs["penalties"])
+        self.assertEqual([None, None, None], gs["mvps"])
+        self.assertTrue(all(g["seconds"] == 0 for g in gs["home_team_lineup"]["goalies"]))
+
+    def test_topgoalies_list_the_traded_goalie_too(self):
+        for c in sports_chl.CLIENTS:
+            team = self.game(c, "evening")[2]
+            st, body = self.goalies(c, team)
+            self.assertEqual(200, st)
+            rows = json.loads(body)["SiteKit"]["Statviewtype"]
+            self.assertEqual(3, len(rows))
+            self.assertEqual("0", rows[0]["active"])  # most games, but traded
+            self.assertNotEqual(team, rows[0]["latest_team_id"])
+            self.assertEqual("2", rows[0]["num_teams"])
+            active = [r for r in rows if r["active"] == "1"]
+            self.assertEqual([team, team], [r["latest_team_id"] for r in active])
+            self.assertTrue(all(isinstance(r["games_played"], str) for r in rows))
+            # The preview's marked starter is the active goalie with the most games.
+            pv = self.gc_json(c, "preview", self.game(c, "evening")[0])["Preview"]
+            starter = next(g for g in pv["home_team"]["lineup"]["goalies"] if g["start"] == "1")
+            self.assertEqual(active[0]["player_id"], starter["player_id"])
+            self.assertEqual([], json.loads(self.goalies(c, team, season="1")[1])["SiteKit"]["Statviewtype"])
+
+    def test_the_tables_are_a_jsonp_array_joined_by_team_id(self):
+        for c in sports_chl.CLIENTS:
+            for special in (False, True):
+                st, h, body = self.table(c, special)
+                self.assertEqual(200, st)
+                self.assertTrue(body.startswith(b"(") and body.endswith(b")"))
+                arr = json.loads(body[1:-1])
+                self.assertIsInstance(arr, list)
+                rows = arr[0]["sections"][0]["data"]
+                self.assertEqual(set(sports_chl.TEAMS[c]), {r["prop"]["team_code"]["teamLink"] for r in rows})
+                self.assertEqual(list(range(1, len(rows) + 1)), [r["row"]["rank"] for r in rows])
+                key = "power_plays" if special else "goals_for"
+                self.assertTrue(all(isinstance(r["row"][key], str) for r in rows))
+        self.assertEqual([], json.loads(self.table("ohl", False, season="1")[2][1:-1])[0]["sections"][0]["data"])
+
+    def test_shapes_match_the_fixtures(self):
+        files = sports_chl.TEMPLATE_FILES
+        for c in sports_chl.CLIENTS:
+            self.assertShape(fixture(files["preview"][c])["GC"]["Preview"],
+                             self.gc_json(c, "preview", self.game(c, "evening")[0])["Preview"])
+            self.assertShape(fixture(files["gamesummary"][c])["GC"]["Gamesummary"],
+                             self.gc_json(c, "gamesummary", self.game(c, "evicted")[0])["Gamesummary"])
+            team = self.game(c, "evening")[2]
+            self.assertShape(fixture(files["topgoalies"][c])["SiteKit"]["Statviewtype"],
+                             json.loads(self.goalies(c, team)[1])["SiteKit"]["Statviewtype"])
+            for special in (False, True):
+                self.assertShape(fixture(files["special" if special else "standard"][c]), json.loads(self.table(c, special)[2][1:-1]))
+
+    def test_headshots(self):
+        pv = self.gc_json("ohl", "preview", self.game("ohl", "evening")[0])["Preview"]
+        pid = pv["home_team"]["leadingScorers"][0]["player_id"]
+        st, h, body = self.raw(f"/leaguestat/ohl/240x240/{pid}.jpg")
+        self.assertEqual((200, sports_chl.JPEG_MARKERS), (st, body))
+        self.assertEqual(404, self.raw("/leaguestat/ohl/240x240/1.jpg")[0])
+        self.assertEqual(404, self.raw(f"/leaguestat/whl/240x240/{pid}x.jpg")[0])
+        self.assertEqual(200, self.raw("/leaguestat/ohl/logos/14.png")[0])  # the logos are unchanged
+
+    def test_keys_unknown_games_and_no_real_key(self):
+        gid = self.game("ohl", "evening")[0]
+        self.assertEqual(b"Invalid key.", self.gc("ohl", "preview", gid, key="nope")[2])
+        self.assertEqual(b"Client access denied.", self.gc("ohl", "preview", gid, key=sports_chl.fake_key("whl"))[2])
+        st, _, body = self.gc("ohl", "preview", "123")
+        self.assertEqual((404, {"error": "No such game"}), (st, json.loads(body)))
+        self.assertEqual(404, self.gc("ohl", "pxpverbose", gid)[0])
+        bodies = []
+        for c in sports_chl.CLIENTS:
+            for g in self.chl.games(c):
+                bodies += [self.gc(c, "preview", g[0])[2], self.gc(c, "gamesummary", g[0])[2], self.goalies(c, g[1])[1]]
+            bodies += [self.table(c, False)[2], self.table(c, True)[2]]
+        for b in bodies:
+            self.assertIsNone(HEX16.search(b.decode()), "a 16-hex token (a real key's form) in a body")
+        log = json.dumps(self.panel.sports.log)
+        self.assertIn("gc:preview", log)
+        self.assertNotIn("fakepanel-", log)  # the request log never holds a key
+
+
+class HubFaultsTest(HubCase):
+    def set_fault(self, f):
+        self.admin("/admin/config", {"sports_chl_detail": f})
+
+    def test_faults(self):
+        gid, _, team, _, _ = self.game("ohl", "evening")
+        self.set_fault("invalid_key")
+        self.assertEqual(b"Invalid key.", self.gc("ohl", "preview", gid)[2])
+        self.assertEqual(b"Invalid key.", self.table("ohl", True)[2])
+        self.set_fault("no_such_game")
+        self.assertEqual(404, self.gc("ohl", "gamesummary", gid)[0])
+        self.set_fault("oversize")
+        st, _, body = self.gc("ohl", "preview", gid)
+        self.assertEqual(200, st)
+        self.assertGreater(len(body), 524_288)
+        self.set_fault("goalies_fail")
+        self.assertEqual(503, self.goalies("ohl", team)[0])
+        self.assertEqual(200, self.gc("ohl", "preview", gid)[0])
+        self.assertEqual(200, self.table("ohl", False)[0])
+        self.set_fault("tables_fail")
+        self.assertEqual(503, self.table("ohl", False)[0])
+        self.assertEqual(503, self.table("ohl", True)[0])
+        self.assertEqual(200, self.goalies("ohl", team)[0])
+        old = sports_chl.DETAIL_SLOW_S
+        sports_chl.DETAIL_SLOW_S = 0.3
+        try:
+            self.set_fault("slow")
+            t0 = time.time()
+            self.assertEqual(200, self.gc("ohl", "preview", gid)[0])
+            self.assertGreaterEqual(time.time() - t0, 0.29)
+        finally:
+            sports_chl.DETAIL_SLOW_S = old
+        self.set_fault("")
+        self.assertEqual(200, self.table("ohl", True)[0])
+
+    def test_bad_config(self):
+        for patch in ({"sports_chl_detail": "nope"}, {"sports_chl_hub": "yes"}, {"sports_chl_playoff": 1}):
+            with self.assertRaises(ValueError):
+                sports_chl.check_config(patch)
+        sports_chl.check_config({"sports_chl_detail": "tables_fail", "sports_chl_hub": True})
 
 
 if __name__ == "__main__":
