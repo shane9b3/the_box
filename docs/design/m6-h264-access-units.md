@@ -332,3 +332,18 @@ records the split.
 
 **Not verified here.** No device or emulator run (the Sony and emulator gates in §6 are open). The MTK decoder's
 acceptance of filler at the front of a picture is unverified. No interlaced (PAFF) fixture was made.
+
+## Device gate and code review outcome (2026-11-26)
+
+Sony BRAVIA (mt5895, OMX.MTK.VIDEO.DECODER.AVC), build 0.1.22-diag4 = this fix with the diagnostic switch cleared, owner
+watching: TS 720, TS 1080, HLS 720/1080 and a hub replay clip, tunneling off, all reported smooth. Per-second counters
+on the un-tunneled sessions: queued inputs ≈ frames rendered (about 59 and 57 a second over the steady sessions; the
+first seconds after a zap run higher while the buffer catches up), zero drop-to-keyframe flushes. Before the fix the same
+channels gave about 92 in, 23 out and one flush a second.
+
+Code review of 9a8f9bfa: no blocking findings. Accepted as they are: a joined first sample dropped whole if the
+pre-format buffer overflowed (one picture at start); a held sample joining across HLS chunks when an EOF is swallowed
+(bytes contiguous, harmless); a format switch from non-H.264 to H.264 on one track losing earlier positions (TsExtractor
+never does this). Open test gaps: one HLS chunk extractor reused across segments (covered on the device only), the
+32-in-a-row cap and ring overflow, MODE_MULTI_PMT's internal seek, and field-coded (PAFF) streams, which are unverified
+on the MediaTek decoder. The emulator check proved nothing: its tuned channel shows no picture on the old build either.
