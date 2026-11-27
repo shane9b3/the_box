@@ -587,7 +587,7 @@ class SettingsMachineImpl(
                 if (k is RowKind.Choice) {
                     val opt = options.getOrNull(c.focused)
                     choice = null
-                    if (opt != null && opt.enabled && c.focused != k.selected) {
+                    if (opt != null && opt.enabled && (c.focused != k.selected || opt.reselectable)) {
                         emit(RowIntent.Choose(row.id, opt.id), row)
                         replaceRow(row.id) { it.copy(kind = k.copy(selected = c.focused), value = opt.label) }
                     }

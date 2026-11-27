@@ -50,6 +50,11 @@
     <string name="setup_format_ts">MPEG-TS</string>
     <string name="setup_format_hls">HLS</string>
     <string name="setup_format_learned_hls">Auto (using HLS: the server refused TS)</string>
+    <string name="setup_format_learned_hls_retry_next">Auto (using HLS: the server refused TS; will try TS at the next channel)</string>
+    <string name="setup_format_learned_hls_retry_today">Auto (using HLS: the server refused TS; will try TS again later today)</string>
+    <string name="setup_format_learned_hls_retry_tomorrow">Auto (using HLS: the server refused TS; will try TS again tomorrow)</string>
+    <string name="setup_format_learned_hls_retry_days">Auto (using HLS: the server refused TS; will try TS again in %1$s days)</string>
+    <string name="setup_format_auto_reset_detail">Pick again to try TS at the next channel</string>
     <string name="setup_ua_the_box">The Box</string>
     <string name="setup_ua_vlc">VLC</string>
     <string name="setup_ua_browser">Browser</string>

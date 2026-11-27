@@ -270,6 +270,7 @@ object PlayerText {
         StatLabel.DROPPED -> R.string.player_stat_dropped
         StatLabel.FORMAT -> R.string.player_stat_format
         StatLabel.HTTP -> R.string.player_stat_http
+        StatLabel.RESTARTS -> R.string.player_stat_restarts
         StatLabel.SERVER -> R.string.player_stat_server
         StatLabel.CONNECTIONS -> R.string.player_stat_connections
         StatLabel.BUFFER_PROFILE -> R.string.player_stat_buffer_profile

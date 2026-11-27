@@ -21,6 +21,7 @@ import java.util.concurrent.ThreadLocalRandom
  *
  * The policy only classifies; the numbers come from WP-A's [LoadRetryRules]:
  * - any [LiveStreamException] → fatal (the source already retried, or the ladder must decide at once);
+ * - (HLS playlist renewal) any [HlsRenewalException] → fatal (the data source already sent the ladder its signal);
  * - (M6 time-shift) any `RingException` → fatal (the controller re-prepares the reader, §5.1);
  * - Media3's non-retriable causes (`ParserException`, `FileNotFoundException`, `CleartextNotPermittedException`,
  *   `Loader.UnexpectedLoaderException`, a position-out-of-range 416) → fatal;
@@ -49,6 +50,8 @@ internal class BoxLoadErrorHandlingPolicy(
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
         val e = loadErrorInfo.exception
         if (findInChain<LiveStreamException>(e) != null) return C.TIME_UNSET
+        // (HLS playlist renewal) A declined, misaligned or failed renewal: the ladder already has the typed signal.
+        if (findInChain<HlsRenewalException>(e) != null) return C.TIME_UNSET
         // (M6 time-shift, §5.1, A-S9) A ring reader is never retried in place: a deferred retry would reset the sample
         // queues and re-anchor the TimestampAdjuster; the controller re-prepares at the pin instead.
         if (findInChain<app.thebox.core.playback.timeshift.RingException>(e) != null) return C.TIME_UNSET

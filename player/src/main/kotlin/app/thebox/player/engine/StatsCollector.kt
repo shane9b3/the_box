@@ -130,6 +130,7 @@ internal class StatsCollector(
             redirects = t?.redirects ?: 0,
             format = t?.sniffed?.takeIf { it != StreamFormat.UNKNOWN } ?: format,
             reconnects = t?.reconnects ?: 0,
+            playlistRenewals = t?.playlistRenewals ?: 0,
             broker = brokerSnapshot?.invoke(),
             bufferProfile = bufferProfile,
             afr = afr,

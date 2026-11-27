@@ -122,6 +122,15 @@ FAULT_DOC = {
     "psi_every_s": None,               # PAT/PMT only at connection start and every N s (the clip's own PSI is dropped)
     "pmt_change_after": None,          # s: PMT version +1 and the audio moves to a new PID (new PMT first)
     "pad_bps": None,                   # null packets (PID 0x1FFF) added at this many bytes/s on top of the content
+    # HLS playlist-URL expiry as measured on the owner's provider (docs/design/m6-hls-edge-handover.md §1.2): live
+    # .m3u8 -> 302 to /hls/<token>/<id>.m3u8 on the redirect port; the token's playlist expires after N s.
+    "playlist_token_ttl": None,        # s: lifetime of a playlist token (null = off)
+    "token_expire_mode": "redirect_dead",  # expired playlist: redirect_dead | redirect_refused | redirect_moved | 403 | 404
+    # (code review 2026-11-26, D) a network blip on the HLS token paths: every edge_blip_every s, for edge_blip_s s, the
+    # playlist redirect and the /hls/ requests are dropped before any response byte (connection closed).
+    "edge_blip_every": None,           # s (null = off)
+    "edge_blip_s": 2,                  # s
+    "token_msn": "continue",           # a new token's playlist: continue (the same media sequence) | restart (from 0)
 }
 # Timeshift URL forms the panel can tell apart (the request log's `form`, the keys of timeshift_reject_forms).
 API_FAULTS = (None, "html_splash", "timeout", "429", "redirect")
@@ -972,6 +981,11 @@ class Panel:
         self.verbose, self.quiet = verbose, quiet
         self.stopping = threading.Event()
         self.tokens = {}
+        self.edge_tokens = {}  # playlist_token_ttl: token -> {sid, user, issued, ttl, cur0}
+        self.edge_moved = set()  # token_expire_mode=redirect_moved: streams whose playlists moved to the main port
+        with socket.socket() as dead:  # a local port with nothing listening (token_expire_mode=redirect_refused)
+            dead.bind(("127.0.0.1", 0))
+            self.dead_port = dead.getsockname()[1]
         self.live_pos = {}
         self.clamp_cache = {}  # U-S9: (form, stream, start, duration) -> (first open, written seconds)
         self.main_port = self.lb_port = 0
@@ -993,6 +1007,7 @@ class Panel:
     def reset_stats(self):
         self.stats = {"dns_queries": 0, "requests": 0, "stream_opens": 0, "rejections": {}, "range_requests_seen": 0,
                       "range_requests": [], "auth_failures": 0, "redirects": 0, "token_expired": 0,
+                      "edge_tokens_issued": 0, "edge_token_expired": 0, "edge_blips": 0,
                       "forced_closes": 0, "client_eof": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": [], "stream_requests": 0,
                       "timeshift_requests": [], "timeshift_request_count": 0,
                       "connection_log": [], "connection_seq": 0}
@@ -1152,6 +1167,8 @@ class Panel:
             self.clamp_cache = {}
             self.cfg = copy.deepcopy(self.initial)
             self.tokens.clear()
+            self.edge_tokens.clear()
+            self.edge_moved.clear()
             self.live_pos.clear()
         self.registry.kill_all()
         self.registry.slots = []
@@ -1460,6 +1477,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         p, path = self.panel, self.path_only
         if path.startswith("/admin"):
             return self.admin(path)
+        # playlist_token_ttl: the tokenised edge playlist and its absolute-path segments (either port; the 302 goes to lb).
+        m = re.match(r"^/hls/([0-9a-f]{16})/(\d+)(?:_(\d+))?\.(m3u8|ts)$", path)
+        if m:
+            return self.edge_token_request(m)
         # The redirect port also serves the archive playlists' absolute segment paths (/vodseg/, /tseg/).
         if self.server.is_lb and not re.match(r"^/(live|movie|series|timeshift|vodseg|tseg)/|^/streaming/timeshift\.php$", path):
             return self.send(404, b"lb: stream paths only", "text/plain")
@@ -1964,6 +1985,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.reject(403, "token_" + res)
             with p.lock:
                 self._token_exp = (p.tokens.get(tok) or [None])[0]
+        elif kind == "live" and ext == "m3u8" and not seg and not sub and f.get("playlist_token_ttl"):
+            return self.edge_redirect(user, sid, f)
         elif (f.get("redirect") or (kind == "timeshift" and f.get("timeshift_redirect"))) and not seg_like:
             ttl = f.get("token_ttl") or c["token_ttl"]
             tok = p.make_token(path, ttl)
@@ -2277,6 +2300,101 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # ---- HLS
     def seg_dur(self, clip):
         return clip.segments[0][1]
+
+    # ---- playlist_token_ttl (docs/design/m6-hls-edge-handover.md §1.2, §8.2)
+    def edge_blip(self, f):
+        """edge_blip_every: inside a blip window, drop the request (connection closed before any response byte)."""
+        every = f.get("edge_blip_every")
+        width = f.get("edge_blip_s")
+        if not every or (time.time() % float(every)) >= float(2 if width is None else width):
+            return False
+        self.panel.bump("edge_blips")
+        self._notes.append("EDGE-BLIP")
+        self.close_connection = True  # nothing written: the client reads EOF before the status line
+        return True
+
+    def edge_token(self, user, sid, f):
+        """A new playlist token for stream [sid] (its TTL from playlist_token_ttl)."""
+        p = self.panel
+        d = self.seg_dur(p.clips[p.media(sid)])
+        tok = secrets.token_hex(8)
+        now = time.time()
+        with p.lock:
+            p.edge_tokens = {k: v for k, v in p.edge_tokens.items() if v["issued"] > now - 3600}
+            p.edge_tokens[tok] = {"sid": sid, "user": user, "issued": now, "ttl": float(f["playlist_token_ttl"]), "cur0": int(now / d)}
+        p.bump("edge_tokens_issued")
+        return tok
+
+    def edge_redirect(self, user, sid, f):
+        """A live .m3u8 on the main port: a new playlist token, 302 to its media playlist on the redirect port (on the
+        main port once the stream moved, token_expire_mode=redirect_moved)."""
+        p = self.panel
+        if self.edge_blip(f):
+            return
+        tok = self.edge_token(user, sid, f)
+        self._notes.append("EDGE-TOKEN")
+        h = (self.headers.get("Host") or "127.0.0.1").split(":")[0]
+        port = p.main_port if sid in p.edge_moved else p.lb_port
+        return self.send(302, b"", "text/plain", {"Location": f"http://{h}:{port}/hls/{tok}/{sid}.m3u8"})
+
+    def edge_token_request(self, m):
+        """/hls/<token>/<id>.m3u8 (the token's playlist) or /hls/<token>/<id>_<n>.ts (a segment). An expired token's
+        playlist answers per token_expire_mode; its segments keep answering inside the window (as measured)."""
+        p = self.panel
+        tok, sid, n, ext = m[1], int(m[2]), m[3], m[4]
+        with p.lock:
+            info = p.edge_tokens.get(tok)
+        if not info or info["sid"] != sid or not p.channel(sid):
+            return self.reject(403, "edge_token_unknown")
+        f = p.faults(sid)
+        clip = p.clips[p.media(sid)]
+        if self.edge_blip(f):
+            return
+        if ext == "ts":
+            if n is None:
+                return self.reject(404, "edge_not_found")
+            p.registry.touch(info["user"], sid)
+            return self.hls_segment(clip, sid, int(n))
+        if n is not None:
+            return self.reject(404, "edge_not_found")
+        if time.time() >= info["issued"] + info["ttl"]:
+            p.bump("edge_token_expired")
+            mode = str(f.get("token_expire_mode") or "redirect_dead")
+            self._notes.append("EDGE-EXPIRED:" + mode)
+            if mode in ("403", "404"):
+                return self.reject(int(mode), "edge_token_expired")
+            if mode == "redirect_moved":
+                # The edge moved: the expired playlist redirects to a working new token on the main port, and the
+                # provider URL hands out tokens there from now on (another host:port for the app: renewal declines,
+                # the followed redirect plays).
+                with p.lock:
+                    p.edge_moved.add(sid)
+                new = self.edge_token(info["user"], sid, f)
+                h = (self.headers.get("Host") or "127.0.0.1").split(":")[0]
+                return self.send(302, b"", "text/plain", {"Location": f"http://{h}:{p.main_port}/hls/{new}/{sid}.m3u8"})
+            # redirect_dead: a non-routable address (connects time out, as measured); redirect_refused: a closed port.
+            target = f"10.255.255.1:{p.lb_port}" if mode == "redirect_dead" else f"127.0.0.1:{p.dead_port}"
+            return self.send(302, b"", "text/plain", {"Location": f"http://{target}/hls/{tok}/{sid}.m3u8"})
+        c = p.cfg
+        if p.registry.acquire(info["user"], sid, c["max_connections"], 0, c["hls_timeout"], hls=True) is None:
+            return self.reject(403, "max_connections")
+        return self.edge_playlist(clip, sid, tok, info, f)
+
+    def edge_playlist(self, clip, sid, tok, info, f):
+        """The token's live media playlist: wall-clock segments, absolute-path references on this host. With
+        token_msn=restart the media sequence counts from 0 at the token's issue (a new token restarts it)."""
+        c = self.panel.cfg
+        d, nseg = self.seg_dur(clip), len(clip.segments)
+        cur = int(time.time() / d)
+        first = max(0, cur - c["hls_window"] + 1)
+        base = max(0, info["cur0"] - c["hls_window"] + 1) if f.get("token_msn") == "restart" else 0
+        L = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{math.ceil(d)}", f"#EXT-X-MEDIA-SEQUENCE:{first - base}",
+             f"#EXT-X-DISCONTINUITY-SEQUENCE:{(first - 1) // nseg if first > 0 else 0}"]
+        for k in range(first, cur + 1):
+            if k > 0 and k % nseg == 0:
+                L.append("#EXT-X-DISCONTINUITY")
+            L += [f"#EXTINF:{clip.segments[k % nseg][1]:.3f},", f"/hls/{tok}/{sid}_{k}.ts"]
+        self.send(200, "\n".join(L) + "\n", "application/vnd.apple.mpegurl", {"Cache-Control": "no-cache"})
 
     def hls_playlist(self, clip, sid, f):
         c = self.panel.cfg

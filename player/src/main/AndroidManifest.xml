@@ -3,6 +3,8 @@
 
     <!-- ExoPlayer WAKE_MODE_NETWORK (docs/design/m2-playback-core.md §3.10.5). -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- HLS playlist renewal: no renewal attempt while the device has no network (DeviceNetwork). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!--
         No MediaSessionService and no FOREGROUND_SERVICE_MEDIA_PLAYBACK in v1 (design review B5, §3.10.4): the

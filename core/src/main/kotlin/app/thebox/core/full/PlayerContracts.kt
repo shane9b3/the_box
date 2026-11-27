@@ -131,18 +131,44 @@ data class StatsFacts(
     val redirects: Int = 0,
     val format: StreamFormat = StreamFormat.UNKNOWN,
     val reconnects: Int = 0,
+    /** (HLS playlist renewal; code review 2026-11-26, A8) Playlist URLs renewed in place this tune, across its restarts. */
+    val playlistRenewals: Int = 0,
+    /** (A8) The same over the visit (the tunes of this channel since the last user tune). */
+    val visitPlaylistRenewals: Int = 0,
+    /** (A8) Ladder reconnect restarts after first media this tune, and how many of them showed no notice (quiet). */
+    val restarts: Int = 0,
+    val quietRestarts: Int = 0,
+    /** (A8) The same over the visit. */
+    val visitRestarts: Int = 0,
+    val visitQuietRestarts: Int = 0,
     val broker: BrokerSnapshot? = null,
     val bufferProfile: BufferProfile? = null,
     val afr: AfrMode = AfrMode.SEAMLESS,
     val displayRefreshHz: Float? = null,
     val tunneling: Boolean = false,
+    /** (2026-11-25; code review 2026-11-26, B3) Why tunneling is off when [tunneling] is false; null = not known yet. */
+    val tunnelingOff: TunnelingOff? = null,
     /** (reviewed 2026-10-15, E23) 0-based base URL in use and the number of bases (backup servers); "Server: n of m". */
     val serverIndex: Int = 0,
     val serverCount: Int = 1,
 )
 
+/** (Code review 2026-11-26, B3) Why tunneled playback is off, for the stats overlay's Tunneling line. */
+enum class TunnelingOff {
+    /** The Playback setting, or this channel's "Off for this channel" option. */
+    SETTING,
+    /** The ladder turned it off for this visit (the picture stalled). */
+    STALLED,
+    /** Started off: this channel stalled tunneled on its last visits (in memory, until the app restarts). */
+    STALLED_BEFORE,
+    /** A replay (Sports Hub clip): never tunneled. */
+    REPLAY,
+    /** Asked for, but the track selector did not tunnel this stream on this device. */
+    NOT_SUPPORTED,
+}
+
 /** Stat rows in display order (§3.4.4); the UI localises [label]. */
-enum class StatLabel { VIDEO, RESOLUTION, FRAME_RATE, VIDEO_DECODER, AUDIO, AUDIO_DECODER, BITRATE, BUFFER, DROPPED, FORMAT, HTTP, SERVER, CONNECTIONS, BUFFER_PROFILE, DISPLAY, TUNNELING }
+enum class StatLabel { VIDEO, RESOLUTION, FRAME_RATE, VIDEO_DECODER, AUDIO, AUDIO_DECODER, BITRATE, BUFFER, DROPPED, FORMAT, HTTP, RESTARTS, SERVER, CONNECTIONS, BUFFER_PROFILE, DISPLAY, TUNNELING }
 
 /** [value] is language-neutral (numbers, codec names, hosts). */
 data class StatLine(val label: StatLabel, val value: String)

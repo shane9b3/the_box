@@ -36,12 +36,20 @@ import javax.inject.Singleton
  */
 @OptIn(UnstableApi::class)
 @Singleton
-internal class TransportFactoryImpl @Inject constructor(
+internal class TransportFactoryImpl(
     private val clients: PlaybackHttpClients,
     private val watchdog: ByteWatchdog,
     private val clock: MonoClock,
+    /** (HLS playlist renewal) No renewal attempt while the device has no network. */
+    private val online: OnlineCheck = OnlineCheck.ALWAYS,
 ) : TransportFactory {
+    @Inject constructor(clients: PlaybackHttpClients, watchdog: ByteWatchdog, clock: MonoClock, network: DeviceNetwork) :
+        this(clients, watchdog, clock, network as OnlineCheck)
+
     private val sessions = ConcurrentHashMap<Long, TransportSession>()
+
+    /** (HLS playlist renewal) One renewal budget per playlist (`brokerKey`), outliving the sessions that use it. */
+    private val renewalBudgets = ConcurrentHashMap<String, HlsRenewalBudget>()
 
     override fun liveTs(ctx: StreamSessionContext): Pair<DataSource.Factory, StreamTelemetry> {
         val session = session(ctx)
@@ -67,7 +75,31 @@ internal class TransportFactoryImpl @Inject constructor(
         return factory to session.telemetry
     }
 
+    /**
+     * (HLS playlist renewal, docs/design/m6-hls-edge-handover.md §6) Live HLS: the brokered `http` data sources behind a
+     * per-session [HlsPlaylistRenewal] router. Same client, same lease, same telemetry as [http].
+     */
+    override fun liveHls(ctx: StreamSessionContext): Pair<androidx.media3.exoplayer.hls.HlsDataSourceFactory, StreamTelemetry> {
+        if (!HlsPlaylistRenewal.ENABLED) return super.liveHls(ctx)
+        val session = session(ctx)
+        val renewal = session.renewal {
+            HlsPlaylistRenewal(ctx, renewalBudgets.computeIfAbsent(ctx.resolved.brokerKey) { HlsRenewalBudget() }, online, clock, session.telemetry)
+        }
+        val factory = RenewingHlsDataSourceFactory(
+            ctx = ctx,
+            callFactory = clients.segments(ctx.resolved.ignoreTlsErrors),
+            telemetry = session.telemetry,
+            scope = session,
+            clock = clock,
+            renewal = renewal,
+        )
+        return factory to session.telemetry
+    }
+
     override fun endSession(tuneId: Long) {
+        // (HLS edge hand-over, stage 0) Logging only, and a no-op for an untracked tune. First, so the cancels below
+        // are logged as the session's end rather than as request failures.
+        HlsEdgeProbe.end(tuneId)
         sessions.remove(tuneId)?.end()
     }
 
@@ -195,7 +227,17 @@ internal open class StandaloneScope : SessionScope {
 }
 
 /** The session object [TransportFactoryImpl] keeps per tune. */
-internal class TransportSession(val ctx: StreamSessionContext, val telemetry: SessionTelemetry) : StandaloneScope()
+internal class TransportSession(val ctx: StreamSessionContext, val telemetry: SessionTelemetry) : StandaloneScope() {
+    @Volatile private var renewal: HlsPlaylistRenewal? = null
+
+    /** (HLS playlist renewal) The session's one router, built on first use and ended with the session. */
+    @Synchronized fun renewal(create: () -> HlsPlaylistRenewal): HlsPlaylistRenewal =
+        renewal ?: create().also {
+            renewal = it
+            add(it)
+            if (isEnded) it.terminate()
+        }
+}
 
 /**
  * [StreamTelemetry] of one session (§2.5): written by data sources and OkHttp event listeners (any thread), read by
@@ -229,6 +271,9 @@ internal class SessionTelemetry(private val clock: MonoClock) : StreamTelemetry 
     val positionIgnoredCount = AtomicInteger()
     /** Byte-watchdog cancels in this session. */
     val noBytesCount = AtomicInteger()
+    /** (HLS playlist renewal) Renewals adopted in this session. */
+    val renewalCount = AtomicInteger()
+    override val playlistRenewals: Int get() = renewalCount.get()
 
     fun onBytes(n: Int, nowMs: Long) {
         if (n <= 0) return

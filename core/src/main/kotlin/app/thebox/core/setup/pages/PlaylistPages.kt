@@ -1,6 +1,9 @@
 package app.thebox.core.setup.pages
 
 import app.thebox.core.common.Outcome
+import app.thebox.core.playback.XtreamOutput
+import app.thebox.core.playback.resolve.AutoTsRetry
+import app.thebox.core.playback.resolve.LearnedOutput
 import app.thebox.core.settings.Badge
 import app.thebox.core.settings.ChoiceOption
 import app.thebox.core.settings.ConfirmSpec
@@ -242,11 +245,18 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
         if (p.secretHeaderCount > 0) rows += info(ROW_HEADERS_SECRET, t(SetupText.HEADERS_SECRET, p.secretHeaderCount), emptyList())
         rows += text(ROW_HEADERS, t(SetupText.ROW_HEADERS_ADD), "", TextHint.HEADER, description = t(SetupText.HEADERS_HINT))
         if (xtream) {
+            // (2026-11-25, docs/decisions/2026-11-25-auto-format-retries-ts.md) While Auto has learned HLS, the description
+            // says when TS is tried again, and picking Auto again forgets HLS (setStreamFormat clears the learned value).
+            val learnedHls = p.xtreamOutput == "AUTO" && LearnedOutput.parse(p.xtreamOutputLearned)?.output == XtreamOutput.HLS
             rows += choice(
                 ROW_STREAM_FORMAT, t(SetupText.ROW_STREAM_FORMAT),
-                listOf(ChoiceOption("AUTO", t(SetupText.FORMAT_AUTO)), ChoiceOption("TS", t(SetupText.FORMAT_TS)), ChoiceOption("HLS", t(SetupText.FORMAT_HLS))),
+                listOf(
+                    if (learnedHls) ChoiceOption("AUTO", t(SetupText.FORMAT_AUTO), detail = t(SetupText.FORMAT_AUTO_RESET_DETAIL), reselectable = true)
+                    else ChoiceOption("AUTO", t(SetupText.FORMAT_AUTO)),
+                    ChoiceOption("TS", t(SetupText.FORMAT_TS)), ChoiceOption("HLS", t(SetupText.FORMAT_HLS)),
+                ),
                 p.xtreamOutput,
-                description = if (p.xtreamOutput == "AUTO" && p.xtreamOutputLearned == "HLS") t(SetupText.FORMAT_LEARNED_HLS) else t(SetupText.EFFECT_NEXT_TUNE),
+                description = if (learnedHls) learnedHlsDescription(p) else t(SetupText.EFFECT_NEXT_TUNE),
             )
             p.backupHosts.forEachIndexed { i, h ->
                 rows += row(backupRow(i), t(SetupText.BACKUP_SERVER_N, i + 2), RowKind.Item(menu = listOf(ChoiceOption(MENU_REMOVE_BACKUP, t(SetupText.BACKUP_REMOVE)))), value = h)
@@ -301,6 +311,21 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
         if (rep.urlChanged > 0) parts += t(SetupText.REPORT_URLS_CHANGED, num(rep.urlChanged))
         if (rep.favouritesOrphaned == 0) parts += t(SetupText.REPORT_FAVOURITES_KEPT)
         return parts.joinToString(" · ")
+    }
+
+    /** "Auto (using HLS: …; will try TS again tomorrow)": the next retry as a calendar day in the device zone. */
+    private fun learnedHlsDescription(p: PlaylistDetail): String {
+        val now = d.nowMs()
+        if (!AutoTsRetry.tsAllowed(p.account)) return t(SetupText.FORMAT_LEARNED_HLS)
+        val next = AutoTsRetry.nextRetryAtMs(LearnedOutput.parse(p.xtreamOutputLearned), now) ?: return t(SetupText.FORMAT_LEARNED_HLS)
+        if (next <= now) return t(SetupText.FORMAT_LEARNED_HLS_RETRY_NEXT)
+        val z = d.zone()
+        val days = java.time.temporal.ChronoUnit.DAYS.between(Instant.ofEpochMilli(now).atZone(z).toLocalDate(), Instant.ofEpochMilli(next).atZone(z).toLocalDate())
+        return when {
+            days <= 0L -> t(SetupText.FORMAT_LEARNED_HLS_RETRY_TODAY)
+            days == 1L -> t(SetupText.FORMAT_LEARNED_HLS_RETRY_TOMORROW)
+            else -> t(SetupText.FORMAT_LEARNED_HLS_RETRY_DAYS, days.toInt())
+        }
     }
 
     private fun accountCard(p: PlaylistDetail): SettingsRow {

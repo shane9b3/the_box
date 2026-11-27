@@ -388,6 +388,13 @@ internal class FakeProvider : PlaybackSourceProvider {
     }
     override suspend fun saveActiveBaseIndex(playlistId: Long, index: Int) { savedBase += index }
     override suspend fun saveLearnedOutput(playlistId: Long, output: XtreamOutput?) { savedOutput += output }
+    /** (2026-11-25) Auto TS retry results, in order. */
+    val tsRetries = mutableListOf<app.thebox.core.playback.resolve.AutoTsRetry.Result>()
+    override suspend fun recordAutoTsRetry(playlistId: Long, result: app.thebox.core.playback.resolve.AutoTsRetry.Result): app.thebox.core.playback.resolve.LearnedOutput? {
+        tsRetries += result
+        return if (result == app.thebox.core.playback.resolve.AutoTsRetry.Result.CONFIRMED) null
+        else app.thebox.core.playback.resolve.LearnedOutput(XtreamOutput.HLS, step = 1)
+    }
     override suspend fun backupSources(identity: ChannelIdentity): List<ChannelIdentity> = emptyList()
 
     companion object {

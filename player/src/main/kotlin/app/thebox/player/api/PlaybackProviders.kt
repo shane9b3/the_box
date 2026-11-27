@@ -27,6 +27,14 @@ interface PlaybackSourceProvider {
     suspend fun refreshAccount(playlistId: Long): Outcome<XtreamAccountInfo>
     suspend fun saveActiveBaseIndex(playlistId: Long, index: Int)
     suspend fun saveLearnedOutput(playlistId: Long, output: XtreamOutput?)
+    /**
+     * (2026-11-25, docs/decisions/2026-11-25-auto-format-retries-ts.md) Stores an Auto TS retry's [result]
+     * (`AutoTsRetry.afterResult`) and returns the stored value after it (null = cleared, plain Auto again).
+     */
+    suspend fun recordAutoTsRetry(
+        playlistId: Long,
+        result: app.thebox.core.playback.resolve.AutoTsRetry.Result,
+    ): app.thebox.core.playback.resolve.LearnedOutput? = null
     /** v1.1 failover (stream_source). v1 implementations return an empty list. */
     suspend fun backupSources(identity: ChannelIdentity): List<ChannelIdentity>
 }
@@ -46,8 +54,8 @@ data class ChannelPlaybackMemory(
     /** Last snapped fps × 1000 (AFR pre-switch, §3.9.3). */
     val fpsMilli: Int? = null,
     /**
-     * Device finding 2026-10-17 (Sony Bravia, MediaTek HEVC): the ladder turned tunneling off for a channel whose tunneled
-     * decoder produced nothing, and the user's next retry tunneled again. Learned bit: this channel plays untunneled.
+     * Channel options "Tunneled playback: Off for this channel": the user's choice. (2026-11-25, owner ruling) The ladder
+     * no longer writes it: its own switch-off lasts for the visit only (docs/decisions/2026-11-25-tunneling-off-per-visit.md).
      */
     val tunnelingOff: Boolean = false,
     /**

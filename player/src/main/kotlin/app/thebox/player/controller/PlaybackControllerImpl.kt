@@ -422,6 +422,9 @@ internal class PlaybackControllerImpl @Inject constructor(
         var failureCount = 0
         var rebufferCount = 0
         var reconnectNoticeShown = false
+        /** (Quiet reconnect, 2026-11-25) The deferred "Reconnecting" notice, and whether it has been shown. */
+        var reconnectNoticeJob: Job? = null
+        var reconnectNoticeEmitted = false
 
         // (M6 time-shift, §7) The cycle's local buffer.
         /** The cycle's time-shift session (null = unbuffered, or not started yet). */
@@ -468,6 +471,30 @@ internal class PlaybackControllerImpl @Inject constructor(
         var hdr: HdrKind? = null
         var fpsMilli: Int? = null
 
+        // (2026-11-25, docs/decisions/2026-11-25-auto-format-retries-ts.md) The Auto TS retry.
+        /** Started by tune() or a zap: its first session may try TS once (never a retry, resume or ladder restart). */
+        var userTune = false
+        /** This cycle is a TS retry not yet settled (refused, confirmed or inconclusive). */
+        var tsRetry = false
+        /** The retry fell back to HLS: the flip's SwitchedFormat notice is not shown. */
+        var tsRetryFellBack = false
+        /** (2026-11-25, docs/decisions/2026-11-25-tunneling-off-per-visit.md) The ladder turned tunneling off for this visit. */
+        var tunnelingAutoOff = false
+        /** (Code review 2026-11-26, B2) Started untunneled: this channel stalled tunneled on its last visits (in memory). */
+        var tunnelingDamped = false
+        /** (B1) This cycle started as a TS retry (stays true after it settles). */
+        var tsRetryCycle = false
+        /** (B1) Failures of the TS retry after it reached first media. */
+        var tsFailuresAfterMedia = 0
+        /** (Code review 2026-11-26, A8) The visit this cycle belongs to (set in [startCycle]). */
+        var visit: Visit? = null
+        /** (A8) Ladder restarts after first media, the quiet ones, and playlist renewals, this tune (across its sessions). */
+        var restarts = 0
+        var quietRestarts = 0
+        var renewals = 0
+        /** (A8) Restarts of the current reconnect series (since the last first media). */
+        var seriesRestarts = 0
+
         val isArchive: Boolean get() = spec is Spec.Archive
         /** (Sports Hub §6.5) A clip cycle. `NowPlaying.isArchive` stays false for it (ArchivePlayback never takes it). */
         val isClip: Boolean get() = spec is Spec.Clip
@@ -504,13 +531,13 @@ internal class PlaybackControllerImpl @Inject constructor(
         val identity = (target as? TuneTarget.Channel)?.identity
         if (identity != null && refused(identity, isArchive = false)) return
         if (viewport == Viewport.MINI) previewStarted()
-        startCycle(Spec.Live(target))
+        startCycle(Spec.Live(target), userTune = true)
     }
 
     override fun tuneArchive(tune: ArchiveTune) {
         cancelPendingZap()
         if (refused(tune.identity, isArchive = true)) return
-        startCycle(Spec.Archive(tune))
+        startCycle(Spec.Archive(tune), userTune = true)
     }
 
     /**
@@ -585,7 +612,7 @@ internal class PlaybackControllerImpl @Inject constructor(
                 if (plan.immediate) {
                     zapFireJob?.cancel()
                     _pendingZap.value = null
-                    startCycle(Spec.Live(TuneTarget.Channel(next)))
+                    startCycle(Spec.Live(TuneTarget.Channel(next)), userTune = true)
                 } else {
                     _pendingZap.value = next
                     zapFireJob?.cancel()
@@ -594,7 +621,7 @@ internal class PlaybackControllerImpl @Inject constructor(
                         debouncer.onFired()
                         val target = _pendingZap.value ?: return@launch
                         _pendingZap.value = null
-                        startCycle(Spec.Live(TuneTarget.Channel(target)))
+                        startCycle(Spec.Live(TuneTarget.Channel(target)), userTune = true)
                     }
                 }
             }
@@ -743,7 +770,7 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     // ------------------------------------------------------------------ pipeline (§3.1.1)
 
-    private fun startCycle(spec: Spec, refreshAccount: Boolean = false) {
+    private fun startCycle(spec: Spec, refreshAccount: Boolean = false, userTune: Boolean = false) {
         val now = clock.nowMs()
         val identity = when (spec) {
             is Spec.Live -> (spec.target as? TuneTarget.Channel)?.identity
@@ -774,6 +801,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         }
         cancelCycleJobs()
         val c = Cycle(spec, identity, now)
+        c.userTune = userTune
+        carryVisit(c, userTune)
         c.cycleId = ++cycleSeq
         if (spec is Spec.Clip) c.title = spec.tune.title
         cycle = c
@@ -920,6 +949,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             }
         }
         if (!current(c, id)) return
+        if (reuse == null && beginTsRetry(c)) early = null
 
         // Step 3: resolve (never reuse a resolved URL across a user request; only RetrySame/Reprepare reuse it).
         val resolved = reuse ?: (if (early != null) handleResolveOutcome(c, early) else resolve(c)) ?: return
@@ -1361,6 +1391,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         override fun onRenderedFirstFrame() {
             _video.update { it.copy(renderedFirstFrames = it.renderedFirstFrames + 1) }
             val s = session ?: return
+            if (app.thebox.player.datasource.HlsEdgeProbe.isTracked(s.tuneId)) app.thebox.player.datasource.HlsEdgeProbe.onFirstFrame(s.tuneId)
             if (s.milestoneVideo != false) onFirstMedia(s)
         }
 
@@ -1606,6 +1637,8 @@ internal class PlaybackControllerImpl @Inject constructor(
             }
         }
         scheduleHealthyReset(c)
+        // (Code review 2026-11-26, B2) This visit played with tunneling asked for: a later visit may reset the damping.
+        if (settings.current.tunneling && !c.tunnelingOff && !c.isClip) c.visit?.tunneledPlay = true
         if (c.compatPending) scheduleCompatPersist(c, s)
         // Learned values are persisted and announced only once the new variant actually played (§4.3 L5/L9/L15).
         val id = c.identity
@@ -1614,8 +1647,9 @@ internal class PlaybackControllerImpl @Inject constructor(
             if (id != null && c.playlistInfo?.xtreamOutput == XtreamOutput.AUTO) {
                 scope.launch { safeProvider { provider.saveLearnedOutput(id.playlistId, to) } }
             }
-            _notices.tryEmit(PlaybackNotice.SwitchedFormat(if (to == XtreamOutput.HLS) StreamFormat.HLS else StreamFormat.TS))
+            if (!c.tsRetryFellBack) _notices.tryEmit(PlaybackNotice.SwitchedFormat(if (to == XtreamOutput.HLS) StreamFormat.HLS else StreamFormat.TS))
         }
+        if (c.tsRetry) scheduleTsRetryConfirm(c, s)
         val playlist = c.playlistInfo
         if (id != null && playlist != null && s.resolved.baseIndex != playlist.activeBaseIndex) {
             val index = s.resolved.baseIndex
@@ -1627,10 +1661,66 @@ internal class PlaybackControllerImpl @Inject constructor(
             c.uaFallbackPending = false
             _notices.tryEmit(PlaybackNotice.UserAgentSwitched(settings.current.userAgentFallbackPreset))
         }
-        if (c.reconnectNoticeShown) {
-            c.reconnectNoticeShown = false
-            _notices.tryEmit(PlaybackNotice.Reconnected)
+        if (c.reconnectNoticeShown) noticeReconnected(c)
+    }
+
+    /**
+     * (Quiet reconnect, lead's decision pending the owner, 2026-11-25) With [QUIET_FAST_RECONNECT] the "Reconnecting"
+     * notice waits [QUIET_RECONNECT_MS] from the first restart of a series; a recovery inside that time shows neither it
+     * nor "Reconnected". A later restart in the same series, once the notice is shown, announces itself at once.
+     */
+    private fun noticeReconnecting(c: Cycle, n: Int, max: Int) {
+        c.reconnectNoticeShown = true
+        if (!QUIET_FAST_RECONNECT || c.reconnectNoticeEmitted || quietReconnectsUsedUp(c)) {
+            c.reconnectNoticeEmitted = true
+            _notices.tryEmit(PlaybackNotice.Reconnecting(n, max))
+            return
         }
+        if (c.reconnectNoticeJob?.isActive == true) return
+        c.reconnectNoticeJob = scope.launch {
+            delay(QUIET_RECONNECT_MS)
+            val st = _state.value
+            // (Code review 2026-11-26, A8) Any waiting state past 3 s announces the series (not only RECONNECTING), so
+            // "Reconnected" follows; an error card, a stop or playing again does not.
+            if (cycle === c && c.reconnectNoticeShown && !c.reconnectNoticeEmitted &&
+                st !is PlaybackState.Error && st !is PlaybackState.Stopped && st !is PlaybackState.Idle && st !is PlaybackState.Playing
+            ) {
+                c.reconnectNoticeEmitted = true
+                _notices.tryEmit(PlaybackNotice.Reconnecting(c.counters.transientRetries.coerceAtLeast(1), max))
+            }
+        }
+    }
+
+    /** The reconnect series ended with media: "Reconnected" only if "Reconnecting" was shown. */
+    private fun noticeReconnected(c: Cycle) {
+        c.reconnectNoticeShown = false
+        c.reconnectNoticeJob?.cancel()
+        c.reconnectNoticeJob = null
+        val restarts = c.seriesRestarts
+        c.seriesRestarts = 0
+        if (c.reconnectNoticeEmitted) {
+            c.reconnectNoticeEmitted = false
+            _notices.tryEmit(PlaybackNotice.Reconnected)
+        } else if (QUIET_FAST_RECONNECT) {
+            // (A8) A quiet series: counted for the stats overlay and for the cap below.
+            c.quietRestarts += restarts
+            c.visit?.let { v ->
+                v.quietRestarts += restarts
+                v.quietSeriesAtMs.addLast(clock.nowMs())
+                while (v.quietSeriesAtMs.size > QUIET_RECONNECT_MAX) v.quietSeriesAtMs.removeFirst()
+            }
+        }
+    }
+
+    /**
+     * (Code review 2026-11-26, A8) The quiet rule hides a fast reconnect, not a channel that keeps dropping: after
+     * [QUIET_RECONNECT_MAX] quiet series within [QUIET_RECONNECT_WINDOW_MS] in this visit, the next one announces itself
+     * at once (the 3rd within 10 minutes is no longer quiet).
+     */
+    private fun quietReconnectsUsedUp(c: Cycle): Boolean {
+        val v = c.visit ?: return false
+        val now = clock.nowMs()
+        return v.quietSeriesAtMs.count { now - it < QUIET_RECONNECT_WINDOW_MS } >= QUIET_RECONNECT_MAX
     }
 
     /**
@@ -1688,12 +1778,28 @@ internal class PlaybackControllerImpl @Inject constructor(
             PlaybackEventType.STALL -> if (code == app.thebox.player.engine.MediaSourceBuilder.STUCK_AUDIO_CODE) {
                 BoxLog.i(TAG) { "audio timestamps stuck ($detail): asking the ladder" }
                 onFailure(c, FailureSignal.AudioTimestampsStuck, null)
+            } else if (code == app.thebox.player.datasource.HlsPlaylistRenewal.FALLBACK_CODE) {
+                // (HLS playlist renewal, design §6.6; code review 2026-11-26) The pinned playlist URL expired and could not
+                // be renewed or followed: the dedicated row (L19p, a re-resolve with no initial delay), now instead of
+                // after Media3's retries have drained the buffer.
+                BoxLog.i(TAG) { "hls playlist renewal $detail: asking the ladder" }
+                onFailure(c, FailureSignal.PlaylistExpired, null)
+            } else if (code == app.thebox.player.datasource.HlsPlaylistRenewal.SEGMENT_CODE) {
+                // A segment refused with 401/403/410 is fatal in the policy but reaches the player only once the buffer
+                // ran dry: the same status row, now.
+                val status = detail.substringAfter("status=").toIntOrNull()
+                if (status != null) onFailure(c, FailureSignal.Http(status, app.thebox.core.playback.LoadOrigin.HLS_SEGMENT), null)
             }
             PlaybackEventType.RECONNECT -> {
                 val st = _state.value
                 if ((st is PlaybackState.Playing && !st.paused) || (st is PlaybackState.Buffering && st.cause == BufferingCause.REBUFFER)) {
                     setState(PlaybackState.Buffering(nowPlaying(c), BufferingCause.RECONNECTING, null))
                 }
+            }
+            // (Code review 2026-11-26, A8) A playlist URL renewed in place: counted per tune and per visit (stats).
+            PlaybackEventType.DECISION -> if (code == app.thebox.player.datasource.HlsPlaylistRenewal.RENEWED_CODE) {
+                c.renewals++
+                c.visit?.let { it.renewals++ }
             }
             PlaybackEventType.RECONNECT_OK -> {
                 // (integration 2026-10-13) The player usually never left READY during an in-source reconnect, so no
@@ -1756,6 +1862,13 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     // ------------------------------------------------------------------ ladder (§4.3)
 
+    /** (HLS edge hand-over, stage 0) Read-only player facts for the `HlsEdge` failure/decision lines (main thread). */
+    private fun hlsEdgeFacts(): app.thebox.player.datasource.HlsEdgeProbe.PlayerFacts? = try {
+        player?.let { p -> app.thebox.player.datasource.HlsEdgeProbe.PlayerFacts(p.totalBufferedDuration, p.currentLiveOffset, p.playbackState, p.playWhenReady) }
+    } catch (_: RuntimeException) {
+        null
+    }
+
     private fun onFailure(c: Cycle, signal: FailureSignal, error: PlaybackException?, fromWriter: Boolean = false) {
         if (cycle !== c) return
         if (c.isClip) {
@@ -1774,6 +1887,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         c.compatPending = false
         eventLog.add(PlaybackEventType.ERROR, id, signal.name, error?.errorCodeName ?: "")
         BoxLog.i(TAG) { "failure ${signal.name} (tune $id, ${now - c.startedAtMs} ms)" }
+        // (HLS edge hand-over, stage 0) Logging only: tracked live HLS tunes in debug builds.
+        if (app.thebox.player.datasource.HlsEdgeProbe.isTracked(id)) app.thebox.player.datasource.HlsEdgeProbe.onPlayerFailure(id, signal.name, hlsEdgeFacts())
 
         // WP-A: peek the limiter for the context; consume a slot only when the ladder actually re-resolves (format flip
         // and UA fallback are not rate-limited). The second decision only runs if the slot vanished in between.
@@ -1790,6 +1905,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         ) {
             decision = LadderDecision.Fail(PlaybackError(eventualCode(signal), ErrorDetail(signal = signal.name)))
         }
+        if (c.tsRetry) decision = settleTsRetryOnFailure(c, decision)
+        if (c.tsRetryCycle) decision = tsRetryAfterMedia(c, decision)
         execute(c, decision, signal, error)
     }
 
@@ -1885,6 +2002,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         val id = c.currentTuneId
         eventLog.add(PlaybackEventType.DECISION, id, decisionName(d), signal.name)
         BoxLog.i(TAG) { "decision ${decisionName(d)} for ${signal.name}" }
+        if (app.thebox.player.datasource.HlsEdgeProbe.isTracked(id)) app.thebox.player.datasource.HlsEdgeProbe.onDecision(id, decisionName(d), signal.name, hlsEdgeFacts())
         // (M6, §7.4) A buffered cycle routes writer-scoped, cycle-scoped and behind-live decisions first.
         if (c.ts != null && executeBuffered(c, d, signal)) return
         when (d) {
@@ -1922,9 +2040,8 @@ internal class PlaybackControllerImpl @Inject constructor(
             }
             LadderDecision.DisableTunnelingAndReprepare -> {
                 c.tunnelingOff = true
-                // Learned for the channel (ChannelPlaybackMemory.tunnelingOff): the next tune starts untunneled.
-                c.memory = c.memory.copy(tunnelingOff = true)
-                c.identity?.let { id -> remember(id) { it.copy(tunnelingOff = true) } }
+                // (2026-11-25) For this visit only: never saved, the next tune of the channel tries tunneling again.
+                tunnelingOffForVisit(c, signal)
                 _notices.tryEmit(PlaybackNotice.TunnelingDisabled)
                 extendSwitchWindow(c)
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
@@ -2012,6 +2129,12 @@ internal class PlaybackControllerImpl @Inject constructor(
     private fun restart(c: Cycle, d: LadderDecision, signal: FailureSignal, plan: Plan) {
         val max = settings.current.reconnectAttempts
         val transient = (d is LadderDecision.ReResolve || d is LadderDecision.RetrySame) && isTransient(signal)
+        if (c.firstMediaReached) {
+            // (Code review 2026-11-26, A8) Restarts after the picture appeared, per tune and per visit (stats overlay).
+            c.restarts++
+            c.seriesRestarts++
+            c.visit?.let { it.restarts++ }
+        }
         val waiting: (NowPlaying) -> PlaybackState = when {
             !c.firstMediaReached -> {
                 c.attempt++
@@ -2021,8 +2144,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             }
             transient -> {
                 val n = c.counters.transientRetries.coerceAtLeast(1)
-                _notices.tryEmit(PlaybackNotice.Reconnecting(n, max))
-                c.reconnectNoticeShown = true
+                noticeReconnecting(c, n, max)
                 ({ np -> PlaybackState.Buffering(np, BufferingCause.RECONNECTING, ReconnectProgress(n, max)) })
             }
             else -> {
@@ -2513,6 +2635,13 @@ internal class PlaybackControllerImpl @Inject constructor(
             redirects = t?.redirects ?: base.redirects,
             format = s?.format ?: base.format,
             reconnects = t?.reconnects ?: base.reconnects,
+            // (Code review 2026-11-26, A8) Per tune and per visit, across restarts (the session's own count resets).
+            playlistRenewals = c?.renewals ?: t?.playlistRenewals ?: base.playlistRenewals,
+            visitPlaylistRenewals = c?.visit?.renewals ?: 0,
+            restarts = c?.restarts ?: 0,
+            quietRestarts = c?.quietRestarts ?: 0,
+            visitRestarts = c?.visit?.restarts ?: 0,
+            visitQuietRestarts = c?.visit?.quietRestarts ?: 0,
             broker = try {
                 s?.ctx?.broker?.snapshot()
             } catch (e: Exception) {
@@ -2523,7 +2652,25 @@ internal class PlaybackControllerImpl @Inject constructor(
             updatedAtElapsedMs = clock.nowMs(),
             serverIndex = s?.resolved?.baseIndex ?: base.serverIndex,
             serverCount = s?.resolved?.baseCount ?: base.serverCount,
+            tunnelingOff = tunnelingOffReason(c, base),
         ).let { st -> withRewindStats(c, st) }
+    }
+
+    /**
+     * (Code review 2026-11-26, B3) Why the player is not tunneling: the clip rule, the settings (global or the channel's
+     * option), this visit's switch-off, the damping (B2), or else not supported for this stream on this device. Null while
+     * it is on, or before first media (the track selector has not decided yet).
+     */
+    private fun tunnelingOffReason(c: Cycle?, base: StreamStats): app.thebox.core.full.TunnelingOff? {
+        if (c == null || base.tunneling) return null
+        return when {
+            c.isClip -> app.thebox.core.full.TunnelingOff.REPLAY
+            !settings.current.tunneling || c.memory.tunnelingOff -> app.thebox.core.full.TunnelingOff.SETTING
+            c.tunnelingAutoOff -> app.thebox.core.full.TunnelingOff.STALLED
+            c.tunnelingDamped -> app.thebox.core.full.TunnelingOff.STALLED_BEFORE
+            !c.firstMediaReached -> null
+            else -> app.thebox.core.full.TunnelingOff.NOT_SUPPORTED
+        }
     }
 
     private fun safeStats(): StreamStats = try {
@@ -2952,10 +3099,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         val st = _state.value
         if (st is PlaybackState.Connecting && st.phase == ConnectPhase.CONNECTING) setActiveState(c, st.copy(phase = ConnectPhase.BUFFERING_INITIAL))
         // A writer restart (no new reader session, so onFirstMedia does not run): announce the reconnect's end here.
-        if (!first && c.reconnectNoticeShown && c.firstMediaReached) {
-            c.reconnectNoticeShown = false
-            _notices.tryEmit(PlaybackNotice.Reconnected)
-        }
+        if (!first && c.reconnectNoticeShown && c.firstMediaReached) noticeReconnected(c)
         publishLocalBuffer(force = true)
     }
 
@@ -3144,10 +3288,13 @@ internal class PlaybackControllerImpl @Inject constructor(
             setActiveState(c, PlaybackState.Connecting(nowPlaying(c), ConnectPhase.CONNECTING, c.attempt, clock.nowMs()))
         } else if (waiting && d != null && signal != null) {
             val max = settings.current.reconnectAttempts
+            // (Code review 2026-11-26, A8) A writer restart after first media counts like a session restart.
+            c.restarts++
+            c.seriesRestarts++
+            c.visit?.let { it.restarts++ }
             if ((d is LadderDecision.ReResolve || d is LadderDecision.RetrySame) && isTransient(signal)) {
                 val n = c.counters.transientRetries.coerceAtLeast(1)
-                _notices.tryEmit(PlaybackNotice.Reconnecting(n, max))
-                c.reconnectNoticeShown = true
+                noticeReconnecting(c, n, max)
                 setActiveState(c, PlaybackState.Buffering(nowPlaying(c), BufferingCause.RECONNECTING, ReconnectProgress(n, max)))
             } else {
                 c.attempt++
@@ -3479,6 +3626,205 @@ internal class PlaybackControllerImpl @Inject constructor(
         }
     }
 
+    // ------------------------------------------------------------------ Auto TS retry (owner ruling 2026-11-25)
+
+    /**
+     * (docs/decisions/2026-11-25-auto-format-retries-ts.md) The first session of a user tune (tune, zap) on an Xtream
+     * playlist set to Auto that learned HLS, once the back-off is over (`PlaylistPlaybackInfo.autoTsRetryDue`): this tune
+     * asks for MPEG-TS. True when the cycle's output changed, so the early resolve (made with HLS) is dropped and the
+     * resolve runs again (local reads only, no request). Never for Retry, a lifecycle resume or a ladder restart.
+     */
+    private fun beginTsRetry(c: Cycle): Boolean {
+        if (!c.userTune) return false
+        c.userTune = false
+        val id = c.identity ?: return false
+        if (c.spec !is Spec.Live || c.output != null || c.playlistInfo?.autoTsRetryDue != true) return false
+        c.output = XtreamOutput.TS
+        c.tsRetry = true
+        c.tsRetryCycle = true
+        eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "ts_retry", "attempt")
+        BoxLog.i(TAG) { "auto format: trying MPEG-TS again on playlist ${id.playlistId} (HLS was learned)" }
+        scope.launch {
+            delay(app.thebox.core.playback.resolve.AutoTsRetry.FIRST_MEDIA_BUDGET_MS)
+            if (cycle !== c || !c.tsRetry || c.firstMediaReached || c.cardShown) return@launch
+            val st = _state.value
+            if (st is PlaybackState.Error || st is PlaybackState.Stopped || st is PlaybackState.Idle) return@launch
+            // Neither refused nor playing yet: this tune goes back to HLS; the retry did not prove anything.
+            c.tsRetry = false
+            recordTsRetry(c, app.thebox.core.playback.resolve.AutoTsRetry.Result.INCONCLUSIVE, "no picture yet")
+            execute(c, tsRetryFallBack(c), c.lastSignal ?: FailureSignal.Network(NetworkFailureKind.TIMEOUT, beforeFirstByte = !c.firstByteSeen), null)
+        }
+        return true
+    }
+
+    /**
+     * A failure of an unsettled TS retry. The ladder's flip to HLS (405/406, L9) is the refusal: it runs as decided (the
+     * existing flip, same tune) and the back-off steps up. Anything else is inconclusive: before first media this tune
+     * falls back to HLS at once (one extra request, then the normal ladder on HLS); after first media TS has played, so
+     * the ladder's decision stands.
+     */
+    private fun settleTsRetryOnFailure(c: Cycle, decision: LadderDecision): LadderDecision {
+        c.tsRetry = false
+        if (decision is LadderDecision.FlipXtreamOutput && decision.to == XtreamOutput.HLS) {
+            c.tsRetryFellBack = true
+            recordTsRetry(c, app.thebox.core.playback.resolve.AutoTsRetry.Result.REFUSED, "")
+            return decision
+        }
+        recordTsRetry(c, app.thebox.core.playback.resolve.AutoTsRetry.Result.INCONCLUSIVE, c.lastSignal?.name.orEmpty())
+        return if (c.firstMediaReached) decision else tsRetryFallBack(c)
+    }
+
+    /**
+     * (Code review 2026-11-26, B1) The TS retry reached first media and then fails again within the same tune. A 405/406
+     * (the ladder's flip to HLS) is a refusal after all: recorded as such, the flip runs. Otherwise the first failure
+     * lets the ladder's decision stand (a blip); the [TS_RETRY_FAILURES_BEFORE_HLS]th failure, or any decision that
+     * would end at the error card, falls back to HLS for the rest of this tune, once. Not a refusal: the learned HLS
+     * keeps its step (the first failure already recorded the retry as inconclusive). Decoder and audio repairs run as
+     * decided (HLS carries the same codecs).
+     */
+    private fun tsRetryAfterMedia(c: Cycle, decision: LadderDecision): LadderDecision {
+        if (!c.firstMediaReached || c.tsRetryFellBack || c.output != XtreamOutput.TS) return decision
+        if (decision is LadderDecision.FlipXtreamOutput && decision.to == XtreamOutput.HLS) {
+            c.tsRetryFellBack = true
+            recordTsRetry(c, app.thebox.core.playback.resolve.AutoTsRetry.Result.REFUSED, "")
+            return decision
+        }
+        if (decision !is LadderDecision.Fail && decision !is LadderDecision.ReResolve && decision !is LadderDecision.RetrySame) return decision
+        c.tsFailuresAfterMedia++
+        if (decision !is LadderDecision.Fail && c.tsFailuresAfterMedia < TS_RETRY_FAILURES_BEFORE_HLS) return decision
+        BoxLog.i(TAG) { "auto format: MPEG-TS played, then kept failing (${c.lastSignal?.name}); HLS for the rest of this tune" }
+        eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "ts_retry", "fallback_after_media")
+        return tsRetryFallBack(c)
+    }
+
+    /** The flip back to HLS for this tune, counted like L9's so a 405 on HLS then ends at L10, with a fresh window. */
+    private fun tsRetryFallBack(c: Cycle): LadderDecision {
+        c.tsRetryFellBack = true
+        c.counters = c.counters.copy(formatFlips = c.counters.formatFlips + 1)
+        extendSwitchWindow(c)
+        return LadderDecision.FlipXtreamOutput(XtreamOutput.HLS)
+    }
+
+    /** First media on the TS retry: [AutoTsRetry.CONFIRM_MS] in the same cycle without a failure confirms it. */
+    private fun scheduleTsRetryConfirm(c: Cycle, s: TuneSession) {
+        if (s.resolved.output != XtreamOutput.TS) return
+        val failures = c.failureCount
+        scope.launch {
+            delay(app.thebox.core.playback.resolve.AutoTsRetry.CONFIRM_MS)
+            if (cycle !== c || !c.tsRetry || c.failureCount != failures) return@launch
+            c.tsRetry = false
+            recordTsRetry(c, app.thebox.core.playback.resolve.AutoTsRetry.Result.CONFIRMED, "")
+        }
+    }
+
+    /** Stores a retry result and writes its one info line (playlist id and numbers only: nothing to redact). */
+    private fun recordTsRetry(c: Cycle, result: app.thebox.core.playback.resolve.AutoTsRetry.Result, why: String) {
+        val playlistId = c.identity?.playlistId ?: return
+        eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "ts_retry", result.name.lowercase())
+        scope.launch {
+            var stored: app.thebox.core.playback.resolve.LearnedOutput? = null
+            safeProvider { stored = provider.recordAutoTsRetry(playlistId, result) }
+            val backoff = app.thebox.core.playback.resolve.AutoTsRetry.BACKOFF_MS
+            BoxLog.i(TAG) {
+                when (result) {
+                    app.thebox.core.playback.resolve.AutoTsRetry.Result.REFUSED ->
+                        "auto format: MPEG-TS refused again on playlist $playlistId, back on HLS; next retry in " +
+                            "${backoff[stored?.step ?: 0] / 86_400_000L} days"
+                    app.thebox.core.playback.resolve.AutoTsRetry.Result.CONFIRMED ->
+                        "auto format: MPEG-TS plays again on playlist $playlistId; learned HLS cleared"
+                    app.thebox.core.playback.resolve.AutoTsRetry.Result.INCONCLUSIVE ->
+                        "auto format: MPEG-TS retry inconclusive on playlist $playlistId ($why); HLS kept, next retry " +
+                            "in ${app.thebox.core.playback.resolve.AutoTsRetry.HOLD_OFF_MS / 60_000L} min at the earliest"
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ tunneling off per visit (owner ruling 2026-11-25)
+
+    /**
+     * (docs/decisions/2026-11-25-tunneling-off-per-visit.md; code review 2026-11-26, A8 and B2) A visit is the run of
+     * cycles on one channel with no user tune in between: the ladder's own restarts, Retry from the card, a
+     * backup-source restart of the same channel, the resume after leaving the app. In memory only.
+     */
+    private class Visit(val identity: ChannelIdentity?, val isArchive: Boolean, val isClip: Boolean) {
+        /** The ladder turned tunneling off in this visit (L27/L28). */
+        var tunnelingAutoOff = false
+        /** This visit reached first media with tunneling asked for. */
+        var tunneledPlay = false
+        /** (B2) This visit started untunneled because the channel stalled on its last visits. */
+        var damped = false
+        var restarts = 0
+        var quietRestarts = 0
+        var renewals = 0
+        /** (A8) When the last quiet reconnect series ended (MonoClock ms), newest last, at most [QUIET_RECONNECT_MAX]. */
+        val quietSeriesAtMs = ArrayDeque<Long>()
+    }
+
+    private var visit: Visit? = null
+
+    /**
+     * (Code review 2026-11-26, B2) Per (channel, catch-up): consecutive visits that ended with the ladder's tunneling
+     * switch-off. For the life of the process only: never saved, so an app restart tries tunneling again.
+     */
+    private val tunnelingStalledVisits = HashMap<Pair<ChannelIdentity, Boolean>, Int>()
+
+    /**
+     * Starts [c]'s visit or carries the current one. Inside a visit tunneling stays off once the ladder turned it off (no
+     * on → stall → off loop). A user tune (tune, zap, previous channel, catch-up), another channel, a clip or a live ↔
+     * catch-up change starts a new visit, and that tune follows the settings again, unless the channel stalled tunneled
+     * on its last [TUNNELING_STALLED_VISITS] visits: then it starts untunneled, without a toast (B2).
+     */
+    private fun carryVisit(c: Cycle, userTune: Boolean) {
+        val old = visit
+        if (old != null && !userTune && c.identity == old.identity && c.isArchive == old.isArchive && c.isClip == old.isClip) {
+            c.visit = old
+            if (old.tunnelingAutoOff) {
+                c.tunnelingOff = true
+                c.tunnelingAutoOff = true
+            }
+            if (old.damped) {
+                c.tunnelingOff = true
+                c.tunnelingDamped = true
+            }
+            return
+        }
+        if (old != null) endVisit(old)
+        val v = Visit(c.identity, c.isArchive, c.isClip)
+        visit = v
+        c.visit = v
+        val id = c.identity ?: return
+        if (c.isClip) return
+        val stalled = tunnelingStalledVisits[id to c.isArchive] ?: 0
+        if (stalled >= TUNNELING_STALLED_VISITS) {
+            v.damped = true
+            c.tunnelingOff = true
+            c.tunnelingDamped = true
+            BoxLog.i(TAG) { "tunneling: off for this visit without trying (stalled on the last $stalled visits; tried again after an app restart)" }
+        } else if (old?.tunnelingAutoOff == true && old.identity == id) {
+            BoxLog.i(TAG) { "tunneling: trying it again on this channel (a new tune after a visit with it off)" }
+        }
+    }
+
+    /** (B2) A visit that played tunneled and was never switched off ends the channel's run of stalled visits. */
+    private fun endVisit(v: Visit) {
+        val id = v.identity ?: return
+        if (!v.tunnelingAutoOff && v.tunneledPlay) tunnelingStalledVisits.remove(id to v.isArchive)
+    }
+
+    private fun tunnelingOffForVisit(c: Cycle, signal: FailureSignal) {
+        c.tunnelingAutoOff = true
+        val v = c.visit
+        if (v != null && !v.tunnelingAutoOff) {
+            v.tunnelingAutoOff = true
+            v.identity?.let { id ->
+                val key = id to v.isArchive
+                tunnelingStalledVisits[key] = (tunnelingStalledVisits[key] ?: 0) + 1
+            }
+        }
+        BoxLog.i(TAG) { "tunneling: off until the viewer leaves this channel (${signal.name}); not saved" }
+    }
+
     private suspend fun safeProvider(block: suspend () -> Unit) {
         try {
             block()
@@ -3505,6 +3851,29 @@ internal class PlaybackControllerImpl @Inject constructor(
 
         /** (follow-up 2026-10-14) Healthy playback at a raised TS compat level before it is saved (L27b). */
         const val COMPAT_PERSIST_HEALTHY_MS = 30_000L
+
+        /**
+         * (Quiet reconnect, 2026-11-25; lead's decision pending owner confirmation: flip to false to restore the
+         * immediate notices) A reconnect that renders again within [QUIET_RECONNECT_MS] shows no notice, all providers.
+         */
+        const val QUIET_FAST_RECONNECT = true
+        const val QUIET_RECONNECT_MS = 3_000L
+        /**
+         * (Code review 2026-11-26, A8) At most this many quiet reconnect series per visit within [QUIET_RECONNECT_WINDOW_MS];
+         * the next one shows "Reconnecting" at once (a channel that keeps dropping is not hidden).
+         */
+        const val QUIET_RECONNECT_MAX = 2
+        const val QUIET_RECONNECT_WINDOW_MS = 600_000L
+
+        /**
+         * (Code review 2026-11-26, B2; docs/decisions/2026-11-25-tunneling-off-per-visit.md) After this many consecutive
+         * visits of a channel that ended with the ladder's tunneling switch-off, its next visits start untunneled for the
+         * rest of the process (no toast); an app restart tries again. Nothing is saved.
+         */
+        const val TUNNELING_STALLED_VISITS = 2
+
+        /** (Code review 2026-11-26, B1) Failures after first media before a TS retry falls back to HLS for the tune. */
+        const val TS_RETRY_FAILURES_BEFORE_HLS = 2
 
         /**
          * Signals that may persist a compat raise: decoder-side stalls (b1 and the readiness stall are DECODER_STUCK;
@@ -3560,7 +3929,7 @@ internal class PlaybackControllerImpl @Inject constructor(
 
         /** Transient signals (L15/L17/L19/L22): reconnect, not a codec or account problem. */
         fun isTransient(s: FailureSignal): Boolean = when (s) {
-            is FailureSignal.ReconnectExhausted, is FailureSignal.Network, is FailureSignal.TinyBody -> true
+            is FailureSignal.ReconnectExhausted, is FailureSignal.Network, is FailureSignal.TinyBody, FailureSignal.PlaylistExpired -> true
             is FailureSignal.Stall -> s.kind == StallKind.NO_BYTES || s.kind == StallKind.HLS_NO_PROGRESS
             is FailureSignal.Http -> s.status >= 500 || s.status == 408 || s.status == 429
             else -> false

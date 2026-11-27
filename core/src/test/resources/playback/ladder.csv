@@ -112,6 +112,12 @@ L19;Stall NO_BYTES;firstFrame=true,ms=60000;ReResolve(delayMs=1000, refreshAccou
 L19;Stall HLS_NO_PROGRESS;firstFrame=true,ms=60000,format=HLS;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L19
 L19;ReconnectExhausted - bytes;firstFrame=true,ms=60000,attempts=-1,transientRetries=40;ReResolve(delayMs=5000, refreshAccount=false, rotateBase=false);L19
 G-limiter;ReconnectExhausted - bytes;firstFrame=true,ms=60000,reResolveAllowed=false;RetrySame(delayMs=1000);L19
+# (code review 2026-11-26) L19p: an HLS playlist URL that expired and could not be renewed re-resolves at once
+L19p;PlaylistExpired;firstFrame=true,ms=60000;ReResolve(delayMs=0, refreshAccount=false, rotateBase=false);L19p
+L19p;PlaylistExpired;firstFrame=true,ms=60000,transientRetries=3,format=HLS;ReResolve(delayMs=0, refreshAccount=false, rotateBase=false);L19p
+L19p;PlaylistExpired;firstFrame=true,ms=60000,attempts=-1,transientRetries=40;ReResolve(delayMs=0, refreshAccount=false, rotateBase=false);L19p
+G-limiter;PlaylistExpired;firstFrame=true,ms=60000,reResolveAllowed=false;RetrySame(delayMs=0);L19p
+L20;PlaylistExpired;firstFrame=true,ms=60000,transientRetries=5;Fail(STREAM_INTERRUPTED);L20
 L20;ReconnectExhausted - bytes;firstFrame=true,ms=60000,transientRetries=5;Fail(STREAM_INTERRUPTED);L20
 L20;ReconnectExhausted - bytes;firstFrame=true,ms=60000,attempts=3,transientRetries=3;Fail(STREAM_INTERRUPTED);L20
 L20;ReconnectExhausted - nobytes;ms=3000,transientRetries=5;Fail(NO_DATA_TIMEOUT);L20

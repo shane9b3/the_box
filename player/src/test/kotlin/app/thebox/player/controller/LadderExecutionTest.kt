@@ -286,16 +286,103 @@ class LadderExecutionTest {
     }
 
     @Test
-    fun transientReconnectAfterFirstMediaShowsProgressAndAnnouncesReconnected() {
+    fun transientReconnectThatRendersWithinThreeSecondsShowsNoNotice() {
+        // (Quiet reconnect, PlaybackControllerImpl.QUIET_FAST_RECONNECT) The waiting state shows, the notices do not.
         tuneAndFail(LadderDecision.ReResolve(1_000), playFirst = true, transient = true)
         assertTrue(f.ladder.seen.single().signal is FailureSignal.Network)
         val st = f.state as PlaybackState.Buffering
         assertEquals(BufferingCause.RECONNECTING, st.cause)
-        assertEquals(1, f.notices.count { it is PlaybackNotice.Reconnecting })
+        assertTrue(f.notices.none { it is PlaybackNotice.Reconnecting })
         f.advance(1_100)
+        f.play()
+        f.advance(5_000)
+        assertTrue(f.notices.none { it is PlaybackNotice.Reconnecting || it == PlaybackNotice.Reconnected })
+        assertTrue(f.state is PlaybackState.Playing)
+    }
+
+    @Test
+    fun transientReconnectPastThreeSecondsShowsProgressAndAnnouncesReconnected() {
+        tuneAndFail(LadderDecision.ReResolve(1_000), playFirst = true, transient = true)
+        f.advance(PlaybackControllerImpl.QUIET_RECONNECT_MS - 100)
+        assertTrue(f.notices.none { it is PlaybackNotice.Reconnecting })
+        f.advance(200)
+        assertEquals(1, f.notices.count { it is PlaybackNotice.Reconnecting })
         f.play()
         assertEquals(1, f.notices.count { it == PlaybackNotice.Reconnected })
         assertTrue(f.state is PlaybackState.Playing)
+    }
+
+    @Test
+    fun anHlsRenewalFallbackReachesTheLadderAtOnceAsTodaysNetworkRow() {
+        tuneAndFail(LadderDecision.ReResolve(1_000), playFirst = true, transient = true)
+        f.advance(1_100)
+        f.play()
+        val seen = f.ladder.seen.size
+        f.sources.last.ctx.onEvent(app.thebox.core.playback.PlaybackEventType.STALL, app.thebox.player.datasource.HlsPlaylistRenewal.FALLBACK_CODE, "misaligned:msn_back")
+        f.idle()
+        // (Code review 2026-11-26) Its own signal, for the immediate row L19p (no initial delay).
+        assertEquals(FailureSignal.PlaylistExpired, f.ladder.seen.drop(seen).single().signal)
+    }
+
+    /**
+     * (Code review 2026-11-26, A8) The quiet rule hides a fast reconnect, not a channel that keeps dropping: two quiet
+     * series in a visit, then the third within 10 minutes says "Reconnecting" at once. The stats count the restarts and
+     * the quiet ones per tune and per visit, and the renewals across sessions.
+     */
+    @Test
+    fun theThirdQuietReconnectWithinTenMinutesIsAnnounced() {
+        f.controller.setStatsEnabled(true)
+        f.ladder.script = { _, _ -> LadderDecision.ReResolve(0) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        f.advance(1_000)
+        repeat(PlaybackControllerImpl.QUIET_RECONNECT_MAX) {
+            f.exo.emitError(resetError())
+            f.idle()
+            f.advance(500)
+            f.play()
+            f.advance(60_000)
+        }
+        assertTrue("quiet so far", f.notices.none { it is PlaybackNotice.Reconnecting || it == PlaybackNotice.Reconnected })
+        f.sources.last.ctx.onEvent(app.thebox.core.playback.PlaybackEventType.DECISION, app.thebox.player.datasource.HlsPlaylistRenewal.RENEWED_CODE, "")
+        f.idle()
+        f.exo.emitError(resetError())
+        f.idle()
+        assertEquals("announced at once", 1, f.notices.count { it is PlaybackNotice.Reconnecting })
+        f.advance(500)
+        f.play()
+        assertEquals(1, f.notices.count { it == PlaybackNotice.Reconnected })
+        f.advance(1_500)
+        val st = f.controller.stats.value
+        assertEquals(3, st.restarts)
+        assertEquals(2, st.quietRestarts)
+        assertEquals(3, st.visitRestarts)
+        assertEquals("a renewal of an earlier session still counts", 1, st.playlistRenewals)
+        assertEquals(1, st.visitPlaylistRenewals)
+        // Ten minutes later the quiet rule is back.
+        f.advance(PlaybackControllerImpl.QUIET_RECONNECT_WINDOW_MS)
+        f.exo.emitError(resetError())
+        f.idle()
+        assertEquals(1, f.notices.count { it is PlaybackNotice.Reconnecting })
+        // A new tune of the channel is a new visit: its counts start over.
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        f.advance(1_500)
+        assertEquals(0, f.controller.stats.value.visitRestarts)
+        assertEquals(0, f.controller.stats.value.playlistRenewals)
+    }
+
+    @Test
+    fun aRefusedHlsSegmentReachesTheLadderAtOnceWithItsStatus() {
+        tuneAndFail(LadderDecision.ReResolve(1_000), playFirst = true, transient = true)
+        f.advance(1_100)
+        f.play()
+        val seen = f.ladder.seen.size
+        f.sources.last.ctx.onEvent(app.thebox.core.playback.PlaybackEventType.STALL, app.thebox.player.datasource.HlsPlaylistRenewal.SEGMENT_CODE, "status=403")
+        f.idle()
+        assertEquals(FailureSignal.Http(403, app.thebox.core.playback.LoadOrigin.HLS_SEGMENT), f.ladder.seen.drop(seen).single().signal)
     }
 
     @Test
@@ -372,17 +459,21 @@ class LadderExecutionTest {
         assertEquals("RepairAudioTimestampsAndReprepare", (f.state as PlaybackState.Stalled).step)
     }
 
+    /**
+     * (Owner ruling 2026-11-25, docs/decisions/2026-11-25-tunneling-off-per-visit.md; replaces the 2026-10-17 "remembered
+     * for the channel" rule) The ladder's switch-off is never saved: the next tune of the channel tunnels again.
+     */
     @Test
-    fun tunnelingOffIsRememberedForTheChannelAndAppliedOnTheNextTune() {
+    fun tunnelingOffIsForTheVisitOnlyAndTheNextTuneTriesAgain() {
         f.settings.update { it.copy(tunneling = true) }
         tuneAndFail(LadderDecision.DisableTunnelingAndReprepare)
-        assertEquals(true, f.memory.rows[CH1]?.tunnelingOff)
+        assertTrue("not saved", f.memory.rows[CH1]?.tunnelingOff != true)
         f.controller.stop(app.thebox.player.api.StopReason.USER)
         f.idle()
         f.ladder.script = { _, _ -> LadderDecision.Fail(PlaybackError(PlaybackErrorCode.INTERNAL)) }
         f.controller.tune(TuneTarget.Channel(CH1))
         f.idle()
-        assertFalse("the remembered channel tunes untunneled", f.playerFactory.bundle!!.trackSelector.parameters.tunnelingEnabled)
+        assertTrue("coming back tunnels again", f.playerFactory.bundle!!.trackSelector.parameters.tunnelingEnabled)
     }
 
     @Test

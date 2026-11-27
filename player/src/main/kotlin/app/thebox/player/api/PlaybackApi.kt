@@ -358,11 +358,23 @@ data class StreamStats(
     val redirects: Int = 0,
     val format: StreamFormat = StreamFormat.UNKNOWN,
     val reconnects: Int = 0,
+    /** (HLS playlist renewal; code review 2026-11-26, A8) Playlist URLs renewed in place this tune, across its restarts. */
+    val playlistRenewals: Int = 0,
+    /** (A8) The same over the visit (the tunes of this channel since the last user tune). */
+    val visitPlaylistRenewals: Int = 0,
+    /** (A8) Ladder reconnect restarts after first media this tune, and how many showed no notice (quiet reconnect). */
+    val restarts: Int = 0,
+    val quietRestarts: Int = 0,
+    /** (A8) The same over the visit. */
+    val visitRestarts: Int = 0,
+    val visitQuietRestarts: Int = 0,
     val broker: BrokerSnapshot? = null,
     val bufferProfile: BufferProfile? = null,
     val afr: AfrMode = AfrMode.SEAMLESS,
     val displayRefreshHz: Float? = null,
     val tunneling: Boolean = false,
+    /** (2026-11-25; code review 2026-11-26, B3) Why tunneling is off when [tunneling] is false; null = not known yet. */
+    val tunnelingOff: app.thebox.core.full.TunnelingOff? = null,
     val updatedAtElapsedMs: Long = 0,
     // (M4, reviewed 2026-10-15, E23)
     /** 0-based base URL in use (ResolvedStream.baseIndex) and the number of bases. */

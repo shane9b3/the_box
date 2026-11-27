@@ -11,6 +11,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
+import androidx.media3.exoplayer.hls.DefaultHlsDataSourceFactory
 import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
@@ -30,6 +31,8 @@ import app.thebox.core.playback.PlaybackEventType
 import app.thebox.core.playback.StreamFormat
 import app.thebox.core.playback.errors.LoadRetryRulesImpl
 import app.thebox.player.datasource.BoxLoadErrorHandlingPolicy
+import app.thebox.player.datasource.HlsEdgeDataSourceFactory
+import app.thebox.player.datasource.HlsEdgeProbe
 import app.thebox.player.internal.MediaSourceBuilderApi
 import app.thebox.player.internal.MediaSourceWithTelemetry
 import app.thebox.player.internal.StreamSessionContext
@@ -110,7 +113,16 @@ internal class MediaSourceBuilder(
                 MediaSourceWithTelemetry(source, telemetry)
             }
             StreamFormat.HLS -> {
-                val (factory, telemetry) = transport.http(ctx)
+                // (HLS playlist renewal, docs/design/m6-hls-edge-handover.md §6) Live: the transport's typed HLS data
+                // sources (playlist-URL renewal inside); archive: the brokered `http` factory exactly as before.
+                val (dataSources, telemetry) = if (isArchive) {
+                    transport.http(ctx).let { (f, t) -> DefaultHlsDataSourceFactory(f) to t }
+                } else {
+                    transport.liveHls(ctx)
+                }
+                // (HLS edge hand-over, stage 0) Debug builds only, live only: an observe-only wrapper that logs `HlsEdge`
+                // lines. Null in release (and for archive), and then the factory below is exactly the one always built.
+                val edgeProbe = if (!isArchive) HlsEdgeProbe.begin(ctx) else null
                 val item = MediaItem.Builder()
                     .setUri(ctx.resolved.url.toUri())
                     .setMediaId(ctx.tuneId.toString())
@@ -129,7 +141,8 @@ internal class MediaSourceBuilder(
                         }
                     }
                     .build()
-                val source: MediaSource = HlsMediaSource.Factory(factory)
+                val hlsFactory = HlsMediaSource.Factory(if (edgeProbe != null) HlsEdgeDataSourceFactory(dataSources, edgeProbe) else dataSources)
+                val source: MediaSource = hlsFactory
                     .setAllowChunklessPreparation(true)
                     .setLoadErrorHandlingPolicy(policyFor(if (isArchive) LoadOrigin.ARCHIVE else LoadOrigin.HLS_MANIFEST))
                     .setExtractorFactory(hlsExtractors(ctx, exposeCea608WhenMissingDeclarations = true))

@@ -5,6 +5,7 @@ import app.thebox.core.playback.CoreLease
 import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.HttpUrl
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
@@ -35,8 +36,16 @@ internal class BrokeredCallFactory(
     private var ending = false
     private var released = false
 
-    override fun newCall(request: Request): Call {
-        val call = client.newCall(request.newBuilder().tag(LeaseTag::class.java, LeaseTag(lease.ownerTuneId, lease.id)).build())
+    override fun newCall(request: Request): Call = newCall(request, followRedirects = true)
+
+    /**
+     * (HLS playlist renewal, docs/design/m6-hls-edge-handover.md §6.3) [followRedirects] false: the call goes through a
+     * no-follow variant of [client] (same pool, dispatcher, interceptors and TLS settings, see [NoFollowClients]), so a
+     * 3xx comes back as the response instead of being followed. Same lease, same bookkeeping as every other call.
+     */
+    fun newCall(request: Request, followRedirects: Boolean): Call {
+        val via = if (followRedirects) client else NoFollowClients.of(client)
+        val call = via.newCall(request.newBuilder().tag(LeaseTag::class.java, LeaseTag(lease.ownerTuneId, lease.id)).build())
         val handle = Handle(call)
         call.addEventListener(handle)
         val refuse = synchronized(lock) {
@@ -114,6 +123,23 @@ internal class BrokeredCallFactory(
         private fun done() {
             synchronized(this) { if (done) return else done = true }
             onCallDone(this)
+        }
+    }
+
+    /**
+     * No-follow twins of the playback clients, built once per client: `newBuilder()` shares the connection pool,
+     * dispatcher, DNS, interceptors and socket/TLS settings, so a no-follow reload reuses the same keep-alive
+     * connection a followed one would. A [Call.Factory] that is not an `OkHttpClient` (tests) is returned as is.
+     */
+    internal object NoFollowClients {
+        private val cache = java.util.WeakHashMap<OkHttpClient, OkHttpClient>()
+
+        fun of(client: Call.Factory): Call.Factory {
+            val ok = client as? OkHttpClient ?: return client
+            if (!ok.followRedirects && !ok.followSslRedirects) return ok
+            return synchronized(cache) {
+                cache.getOrPut(ok) { ok.newBuilder().followRedirects(false).followSslRedirects(false).build() }
+            }
         }
     }
 

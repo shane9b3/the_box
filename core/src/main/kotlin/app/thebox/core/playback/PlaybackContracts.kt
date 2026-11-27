@@ -46,6 +46,11 @@ data class PlaylistPlaybackInfo(
     val ignoreTlsErrors: Boolean = false,
     val maxConnectionsOverride: Int? = null,
     val needsReauth: Boolean = false,
+    /**
+     * (2026-11-25, docs/decisions/2026-11-25-auto-format-retries-ts.md) `AutoTsRetry.due` at the time of the read: Auto,
+     * learned HLS, TS allowed, the back-off over. Only the controller acts on it, and only at a user tune.
+     */
+    val autoTsRetryDue: Boolean = false,
 )
 
 /** What the resolver needs from one channel row (the URL is still a template). */
@@ -235,6 +240,13 @@ sealed interface FailureSignal {
     data class LocalConnectionLimit(val active: Int, val max: Int) : FailureSignal
     data object ChannelMissing : FailureSignal
     data class Unknown(val media3ErrorCode: Int) : FailureSignal
+    /**
+     * (Code review 2026-11-26, docs/design/m6-hls-edge-handover.md §10) The live HLS playlist URL Media3 pinned expired
+     * and the data source could neither renew it nor follow its redirect to a usable continuation: the stream itself is
+     * fine, only a fresh resolve from the provider URL helps. Row L19p re-resolves with no initial delay (still counted as
+     * a transient retry, so a storm ends at L20).
+     */
+    data object PlaylistExpired : FailureSignal
     /**
      * (M6 time-shift commit 0, docs/design/m6-timeshift.md §16.3; additive) A ring reader reached a segment boundary
      * (`RingBoundaryException`). Handled **before** the ladder by `TimelineRouter.onGap` (§7.4): no counters, no stats

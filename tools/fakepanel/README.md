@@ -116,6 +116,10 @@ with N generated ones (VOD and series unchanged), for the guide's instrumented t
 | `timeshift_redirect` | like `redirect`, for timeshift requests only (live stays direct); the `Location` keeps the original query (`timeshift.php`, `?utc=`) |
 | `token_kill` | on the redirect port, an open body is closed when its token expires (`token_ttl`): mid-play token expiry; counts `token_expired` |
 | `timeshift_reject_forms` | per stream (`stream_faults`), as the config key below; wins over it |
+| `playlist_token_ttl` | s (live `.m3u8` only): the measured HLS shape (docs/design/m6-hls-edge-handover.md §1.2). The main port answers each tune with a 302 to `http://host:<redirect-port>/hls/<token>/<id>.m3u8` (a new token per request); that media playlist lists absolute-path segments `/hls/<token>/<id>_<n>.ts` on the same host. After N s the token's **playlist** answers per `token_expire_mode`; its segments keep answering inside the window. A new request to the main port gets a new token. Counts `edge_tokens_issued`, `edge_token_expired` in `/admin/stats` |
+| `token_expire_mode` | with `playlist_token_ttl`: `redirect_dead` (default: 302 to `10.255.255.1`, a non-routable address, so following it times out on connect, as measured), `redirect_refused` (302 to a closed local port), `redirect_moved` (302 to a **working** new token on the *main* port, and from then on the main port's tunes hand out main-port tokens: "the edge moved to another host:port", whose redirect today's code follows), `403`, `404` |
+| `edge_blip_every` / `edge_blip_s` | with `playlist_token_ttl`: every `edge_blip_every` s (wall clock), for `edge_blip_s` s (default 2), the stream's tune redirect and every `/hls/` request get no response at all (connection closed before the status line): a short network blip. Counts `edge_blips` |
+| `token_msn` | with `playlist_token_ttl`: `continue` (default: every token's playlist lists the same wall-clock media sequence and segment names, so a new token simply continues), `restart` (each token's sequence counts from 0 at its issue: a "restarted segmenter") |
 
 Time for `inline_jump_after`, `psi_every_s` and `pmt_change_after` is media time (clip bytes sent / clip rate): wall time when paced (`pace: true`, the default), deterministic when not.
 Shaping applies to live TS (`/live/.../N.ts` and the live-shifted archive forms); with every key off the output is byte-identical to the unshaped generator.
@@ -175,6 +179,54 @@ The correction exists only in the M3U (`get.php`): the Xtream API has no such fi
 M3U URL playlist to see it (the M4 suite does, `m3u=1` on the debug seed link). The panel's zone stays `timezone`
 (default `Europe/Berlin`, ≠ UTC). With the flag off, the synthetic lineup is exactly the M3 one.
 
+## HLS playlist-token expiry (the half-hour "Reconnected" toast in minutes)
+
+The owner's provider expires the post-redirect HLS playlist URL after 30 minutes (docs/design/m6-hls-edge-handover.md §1.2).
+`playlist_token_ttl` reproduces it in seconds. Live channel 1 as HLS, token 90 s, expired playlists redirected to a dead
+address:
+
+```
+python3 tools/fakepanel/fakepanel.py --port 8080 --set 'allowed_output_formats=["m3u8"]' \
+    --stream-fault 1:playlist_token_ttl=90
+```
+
+(`allowed_output_formats` m3u8-only makes the app use HLS for the playlist; alternatively set the playlist's stream
+format to HLS in the app.) Play channel 1 for about 4 minutes (two expiries). Expected in the app log (`HlsRenewal`,
+info level, also in release builds), once per expiry and nothing else:
+
+```
+HlsRenewal: renewed t=<tune> pl=#<hash> trigger=redirect:302 in=<ms>ms edge=ip#<hash>:8081 msn=<a>><b> td=2>2 n=<k>
+```
+
+and **absent**: `failure Network`, `ErrorLadder: row=`, `Reconnecting`/`Reconnected` notices, a second `zap … ok`.
+`/admin/stats` shows `edge_tokens_issued` = 1 + number of expiries, `edge_token_expired` = number of expiries.
+
+Fallback check (`--stream-fault 1:token_msn='"restart"'`, or `POST /admin/config
+{"stream_faults":{"1":{"playlist_token_ttl":90,"token_msn":"restart"}}}`): each expiry logs
+`HlsRenewal: misaligned:msn_back …`, then (the 302 is re-sent with redirects followed, into the dead address)
+`HlsRenewal: follow_failed:connect …`, then at once `hls playlist renewal misaligned:msn_back: asking the ladder`,
+`ErrorLadder: row=L19p signal=PlaylistExpired -> ReResolve(delayMs=0 …)` and a quiet re-resolve (no notice when playback
+is back within 3 s; the third such series within 10 minutes of one visit shows "Reconnecting" at once).
+`token_expire_mode: "403"` exercises `trigger=status:403`.
+
+Code review 2026-11-26 checks (all with `--set 'allowed_output_formats=["m3u8"]'`, or Stream format set to HLS):
+
+```
+# A redirect to a working address is still followed (no restart): renewal declines (other host:port), the followed
+# redirect plays. Expect per expiry `declined:host` then `followed … other_host`; later expiries: nothing (the route
+# follows redirects, today's request). Absent: `asking the ladder`, `ErrorLadder: row=`, notices.
+python3 tools/fakepanel/fakepanel.py --port 8080 --set 'allowed_output_formats=["m3u8"]' \
+    --stream-fault 1:playlist_token_ttl=90 --stream-fault 1:token_expire_mode='"redirect_moved"'
+
+# A 2-second network blip does not restart playback: every 60 s the token paths drop for 2 s. Expect at most one
+# `failed:… trigger=io:…` (or `renewed … trigger=io:…`) line per blip and Media3's own retries; absent: `asking the
+# ladder`, `ErrorLadder: row=`, a second `zap … ok`, notices. (With a short TTL too, expiries still renew.)
+python3 tools/fakepanel/fakepanel.py --port 8080 --set 'allowed_output_formats=["m3u8"]' \
+    --stream-fault 1:playlist_token_ttl=3600 --stream-fault 1:edge_blip_every=60 --stream-fault 1:edge_blip_s=2
+```
+
+The stats overlay's HTTP line counts `n renewals (visit m)` across restarts, and its Restarts line `n (q quiet) · visit m`.
+
 ## Admin API
 
 ```
@@ -193,6 +245,7 @@ curl -X POST localhost:8080/admin/timeshift_expect -d '{"start_unix":1791900000,
 curl -X POST localhost:8080/admin/config -d '{"timeshift_mode":"duration","archive_lag_sec":120}'
 curl -X POST localhost:8080/admin/config -d '{"timeshift_reject_forms":{"path":404},"stream_faults":{"3":{"timeshift_reject_forms":{"php":"200-html"}}}}'
 curl -X POST localhost:8080/admin/config -d '{"max_connections":1,"faults":{"timeshift_range_rejects":458}}'
+curl -X POST localhost:8080/admin/config -d '{"stream_faults":{"1":{"playlist_token_ttl":90}}}'   # HLS playlist token expiry
 curl -X POST localhost:8080/admin/kick # close every open stream
 curl -X POST localhost:8080/admin/reset
 ```

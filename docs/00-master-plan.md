@@ -104,6 +104,7 @@ The ranked top-25 "make or break" list and the complaint → decision → verifi
 | EPG import | ≤ 90 s for ~1M programmes while playing, importer heap ≤ 20 MB, zap degradation ≤ 15 % | Fire TV Stick 4K |
 | Window query | warm ≤ 5 ms, cold ≤ 30 ms, 20k channels × 7 days | Fire TV Stick 4K |
 | Soak | 12 h playback with a zapping bot, no heap growth | all |
+| HLS playlist renewal (2026-11-26) | ≥ 2 half-hour marks on the owner's provider with one `HlsRenewal: renewed` line each and no ladder line (`docs/design/m6-hls-edge-handover.md` §8.3). **To validate HLS renewal on a playlist that the Auto TS retry would move to TS, force Stream format to HLS** (the retry moves Auto playlists to TS, where renewal never runs) | owner's device |
 
 ## 7. Spike phase (before feature work)
 
