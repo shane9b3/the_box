@@ -1,0 +1,849 @@
+([
+ {
+  "sections": [
+   {
+    "title": "",
+    "headers": {
+     "overall_rank": {
+      "properties": {
+       "key": "overall_rank",
+       "hidden": false,
+       "class": "ht-hide-column",
+       "label": " ",
+       "title": "Rank",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "overall_rank"
+      }
+     },
+     "rank": {
+      "properties": {
+       "key": "rank",
+       "hidden": false,
+       "class": "",
+       "label": " ",
+       "title": "Rank",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": ""
+      }
+     },
+     "team_code": {
+      "properties": {
+       "key": "team_code",
+       "hidden": false,
+       "class": "show-mobile",
+       "label": "Name",
+       "title": "Name",
+       "sortable": true,
+       "align": "left",
+       "highlight": false,
+       "sortKey": ""
+      }
+     },
+     "name": {
+      "properties": {
+       "key": "name",
+       "hidden": false,
+       "class": "hide-mobile",
+       "label": "LHJMQ",
+       "title": "LHJMQ",
+       "sortable": true,
+       "align": "left",
+       "highlight": false,
+       "sortKey": ""
+      }
+     },
+     "games_played": {
+      "properties": {
+       "key": "games_played",
+       "hidden": false,
+       "class": "",
+       "label": "GP",
+       "title": "Games Played",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "games_played"
+      }
+     },
+     "wins": {
+      "properties": {
+       "key": "wins",
+       "hidden": false,
+       "class": "",
+       "label": "W",
+       "title": "Wins",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "wins"
+      }
+     },
+     "losses": {
+      "properties": {
+       "key": "losses",
+       "hidden": false,
+       "class": "",
+       "label": "L",
+       "title": "Losses",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "losses"
+      }
+     },
+     "ot_losses": {
+      "properties": {
+       "key": "ot_losses",
+       "hidden": false,
+       "class": "",
+       "label": "OTL",
+       "title": "Overtime Losses",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "ot_losses"
+      }
+     },
+     "shootout_losses": {
+      "properties": {
+       "key": "shootout_losses",
+       "hidden": false,
+       "class": "",
+       "label": "SOL",
+       "title": "Shootout Losses",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "shootout_losses"
+      }
+     },
+     "shootout_wins": {
+      "properties": {
+       "key": "shootout_wins",
+       "hidden": false,
+       "class": "",
+       "label": "SOW",
+       "title": "Shootout Wins",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "shootout_wins"
+      }
+     },
+     "points": {
+      "properties": {
+       "key": "points",
+       "hidden": false,
+       "class": "",
+       "label": "PTS",
+       "title": "Points",
+       "sortable": true,
+       "align": "center",
+       "highlight": true,
+       "sortKey": "points"
+      }
+     },
+     "ot_wins": {
+      "properties": {
+       "key": "ot_wins",
+       "hidden": false,
+       "class": "",
+       "label": "OTW",
+       "title": "OTW",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "ot_wins"
+      }
+     },
+     "goals_for": {
+      "properties": {
+       "key": "goals_for",
+       "hidden": false,
+       "class": "",
+       "label": "GF",
+       "title": "Goals For",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "goals_for"
+      }
+     },
+     "goals_against": {
+      "properties": {
+       "key": "goals_against",
+       "hidden": false,
+       "class": "",
+       "label": "GA",
+       "title": "Goals Against",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "goals_against"
+      }
+     },
+     "goals_diff": {
+      "properties": {
+       "key": "goals_diff",
+       "hidden": false,
+       "class": "",
+       "label": "DIFF",
+       "title": "Goal Differential",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "goals_diff"
+      }
+     },
+     "percentage": {
+      "properties": {
+       "key": "percentage",
+       "hidden": false,
+       "class": "",
+       "label": "PCT",
+       "title": "Percentage",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "percentage"
+      }
+     },
+     "row": {
+      "properties": {
+       "key": "row",
+       "hidden": false,
+       "class": "",
+       "label": "ROW",
+       "title": "Regulation and OT Wins",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "row"
+      }
+     },
+     "streak": {
+      "properties": {
+       "key": "streak",
+       "hidden": false,
+       "class": "",
+       "label": "STK",
+       "title": "Streaks",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": ""
+      }
+     },
+     "penalty_minutes": {
+      "properties": {
+       "key": "penalty_minutes",
+       "hidden": false,
+       "class": "",
+       "label": "PIM",
+       "title": "Penalty Minutes",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "penalty_minutes"
+      }
+     },
+     "past_10": {
+      "properties": {
+       "key": "past_10",
+       "hidden": false,
+       "class": "",
+       "label": "P10",
+       "title": "Past 10 Games",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": ""
+      }
+     }
+    },
+    "data": [
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "15"
+       },
+       "name": {
+        "teamLink": "15"
+       }
+      },
+      "row": {
+       "team_code": "VdO",
+       "wins": "17",
+       "losses": "3",
+       "ot_losses": "1",
+       "ot_wins": "2",
+       "shootout_wins": "2",
+       "shootout_losses": "1",
+       "row": "15",
+       "points": 36,
+       "penalty_minutes": "317",
+       "streak": "1-0-0-0",
+       "goals_for": "88",
+       "goals_against": "52",
+       "goals_diff": "36",
+       "percentage": "0.818",
+       "overall_rank": "1",
+       "games_played": "22",
+       "rank": 1,
+       "past_10": "7-2-0-1",
+       "name": "Val-d'Or, Foreurs"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "9"
+       },
+       "name": {
+        "teamLink": "9"
+       }
+      },
+      "row": {
+       "team_code": "Que",
+       "wins": "17",
+       "losses": "5",
+       "ot_losses": "1",
+       "ot_wins": "2",
+       "shootout_wins": "0",
+       "shootout_losses": "0",
+       "row": "17",
+       "points": 35,
+       "penalty_minutes": "290",
+       "streak": "4-0-0-0",
+       "goals_for": "88",
+       "goals_against": "59",
+       "goals_diff": "29",
+       "percentage": "0.761",
+       "overall_rank": "2",
+       "games_played": "23",
+       "rank": 2,
+       "past_10": "8-2-0-0",
+       "name": "Québec, Remparts"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "17"
+       },
+       "name": {
+        "teamLink": "17"
+       }
+      },
+      "row": {
+       "team_code": "Vic",
+       "wins": "16",
+       "losses": "6",
+       "ot_losses": "0",
+       "ot_wins": "1",
+       "shootout_wins": "1",
+       "shootout_losses": "1",
+       "row": "15",
+       "points": 33,
+       "penalty_minutes": "325",
+       "streak": "2-0-0-0",
+       "goals_for": "100",
+       "goals_against": "89",
+       "goals_diff": "11",
+       "percentage": "0.717",
+       "overall_rank": "3",
+       "games_played": "23",
+       "rank": 3,
+       "past_10": "7-3-0-0",
+       "name": "Victoriaville, Tigres"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "8"
+       },
+       "name": {
+        "teamLink": "8"
+       }
+      },
+      "row": {
+       "team_code": "SNB",
+       "wins": "15",
+       "losses": "6",
+       "ot_losses": "1",
+       "ot_wins": "1",
+       "shootout_wins": "2",
+       "shootout_losses": "2",
+       "row": "13",
+       "points": 33,
+       "penalty_minutes": "303",
+       "streak": "0-1-0-0",
+       "goals_for": "90",
+       "goals_against": "77",
+       "goals_diff": "13",
+       "percentage": "0.688",
+       "overall_rank": "4",
+       "games_played": "24",
+       "rank": 4,
+       "past_10": "7-2-0-1",
+       "name": "Saint John, Sea Dogs"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "2"
+       },
+       "name": {
+        "teamLink": "2"
+       }
+      },
+      "row": {
+       "team_code": "NFL",
+       "wins": "14",
+       "losses": "8",
+       "ot_losses": "2",
+       "ot_wins": "2",
+       "shootout_wins": "1",
+       "shootout_losses": "2",
+       "row": "13",
+       "points": 32,
+       "penalty_minutes": "350",
+       "streak": "1-0-1-0",
+       "goals_for": "88",
+       "goals_against": "82",
+       "goals_diff": "6",
+       "percentage": "0.615",
+       "overall_rank": "5",
+       "games_played": "26",
+       "rank": 5,
+       "past_10": "5-3-1-1",
+       "name": "Newfoundland, Regiment"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "11"
+       },
+       "name": {
+        "teamLink": "11"
+       }
+      },
+      "row": {
+       "team_code": "Rou",
+       "wins": "13",
+       "losses": "7",
+       "ot_losses": "3",
+       "ot_wins": "2",
+       "shootout_wins": "1",
+       "shootout_losses": "0",
+       "row": "12",
+       "points": 29,
+       "penalty_minutes": "218",
+       "streak": "2-0-0-0",
+       "goals_for": "70",
+       "goals_against": "66",
+       "goals_diff": "4",
+       "percentage": "0.630",
+       "overall_rank": "6",
+       "games_played": "23",
+       "rank": 6,
+       "past_10": "7-2-1-0",
+       "name": "Rouyn-Noranda, Huskies"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "60"
+       },
+       "name": {
+        "teamLink": "60"
+       }
+      },
+      "row": {
+       "team_code": "She",
+       "wins": "12",
+       "losses": "6",
+       "ot_losses": "3",
+       "ot_wins": "1",
+       "shootout_wins": "0",
+       "shootout_losses": "1",
+       "row": "12",
+       "points": 28,
+       "penalty_minutes": "273",
+       "streak": "1-0-0-0",
+       "goals_for": "83",
+       "goals_against": "67",
+       "goals_diff": "16",
+       "percentage": "0.636",
+       "overall_rank": "7",
+       "games_played": "22",
+       "rank": 7,
+       "past_10": "5-3-1-1",
+       "name": "Sherbrooke, Phœnix"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "5"
+       },
+       "name": {
+        "teamLink": "5"
+       }
+      },
+      "row": {
+       "team_code": "Hal",
+       "wins": "12",
+       "losses": "6",
+       "ot_losses": "3",
+       "ot_wins": "2",
+       "shootout_wins": "2",
+       "shootout_losses": "1",
+       "row": "10",
+       "points": 28,
+       "penalty_minutes": "232",
+       "streak": "4-0-0-0",
+       "goals_for": "79",
+       "goals_against": "78",
+       "goals_diff": "1",
+       "percentage": "0.636",
+       "overall_rank": "8",
+       "games_played": "22",
+       "rank": 8,
+       "past_10": "6-4-0-0",
+       "name": "Halifax, Mooseheads"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "12"
+       },
+       "name": {
+        "teamLink": "12"
+       }
+      },
+      "row": {
+       "team_code": "Gat",
+       "wins": "12",
+       "losses": "9",
+       "ot_losses": "3",
+       "ot_wins": "3",
+       "shootout_wins": "1",
+       "shootout_losses": "1",
+       "row": "11",
+       "points": 28,
+       "penalty_minutes": "278",
+       "streak": "0-1-0-0",
+       "goals_for": "79",
+       "goals_against": "78",
+       "goals_diff": "1",
+       "percentage": "0.560",
+       "overall_rank": "9",
+       "games_played": "25",
+       "rank": 9,
+       "past_10": "4-5-1-0",
+       "name": "Gatineau, Olympiques"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "3"
+       },
+       "name": {
+        "teamLink": "3"
+       }
+      },
+      "row": {
+       "team_code": "Cap",
+       "wins": "11",
+       "losses": "7",
+       "ot_losses": "2",
+       "ot_wins": "1",
+       "shootout_wins": "1",
+       "shootout_losses": "3",
+       "row": "10",
+       "points": 27,
+       "penalty_minutes": "284",
+       "streak": "2-0-0-0",
+       "goals_for": "82",
+       "goals_against": "70",
+       "goals_diff": "12",
+       "percentage": "0.587",
+       "overall_rank": "10",
+       "games_played": "23",
+       "rank": 10,
+       "past_10": "5-4-1-0",
+       "name": "Cape Breton, Eagles"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "10"
+       },
+       "name": {
+        "teamLink": "10"
+       }
+      },
+      "row": {
+       "team_code": "Chi",
+       "wins": "12",
+       "losses": "9",
+       "ot_losses": "0",
+       "ot_wins": "1",
+       "shootout_wins": "0",
+       "shootout_losses": "1",
+       "row": "12",
+       "points": 25,
+       "penalty_minutes": "228",
+       "streak": "1-0-0-0",
+       "goals_for": "80",
+       "goals_against": "74",
+       "goals_diff": "6",
+       "percentage": "0.568",
+       "overall_rank": "11",
+       "games_played": "22",
+       "rank": 11,
+       "past_10": "6-3-0-1",
+       "name": "Chicoutimi, Saguenéens"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "1"
+       },
+       "name": {
+        "teamLink": "1"
+       }
+      },
+      "row": {
+       "team_code": "Mon",
+       "wins": "11",
+       "losses": "12",
+       "ot_losses": "0",
+       "ot_wins": "3",
+       "shootout_wins": "3",
+       "shootout_losses": "1",
+       "row": "8",
+       "points": 23,
+       "penalty_minutes": "203",
+       "streak": "0-3-0-0",
+       "goals_for": "73",
+       "goals_against": "81",
+       "goals_diff": "-8",
+       "percentage": "0.479",
+       "overall_rank": "12",
+       "games_played": "24",
+       "rank": 12,
+       "past_10": "4-5-0-1",
+       "name": "Moncton, Wildcats"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "14"
+       },
+       "name": {
+        "teamLink": "14"
+       }
+      },
+      "row": {
+       "team_code": "Dru",
+       "wins": "10",
+       "losses": "11",
+       "ot_losses": "0",
+       "ot_wins": "1",
+       "shootout_wins": "1",
+       "shootout_losses": "2",
+       "row": "9",
+       "points": 22,
+       "penalty_minutes": "163",
+       "streak": "0-3-0-0",
+       "goals_for": "79",
+       "goals_against": "86",
+       "goals_diff": "-7",
+       "percentage": "0.478",
+       "overall_rank": "13",
+       "games_played": "23",
+       "rank": 13,
+       "past_10": "6-4-0-0",
+       "name": "Drummondville, Voltigeurs"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "18"
+       },
+       "name": {
+        "teamLink": "18"
+       }
+      },
+      "row": {
+       "team_code": "Rim",
+       "wins": "9",
+       "losses": "10",
+       "ot_losses": "3",
+       "ot_wins": "1",
+       "shootout_wins": "1",
+       "shootout_losses": "1",
+       "row": "8",
+       "points": 22,
+       "penalty_minutes": "264",
+       "streak": "0-7-1-1",
+       "goals_for": "88",
+       "goals_against": "85",
+       "goals_diff": "3",
+       "percentage": "0.478",
+       "overall_rank": "14",
+       "games_played": "23",
+       "rank": 14,
+       "past_10": "1-7-1-1",
+       "name": "Rimouski, Océanic"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "19"
+       },
+       "name": {
+        "teamLink": "19"
+       }
+      },
+      "row": {
+       "team_code": "BLB",
+       "wins": "10",
+       "losses": "13",
+       "ot_losses": "1",
+       "ot_wins": "3",
+       "shootout_wins": "0",
+       "shootout_losses": "1",
+       "row": "10",
+       "points": 22,
+       "penalty_minutes": "311",
+       "streak": "0-1-0-0",
+       "goals_for": "68",
+       "goals_against": "85",
+       "goals_diff": "-17",
+       "percentage": "0.440",
+       "overall_rank": "15",
+       "games_played": "25",
+       "rank": 15,
+       "past_10": "5-4-0-1",
+       "name": "Blainville-Boisbriand, Armada"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "7"
+       },
+       "name": {
+        "teamLink": "7"
+       }
+      },
+      "row": {
+       "team_code": "Cha",
+       "wins": "10",
+       "losses": "13",
+       "ot_losses": "2",
+       "ot_wins": "1",
+       "shootout_wins": "2",
+       "shootout_losses": "0",
+       "row": "8",
+       "points": 22,
+       "penalty_minutes": "303",
+       "streak": "1-0-0-0",
+       "goals_for": "83",
+       "goals_against": "108",
+       "goals_diff": "-25",
+       "percentage": "0.440",
+       "overall_rank": "16",
+       "games_played": "25",
+       "rank": 16,
+       "past_10": "5-5-0-0",
+       "name": "Charlottetown, Islanders"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "13"
+       },
+       "name": {
+        "teamLink": "13"
+       }
+      },
+      "row": {
+       "team_code": "Sha",
+       "wins": "6",
+       "losses": "13",
+       "ot_losses": "3",
+       "ot_wins": "1",
+       "shootout_wins": "0",
+       "shootout_losses": "0",
+       "row": "6",
+       "points": 15,
+       "penalty_minutes": "288",
+       "streak": "1-0-0-0",
+       "goals_for": "68",
+       "goals_against": "102",
+       "goals_diff": "-34",
+       "percentage": "0.341",
+       "overall_rank": "17",
+       "games_played": "22",
+       "rank": 17,
+       "past_10": "2-8-0-0",
+       "name": "Shawinigan, Cataractes"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "16"
+       },
+       "name": {
+        "teamLink": "16"
+       }
+      },
+      "row": {
+       "team_code": "BaC",
+       "wins": "5",
+       "losses": "16",
+       "ot_losses": "0",
+       "ot_wins": "1",
+       "shootout_wins": "1",
+       "shootout_losses": "1",
+       "row": "4",
+       "points": 11,
+       "penalty_minutes": "203",
+       "streak": "0-1-0-0",
+       "goals_for": "50",
+       "goals_against": "88",
+       "goals_diff": "-38",
+       "percentage": "0.250",
+       "overall_rank": "18",
+       "games_played": "22",
+       "rank": 18,
+       "past_10": "4-6-0-0",
+       "name": "Baie-Comeau, Drakkar"
+      }
+     }
+    ]
+   }
+  ]
+ }
+])

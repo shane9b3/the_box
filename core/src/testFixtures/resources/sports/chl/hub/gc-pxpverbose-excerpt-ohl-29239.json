@@ -1,0 +1,1162 @@
+{
+ "GC": {
+  "Parameters": {
+   "feed": "gc",
+   "tab": "pxpverbose",
+   "game_id": "29239",
+   "fmt": "json",
+   "lang_code": "en",
+   "client_code": "ohl",
+   "lang_id": 1
+  },
+  "Pxpverbose": [
+   {
+    "event": "goalie_change",
+    "goalie_in_id": "9075",
+    "goalie_out_id": null,
+    "period_id": "1",
+    "time": "0:00",
+    "team_code": "OTT",
+    "s": 0,
+    "team_id": "5",
+    "goalie_in_info": {
+     "player_id": "9075",
+     "jersey_number": "32",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Jaeden",
+     "last_name": "Nelson"
+    }
+   },
+   {
+    "event": "faceoff",
+    "id": "1",
+    "period": "1",
+    "time": "00:00:00",
+    "time_formatted": "0:00",
+    "home_player_id": "9182",
+    "visitor_player_id": "9321",
+    "home_win": "1",
+    "location_id": "5",
+    "s": 0,
+    "x_location": 300,
+    "y_location": 150,
+    "win_team_id": "7",
+    "player_home": {
+     "player_id": "9182",
+     "jersey_number": "83",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Jonah",
+     "last_name": "McCormick"
+    },
+    "player_visitor": {
+     "player_id": "9321",
+     "jersey_number": "12",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Spencer",
+     "last_name": "Bowes"
+    }
+   },
+   {
+    "id": "734690",
+    "player_id": "9330",
+    "goalie_id": "10102",
+    "event": "shot",
+    "home": "0",
+    "team_id": "5",
+    "period_id": "1",
+    "time": "00:29",
+    "time_formatted": "0:29",
+    "x_location": 513,
+    "y_location": 210,
+    "shot_type": "2",
+    "shot_type_description": "Wrist",
+    "shot_quality_description": "Quality on net",
+    "quality": "1",
+    "game_goal_id": "",
+    "s": 29,
+    "player_team_id": "5",
+    "goalie_team_id": "7",
+    "player": {
+     "player_id": "9330",
+     "jersey_number": "21",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Matthew",
+     "last_name": "Manza"
+    },
+    "goalie": {
+     "player_id": "10102",
+     "jersey_number": "70",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Matvei",
+     "last_name": "Nikonovich"
+    }
+   },
+   {
+    "id": "244644",
+    "event": "goal",
+    "goal_type": "",
+    "home": "1",
+    "team_id": "7",
+    "goal_player_id": "9534",
+    "assist1_player_id": "9580",
+    "assist2_player_id": "8800",
+    "time": "0:47",
+    "time_formatted": "0:47",
+    "period": "1st",
+    "x_location": 76,
+    "y_location": 161,
+    "location_set": "0",
+    "power_play": "0",
+    "empty_net": "0",
+    "penalty_shot": "0",
+    "short_handed": "0",
+    "insurance_goal": "0",
+    "game_winning": "0",
+    "game_tieing": "0",
+    "period_id": "1",
+    "scorer_goal_num": "8",
+    "s": 47,
+    "plus": [
+     {
+      "player_id": "9580",
+      "jersey_number": "11",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "William",
+      "last_name": "Schneid"
+     },
+     {
+      "player_id": "9840",
+      "jersey_number": "21",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Ryan",
+      "last_name": "Yurkiw"
+     },
+     {
+      "player_id": "9534",
+      "jersey_number": "37",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Eamon",
+      "last_name": "Edgar"
+     },
+     {
+      "player_id": "9837",
+      "jersey_number": "72",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Aiden",
+      "last_name": "Mowrey"
+     },
+     {
+      "player_id": "8800",
+      "jersey_number": "85",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Carter",
+      "last_name": "Lowe"
+     }
+    ],
+    "minus": [
+     {
+      "player_id": "9522",
+      "jersey_number": "13",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Ondrej",
+      "last_name": "Ruml"
+     },
+     {
+      "player_id": "9516",
+      "jersey_number": "17",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Brock",
+      "last_name": "Chitaroni"
+     },
+     {
+      "player_id": "9176",
+      "jersey_number": "19",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Kohyn",
+      "last_name": "Eshkawkogan"
+     },
+     {
+      "player_id": "9330",
+      "jersey_number": "21",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Matthew",
+      "last_name": "Manza"
+     },
+     {
+      "player_id": "9033",
+      "jersey_number": "25",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Zach",
+      "last_name": "Houben"
+     }
+    ],
+    "goal_scorer": {
+     "player_id": "9534",
+     "jersey_number": "37",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Eamon",
+     "last_name": "Edgar"
+    },
+    "assist1_player": {
+     "player_id": "9580",
+     "jersey_number": "11",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "William",
+     "last_name": "Schneid"
+    },
+    "assist2_player": {
+     "player_id": "8800",
+     "jersey_number": "85",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Carter",
+     "last_name": "Lowe"
+    }
+   },
+   {
+    "event": "penalty",
+    "id": "455151",
+    "player_id": "9846",
+    "player_served": "9846",
+    "offence": "14",
+    "pp": "1",
+    "time_off_formatted": "1:28",
+    "period": "1st",
+    "bench": "0",
+    "home": "1",
+    "penalty_shot": "0",
+    "minutes": "2.00",
+    "minutes_formatted": "2:00",
+    "penalty_class_id": "1",
+    "penalty_class": "Minor",
+    "lang_penalty_description": "High Sticking",
+    "period_id": "1",
+    "player_penalized_info": {
+     "player_id": "9846",
+     "jersey_number": "74",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Declan",
+     "last_name": "McNally"
+    },
+    "player_served_info": {
+     "player_id": "9846",
+     "jersey_number": "74",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Declan",
+     "last_name": "McNally"
+    },
+    "s": 88,
+    "team_id": "7"
+   },
+   {
+    "id": "244645",
+    "event": "goal",
+    "goal_type": "PP",
+    "home": "0",
+    "team_id": "5",
+    "goal_player_id": "9330",
+    "assist1_player_id": "9321",
+    "assist2_player_id": "9522",
+    "time": "15:36",
+    "time_formatted": "15:36",
+    "period": "1st",
+    "x_location": 494,
+    "y_location": 75,
+    "location_set": "0",
+    "power_play": "1",
+    "empty_net": "0",
+    "penalty_shot": "0",
+    "short_handed": "0",
+    "insurance_goal": "0",
+    "game_winning": "0",
+    "game_tieing": "0",
+    "period_id": "1",
+    "scorer_goal_num": "6",
+    "s": 936,
+    "plus": [
+     {
+      "player_id": "9321",
+      "jersey_number": "12",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Spencer",
+      "last_name": "Bowes"
+     },
+     {
+      "player_id": "9522",
+      "jersey_number": "13",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Ondrej",
+      "last_name": "Ruml"
+     },
+     {
+      "player_id": "8977",
+      "jersey_number": "16",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Chase",
+      "last_name": "Yanni"
+     },
+     {
+      "player_id": "9176",
+      "jersey_number": "19",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Kohyn",
+      "last_name": "Eshkawkogan"
+     },
+     {
+      "player_id": "9330",
+      "jersey_number": "21",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Matthew",
+      "last_name": "Manza"
+     }
+    ],
+    "minus": [
+     {
+      "player_id": "9580",
+      "jersey_number": "11",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "William",
+      "last_name": "Schneid"
+     },
+     {
+      "player_id": "9150",
+      "jersey_number": "17",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Patrick",
+      "last_name": "Babin"
+     },
+     {
+      "player_id": "9840",
+      "jersey_number": "21",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Ryan",
+      "last_name": "Yurkiw"
+     },
+     {
+      "player_id": "8800",
+      "jersey_number": "85",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Carter",
+      "last_name": "Lowe"
+     }
+    ],
+    "goal_scorer": {
+     "player_id": "9330",
+     "jersey_number": "21",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Matthew",
+     "last_name": "Manza"
+    },
+    "assist1_player": {
+     "player_id": "9321",
+     "jersey_number": "12",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Spencer",
+     "last_name": "Bowes"
+    },
+    "assist2_player": {
+     "player_id": "9522",
+     "jersey_number": "13",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Ondrej",
+     "last_name": "Ruml"
+    }
+   },
+   {
+    "id": "244646",
+    "event": "goal",
+    "goal_type": "",
+    "home": "1",
+    "team_id": "7",
+    "goal_player_id": "10029",
+    "assist1_player_id": "9821",
+    "assist2_player_id": "9805",
+    "time": "19:41",
+    "time_formatted": "19:41",
+    "period": "1st",
+    "x_location": 95,
+    "y_location": 127,
+    "location_set": "0",
+    "power_play": "0",
+    "empty_net": "0",
+    "penalty_shot": "0",
+    "short_handed": "0",
+    "insurance_goal": "0",
+    "game_winning": "0",
+    "game_tieing": "0",
+    "period_id": "1",
+    "scorer_goal_num": "5",
+    "s": 1181,
+    "plus": [
+     {
+      "player_id": "9819",
+      "jersey_number": "9",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Luke",
+      "last_name": "Howard"
+     },
+     {
+      "player_id": "10029",
+      "jersey_number": "19",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Michael",
+      "last_name": "Tang"
+     },
+     {
+      "player_id": "9821",
+      "jersey_number": "24",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Ben",
+      "last_name": "Lombardi"
+     },
+     {
+      "player_id": "9837",
+      "jersey_number": "72",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Aiden",
+      "last_name": "Mowrey"
+     },
+     {
+      "player_id": "8967",
+      "jersey_number": "89",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Dylan",
+      "last_name": "Tsherna"
+     }
+    ],
+    "minus": [
+     {
+      "player_id": "9037",
+      "jersey_number": "2",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Justin",
+      "last_name": "Handsor"
+     },
+     {
+      "player_id": "8975",
+      "jersey_number": "4",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Kaleb",
+      "last_name": "Dietsch"
+     },
+     {
+      "player_id": "9009",
+      "jersey_number": "8",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Jaiden",
+      "last_name": "Newton"
+     },
+     {
+      "player_id": "9849",
+      "jersey_number": "9",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Andrew",
+      "last_name": "Laurin"
+     },
+     {
+      "player_id": "9519",
+      "jersey_number": "18",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Brayden",
+      "last_name": "Krawczyk"
+     }
+    ],
+    "goal_scorer": {
+     "player_id": "10029",
+     "jersey_number": "19",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Michael",
+     "last_name": "Tang"
+    },
+    "assist1_player": {
+     "player_id": "9821",
+     "jersey_number": "24",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Ben",
+     "last_name": "Lombardi"
+    },
+    "assist2_player": {
+     "player_id": "9805",
+     "jersey_number": "22",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Lucas",
+     "last_name": "Matheson"
+    }
+   },
+   {
+    "id": "244652",
+    "event": "goal",
+    "goal_type": "",
+    "home": "0",
+    "team_id": "5",
+    "goal_player_id": "9321",
+    "assist1_player_id": "9330",
+    "assist2_player_id": "9037",
+    "time": "8:03",
+    "time_formatted": "8:03",
+    "period": "2nd",
+    "x_location": 541,
+    "y_location": 146,
+    "location_set": "0",
+    "power_play": "0",
+    "empty_net": "0",
+    "penalty_shot": "0",
+    "short_handed": "0",
+    "insurance_goal": "0",
+    "game_winning": "0",
+    "game_tieing": "0",
+    "period_id": "2",
+    "scorer_goal_num": "18",
+    "s": 483,
+    "plus": [
+     {
+      "player_id": "9037",
+      "jersey_number": "2",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Justin",
+      "last_name": "Handsor"
+     },
+     {
+      "player_id": "9321",
+      "jersey_number": "12",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Spencer",
+      "last_name": "Bowes"
+     },
+     {
+      "player_id": "9522",
+      "jersey_number": "13",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Ondrej",
+      "last_name": "Ruml"
+     },
+     {
+      "player_id": "9330",
+      "jersey_number": "21",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Matthew",
+      "last_name": "Manza"
+     }
+    ],
+    "minus": [
+     {
+      "player_id": "9844",
+      "jersey_number": "8",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Sebastian",
+      "last_name": "Mogull"
+     },
+     {
+      "player_id": "9150",
+      "jersey_number": "17",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Patrick",
+      "last_name": "Babin"
+     },
+     {
+      "player_id": "9534",
+      "jersey_number": "37",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Eamon",
+      "last_name": "Edgar"
+     },
+     {
+      "player_id": "9846",
+      "jersey_number": "74",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Declan",
+      "last_name": "McNally"
+     }
+    ],
+    "goal_scorer": {
+     "player_id": "9321",
+     "jersey_number": "12",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Spencer",
+     "last_name": "Bowes"
+    },
+    "assist1_player": {
+     "player_id": "9330",
+     "jersey_number": "21",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Matthew",
+     "last_name": "Manza"
+    },
+    "assist2_player": {
+     "player_id": "9037",
+     "jersey_number": "2",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Justin",
+     "last_name": "Handsor"
+    }
+   },
+   {
+    "id": "244654",
+    "event": "goal",
+    "goal_type": "",
+    "home": "1",
+    "team_id": "7",
+    "goal_player_id": "9844",
+    "assist1_player_id": "9805",
+    "assist2_player_id": "",
+    "time": "14:36",
+    "time_formatted": "14:36",
+    "period": "2nd",
+    "x_location": 105,
+    "y_location": 213,
+    "location_set": "0",
+    "power_play": "0",
+    "empty_net": "0",
+    "penalty_shot": "0",
+    "short_handed": "0",
+    "insurance_goal": "0",
+    "game_winning": "0",
+    "game_tieing": "0",
+    "period_id": "2",
+    "scorer_goal_num": "8",
+    "s": 876,
+    "plus": [
+     {
+      "player_id": "9844",
+      "jersey_number": "8",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Sebastian",
+      "last_name": "Mogull"
+     },
+     {
+      "player_id": "9805",
+      "jersey_number": "22",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Lucas",
+      "last_name": "Matheson"
+     },
+     {
+      "player_id": "9846",
+      "jersey_number": "74",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Declan",
+      "last_name": "McNally"
+     },
+     {
+      "player_id": "9182",
+      "jersey_number": "83",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Jonah",
+      "last_name": "McCormick"
+     },
+     {
+      "player_id": "9305",
+      "jersey_number": "98",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Anthony",
+      "last_name": "Figliomeni"
+     }
+    ],
+    "minus": [
+     {
+      "player_id": "9037",
+      "jersey_number": "2",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Justin",
+      "last_name": "Handsor"
+     },
+     {
+      "player_id": "8976",
+      "jersey_number": "10",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Nic",
+      "last_name": "Whitehead"
+     },
+     {
+      "player_id": "9530",
+      "jersey_number": "11",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Reid",
+      "last_name": "Hayes"
+     },
+     {
+      "player_id": "9522",
+      "jersey_number": "13",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Ondrej",
+      "last_name": "Ruml"
+     },
+     {
+      "player_id": "9982",
+      "jersey_number": "20",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Lucas",
+      "last_name": "Balanyk"
+     }
+    ],
+    "goal_scorer": {
+     "player_id": "9844",
+     "jersey_number": "8",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Sebastian",
+     "last_name": "Mogull"
+    },
+    "assist1_player": {
+     "player_id": "9805",
+     "jersey_number": "22",
+     "team_id": "7",
+     "team_code": "BAR",
+     "first_name": "Lucas",
+     "last_name": "Matheson"
+    }
+   },
+   {
+    "id": "244657",
+    "event": "goal",
+    "goal_type": "PP",
+    "home": "0",
+    "team_id": "5",
+    "goal_player_id": "8976",
+    "assist1_player_id": "9330",
+    "assist2_player_id": "8975",
+    "time": "8:42",
+    "time_formatted": "8:42",
+    "period": "3rd",
+    "x_location": 545,
+    "y_location": 141,
+    "location_set": "0",
+    "power_play": "1",
+    "empty_net": "0",
+    "penalty_shot": "0",
+    "short_handed": "0",
+    "insurance_goal": "0",
+    "game_winning": "0",
+    "game_tieing": "0",
+    "period_id": "3",
+    "scorer_goal_num": "7",
+    "s": 522,
+    "plus": [
+     {
+      "player_id": "8975",
+      "jersey_number": "4",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Kaleb",
+      "last_name": "Dietsch"
+     },
+     {
+      "player_id": "8976",
+      "jersey_number": "10",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Nic",
+      "last_name": "Whitehead"
+     },
+     {
+      "player_id": "9530",
+      "jersey_number": "11",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Reid",
+      "last_name": "Hayes"
+     },
+     {
+      "player_id": "9176",
+      "jersey_number": "19",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Kohyn",
+      "last_name": "Eshkawkogan"
+     },
+     {
+      "player_id": "9330",
+      "jersey_number": "21",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Matthew",
+      "last_name": "Manza"
+     }
+    ],
+    "minus": [
+     {
+      "player_id": "9578",
+      "jersey_number": "2",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Nicholas",
+      "last_name": "Desiderio"
+     },
+     {
+      "player_id": "9837",
+      "jersey_number": "72",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Aiden",
+      "last_name": "Mowrey"
+     },
+     {
+      "player_id": "9846",
+      "jersey_number": "74",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Declan",
+      "last_name": "McNally"
+     },
+     {
+      "player_id": "8967",
+      "jersey_number": "89",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Dylan",
+      "last_name": "Tsherna"
+     }
+    ],
+    "goal_scorer": {
+     "player_id": "8976",
+     "jersey_number": "10",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Nic",
+     "last_name": "Whitehead"
+    },
+    "assist1_player": {
+     "player_id": "9330",
+     "jersey_number": "21",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Matthew",
+     "last_name": "Manza"
+    },
+    "assist2_player": {
+     "player_id": "8975",
+     "jersey_number": "4",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Kaleb",
+     "last_name": "Dietsch"
+    }
+   },
+   {
+    "id": "244658",
+    "event": "goal",
+    "goal_type": "",
+    "home": "0",
+    "team_id": "5",
+    "goal_player_id": "8975",
+    "assist1_player_id": "9033",
+    "assist2_player_id": "",
+    "time": "10:53",
+    "time_formatted": "10:53",
+    "period": "3rd",
+    "x_location": 395,
+    "y_location": 166,
+    "location_set": "0",
+    "power_play": "0",
+    "empty_net": "0",
+    "penalty_shot": "0",
+    "short_handed": "0",
+    "insurance_goal": "0",
+    "game_winning": "1",
+    "game_tieing": "0",
+    "period_id": "3",
+    "scorer_goal_num": "2",
+    "s": 653,
+    "plus": [
+     {
+      "player_id": "8975",
+      "jersey_number": "4",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Kaleb",
+      "last_name": "Dietsch"
+     },
+     {
+      "player_id": "9321",
+      "jersey_number": "12",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Spencer",
+      "last_name": "Bowes"
+     },
+     {
+      "player_id": "9176",
+      "jersey_number": "19",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Kohyn",
+      "last_name": "Eshkawkogan"
+     },
+     {
+      "player_id": "9330",
+      "jersey_number": "21",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Matthew",
+      "last_name": "Manza"
+     },
+     {
+      "player_id": "9033",
+      "jersey_number": "25",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Zach",
+      "last_name": "Houben"
+     }
+    ],
+    "minus": [
+     {
+      "player_id": "9580",
+      "jersey_number": "11",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "William",
+      "last_name": "Schneid"
+     },
+     {
+      "player_id": "9805",
+      "jersey_number": "22",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Lucas",
+      "last_name": "Matheson"
+     },
+     {
+      "player_id": "9534",
+      "jersey_number": "37",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Eamon",
+      "last_name": "Edgar"
+     },
+     {
+      "player_id": "9837",
+      "jersey_number": "72",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Aiden",
+      "last_name": "Mowrey"
+     },
+     {
+      "player_id": "8800",
+      "jersey_number": "85",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Carter",
+      "last_name": "Lowe"
+     }
+    ],
+    "goal_scorer": {
+     "player_id": "8975",
+     "jersey_number": "4",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Kaleb",
+     "last_name": "Dietsch"
+    },
+    "assist1_player": {
+     "player_id": "9033",
+     "jersey_number": "25",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Zach",
+     "last_name": "Houben"
+    }
+   },
+   {
+    "id": "244659",
+    "event": "goal",
+    "goal_type": "",
+    "home": "0",
+    "team_id": "5",
+    "goal_player_id": "9330",
+    "assist1_player_id": "9321",
+    "assist2_player_id": "8977",
+    "time": "17:40",
+    "time_formatted": "17:40",
+    "period": "3rd",
+    "x_location": 525,
+    "y_location": 134,
+    "location_set": "0",
+    "power_play": "0",
+    "empty_net": "0",
+    "penalty_shot": "0",
+    "short_handed": "0",
+    "insurance_goal": "1",
+    "game_winning": "0",
+    "game_tieing": "0",
+    "period_id": "3",
+    "scorer_goal_num": "7",
+    "s": 1060,
+    "plus": [
+     {
+      "player_id": "8975",
+      "jersey_number": "4",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Kaleb",
+      "last_name": "Dietsch"
+     },
+     {
+      "player_id": "9321",
+      "jersey_number": "12",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Spencer",
+      "last_name": "Bowes"
+     },
+     {
+      "player_id": "8977",
+      "jersey_number": "16",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Chase",
+      "last_name": "Yanni"
+     },
+     {
+      "player_id": "9176",
+      "jersey_number": "19",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Kohyn",
+      "last_name": "Eshkawkogan"
+     },
+     {
+      "player_id": "9330",
+      "jersey_number": "21",
+      "team_id": "5",
+      "team_code": "OTT",
+      "first_name": "Matthew",
+      "last_name": "Manza"
+     }
+    ],
+    "minus": [
+     {
+      "player_id": "9578",
+      "jersey_number": "2",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Nicholas",
+      "last_name": "Desiderio"
+     },
+     {
+      "player_id": "9805",
+      "jersey_number": "22",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Lucas",
+      "last_name": "Matheson"
+     },
+     {
+      "player_id": "9534",
+      "jersey_number": "37",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Eamon",
+      "last_name": "Edgar"
+     },
+     {
+      "player_id": "9846",
+      "jersey_number": "74",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Declan",
+      "last_name": "McNally"
+     },
+     {
+      "player_id": "9182",
+      "jersey_number": "83",
+      "team_id": "7",
+      "team_code": "BAR",
+      "first_name": "Jonah",
+      "last_name": "McCormick"
+     }
+    ],
+    "goal_scorer": {
+     "player_id": "9330",
+     "jersey_number": "21",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Matthew",
+     "last_name": "Manza"
+    },
+    "assist1_player": {
+     "player_id": "9321",
+     "jersey_number": "12",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Spencer",
+     "last_name": "Bowes"
+    },
+    "assist2_player": {
+     "player_id": "8977",
+     "jersey_number": "16",
+     "team_id": "5",
+     "team_code": "OTT",
+     "first_name": "Chase",
+     "last_name": "Yanni"
+    }
+   }
+  ]
+ }
+}

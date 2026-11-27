@@ -1,0 +1,865 @@
+([
+ {
+  "sections": [
+   {
+    "title": "",
+    "headers": {
+     "rank": {
+      "properties": {
+       "key": "rank",
+       "hidden": false,
+       "class": "",
+       "label": " ",
+       "title": "Rank",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": ""
+      }
+     },
+     "name": {
+      "properties": {
+       "key": "name",
+       "hidden": false,
+       "class": "hide-mobile",
+       "label": "WHL",
+       "title": "WHL",
+       "sortable": true,
+       "align": "left",
+       "highlight": false,
+       "sortKey": ""
+      }
+     },
+     "team_code": {
+      "properties": {
+       "key": "team_code",
+       "hidden": false,
+       "class": "show-mobile",
+       "label": "Name",
+       "title": "Name",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": ""
+      }
+     },
+     "games_played": {
+      "properties": {
+       "key": "games_played",
+       "hidden": false,
+       "class": "",
+       "label": "GP",
+       "title": "Games Played",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "games_played"
+      }
+     },
+     "ot_wins": {
+      "properties": {
+       "key": "ot_wins",
+       "hidden": false,
+       "class": "",
+       "label": "OTW",
+       "title": "OTW",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "ot_wins"
+      }
+     },
+     "ot_losses": {
+      "properties": {
+       "key": "ot_losses",
+       "hidden": false,
+       "class": "",
+       "label": "OTL",
+       "title": "Overtime Losses",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "ot_losses"
+      }
+     },
+     "shootout_wins": {
+      "properties": {
+       "key": "shootout_wins",
+       "hidden": false,
+       "class": "",
+       "label": "SOW",
+       "title": "Shootout Losses",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "shootout_wins"
+      }
+     },
+     "shootout_losses": {
+      "properties": {
+       "key": "shootout_losses",
+       "hidden": false,
+       "class": "",
+       "label": "SOL",
+       "title": "Shootout Losses",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "shootout_losses"
+      }
+     },
+     "power_plays": {
+      "properties": {
+       "key": "power_plays",
+       "hidden": false,
+       "class": "",
+       "label": "PPOP",
+       "title": "Power Play Opportunities",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "power_plays"
+      }
+     },
+     "power_play_goals": {
+      "properties": {
+       "key": "power_play_goals",
+       "hidden": false,
+       "class": "",
+       "label": "PPGF",
+       "title": "Power Play Goals For",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "power_play_goals"
+      }
+     },
+     "short_handed_goals_against": {
+      "properties": {
+       "key": "short_handed_goals_against",
+       "hidden": false,
+       "class": "",
+       "label": "SHGA",
+       "title": "Short Handed Goals Against",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "short_handed_goals_against"
+      }
+     },
+     "power_play_pct": {
+      "properties": {
+       "key": "power_play_pct",
+       "hidden": false,
+       "class": "",
+       "label": "PP%",
+       "title": "Power Play Percentage",
+       "sortable": true,
+       "align": "center",
+       "highlight": true,
+       "sortKey": "power_play_pct"
+      }
+     },
+     "times_short_handed": {
+      "properties": {
+       "key": "times_short_handed",
+       "hidden": false,
+       "class": "",
+       "label": "TSH",
+       "title": "Times Short Handed",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "times_short_handed"
+      }
+     },
+     "power_play_goals_against": {
+      "properties": {
+       "key": "power_play_goals_against",
+       "hidden": false,
+       "class": "",
+       "label": "PPGA",
+       "title": "Power Play Goals Against",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "power_play_goals_against"
+      }
+     },
+     "short_handed_goals_for": {
+      "properties": {
+       "key": "short_handed_goals_for",
+       "hidden": false,
+       "class": "",
+       "label": "SHGF",
+       "title": "Short Handed Goals For",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "short_handed_goals_for"
+      }
+     },
+     "penalty_kill_pct": {
+      "properties": {
+       "key": "penalty_kill_pct",
+       "hidden": false,
+       "class": "",
+       "label": "PK%",
+       "title": "Penalty Killing Percentage",
+       "sortable": true,
+       "align": "center",
+       "highlight": false,
+       "sortKey": "penalty_kill_pct"
+      }
+     }
+    },
+    "data": [
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "204"
+       },
+       "name": {
+        "teamLink": "204"
+       }
+      },
+      "row": {
+       "team_code": "KEL",
+       "ot_losses": "4",
+       "ot_wins": "2",
+       "shootout_wins": "0",
+       "shootout_losses": "3",
+       "power_play_goals": "22",
+       "power_play_goals_against": "23",
+       "short_handed_goals_for": "3",
+       "short_handed_goals_against": "0",
+       "games_played": "21",
+       "power_play_pct": "28.2%",
+       "penalty_kill_pct": "75.8%",
+       "power_plays": "78",
+       "times_short_handed": "95",
+       "rank": 1,
+       "name": "Kelowna Rockets"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "212"
+       },
+       "name": {
+        "teamLink": "212"
+       }
+      },
+      "row": {
+       "team_code": "REG",
+       "ot_losses": "0",
+       "ot_wins": "1",
+       "shootout_wins": "1",
+       "shootout_losses": "2",
+       "power_play_goals": "26",
+       "power_play_goals_against": "13",
+       "short_handed_goals_for": "4",
+       "short_handed_goals_against": "4",
+       "games_played": "22",
+       "power_play_pct": "27.7%",
+       "penalty_kill_pct": "85.1%",
+       "power_plays": "94",
+       "times_short_handed": "87",
+       "rank": 2,
+       "name": "Regina Pats"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "203"
+       },
+       "name": {
+        "teamLink": "203"
+       }
+      },
+      "row": {
+       "team_code": "KAM",
+       "ot_losses": "3",
+       "ot_wins": "2",
+       "shootout_wins": "3",
+       "shootout_losses": "1",
+       "power_play_goals": "24",
+       "power_play_goals_against": "17",
+       "short_handed_goals_for": "3",
+       "short_handed_goals_against": "0",
+       "games_played": "24",
+       "power_play_pct": "27.3%",
+       "penalty_kill_pct": "78.5%",
+       "power_plays": "88",
+       "times_short_handed": "79",
+       "rank": 3,
+       "name": "Kamloops Blazers"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "209"
+       },
+       "name": {
+        "teamLink": "209"
+       }
+      },
+      "row": {
+       "team_code": "PA",
+       "ot_losses": "1",
+       "ot_wins": "0",
+       "shootout_wins": "1",
+       "shootout_losses": "2",
+       "power_play_goals": "25",
+       "power_play_goals_against": "20",
+       "short_handed_goals_for": "1",
+       "short_handed_goals_against": "3",
+       "games_played": "23",
+       "power_play_pct": "26.6%",
+       "penalty_kill_pct": "75.0%",
+       "power_plays": "94",
+       "times_short_handed": "80",
+       "rank": 4,
+       "name": "Prince Albert Raiders"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "202"
+       },
+       "name": {
+        "teamLink": "202"
+       }
+      },
+      "row": {
+       "team_code": "CGY",
+       "ot_losses": "1",
+       "ot_wins": "3",
+       "shootout_wins": "1",
+       "shootout_losses": "1",
+       "power_play_goals": "22",
+       "power_play_goals_against": "16",
+       "short_handed_goals_for": "6",
+       "short_handed_goals_against": "3",
+       "games_played": "24",
+       "power_play_pct": "25.3%",
+       "penalty_kill_pct": "82.2%",
+       "power_plays": "87",
+       "times_short_handed": "90",
+       "rank": 5,
+       "name": "Calgary Hitmen"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "227"
+       },
+       "name": {
+        "teamLink": "227"
+       }
+      },
+      "row": {
+       "team_code": "VIC",
+       "ot_losses": "1",
+       "ot_wins": "3",
+       "shootout_wins": "1",
+       "shootout_losses": "0",
+       "power_play_goals": "28",
+       "power_play_goals_against": "19",
+       "short_handed_goals_for": "5",
+       "short_handed_goals_against": "4",
+       "games_played": "23",
+       "power_play_pct": "24.8%",
+       "penalty_kill_pct": "78.7%",
+       "power_plays": "113",
+       "times_short_handed": "89",
+       "rank": 6,
+       "name": "Victoria Royals"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "223"
+       },
+       "name": {
+        "teamLink": "223"
+       }
+      },
+      "row": {
+       "team_code": "VAN",
+       "ot_losses": "1",
+       "ot_wins": "3",
+       "shootout_wins": "0",
+       "shootout_losses": "2",
+       "power_play_goals": "23",
+       "power_play_goals_against": "14",
+       "short_handed_goals_for": "4",
+       "short_handed_goals_against": "2",
+       "games_played": "23",
+       "power_play_pct": "24.7%",
+       "penalty_kill_pct": "84.6%",
+       "power_plays": "93",
+       "times_short_handed": "91",
+       "rank": 7,
+       "name": "Vancouver Giants"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "206"
+       },
+       "name": {
+        "teamLink": "206"
+       }
+      },
+      "row": {
+       "team_code": "MH",
+       "ot_losses": "1",
+       "ot_wins": "1",
+       "shootout_wins": "1",
+       "shootout_losses": "2",
+       "power_play_goals": "17",
+       "power_play_goals_against": "18",
+       "short_handed_goals_for": "5",
+       "short_handed_goals_against": "1",
+       "games_played": "23",
+       "power_play_pct": "24.6%",
+       "penalty_kill_pct": "82.5%",
+       "power_plays": "69",
+       "times_short_handed": "103",
+       "rank": 8,
+       "name": "Medicine Hat Tigers"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "213"
+       },
+       "name": {
+        "teamLink": "213"
+       }
+      },
+      "row": {
+       "team_code": "SAS",
+       "ot_losses": "5",
+       "ot_wins": "1",
+       "shootout_wins": "1",
+       "shootout_losses": "1",
+       "power_play_goals": "24",
+       "power_play_goals_against": "18",
+       "short_handed_goals_for": "3",
+       "short_handed_goals_against": "3",
+       "games_played": "22",
+       "power_play_pct": "23.5%",
+       "penalty_kill_pct": "74.6%",
+       "power_plays": "102",
+       "times_short_handed": "71",
+       "rank": 9,
+       "name": "Saskatoon Blades"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "228"
+       },
+       "name": {
+        "teamLink": "228"
+       }
+      },
+      "row": {
+       "team_code": "EDM",
+       "ot_losses": "3",
+       "ot_wins": "0",
+       "shootout_wins": "2",
+       "shootout_losses": "1",
+       "power_play_goals": "21",
+       "power_play_goals_against": "24",
+       "short_handed_goals_for": "3",
+       "short_handed_goals_against": "1",
+       "games_played": "22",
+       "power_play_pct": "23.3%",
+       "penalty_kill_pct": "76.0%",
+       "power_plays": "90",
+       "times_short_handed": "100",
+       "rank": 10,
+       "name": "Edmonton Oil Kings"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "205"
+       },
+       "name": {
+        "teamLink": "205"
+       }
+      },
+      "row": {
+       "team_code": "LET",
+       "ot_losses": "3",
+       "ot_wins": "3",
+       "shootout_wins": "1",
+       "shootout_losses": "0",
+       "power_play_goals": "18",
+       "power_play_goals_against": "17",
+       "short_handed_goals_for": "3",
+       "short_handed_goals_against": "5",
+       "games_played": "23",
+       "power_play_pct": "22.8%",
+       "penalty_kill_pct": "75.4%",
+       "power_plays": "79",
+       "times_short_handed": "69",
+       "rank": 11,
+       "name": "Lethbridge Hurricanes"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "211"
+       },
+       "name": {
+        "teamLink": "211"
+       }
+      },
+      "row": {
+       "team_code": "RD",
+       "ot_losses": "1",
+       "ot_wins": "2",
+       "shootout_wins": "0",
+       "shootout_losses": "2",
+       "power_play_goals": "21",
+       "power_play_goals_against": "18",
+       "short_handed_goals_for": "3",
+       "short_handed_goals_against": "9",
+       "games_played": "24",
+       "power_play_pct": "20.4%",
+       "penalty_kill_pct": "81.8%",
+       "power_plays": "103",
+       "times_short_handed": "99",
+       "rank": 12,
+       "name": "Red Deer Rebels"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "217"
+       },
+       "name": {
+        "teamLink": "217"
+       }
+      },
+      "row": {
+       "team_code": "TC",
+       "ot_losses": "2",
+       "ot_wins": "0",
+       "shootout_wins": "1",
+       "shootout_losses": "1",
+       "power_play_goals": "18",
+       "power_play_goals_against": "14",
+       "short_handed_goals_for": "4",
+       "short_handed_goals_against": "2",
+       "games_played": "23",
+       "power_play_pct": "19.4%",
+       "penalty_kill_pct": "82.5%",
+       "power_plays": "93",
+       "times_short_handed": "80",
+       "rank": 13,
+       "name": "Tri-City Americans"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "201"
+       },
+       "name": {
+        "teamLink": "201"
+       }
+      },
+      "row": {
+       "team_code": "BDN",
+       "ot_losses": "1",
+       "ot_wins": "4",
+       "shootout_wins": "2",
+       "shootout_losses": "2",
+       "power_play_goals": "16",
+       "power_play_goals_against": "19",
+       "short_handed_goals_for": "1",
+       "short_handed_goals_against": "6",
+       "games_played": "25",
+       "power_play_pct": "18.8%",
+       "penalty_kill_pct": "80.8%",
+       "power_plays": "85",
+       "times_short_handed": "99",
+       "rank": 14,
+       "name": "Brandon Wheat Kings"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "215"
+       },
+       "name": {
+        "teamLink": "215"
+       }
+      },
+      "row": {
+       "team_code": "SPO",
+       "ot_losses": "1",
+       "ot_wins": "1",
+       "shootout_wins": "2",
+       "shootout_losses": "1",
+       "power_play_goals": "16",
+       "power_play_goals_against": "16",
+       "short_handed_goals_for": "0",
+       "short_handed_goals_against": "2",
+       "games_played": "21",
+       "power_play_pct": "18.4%",
+       "penalty_kill_pct": "80.7%",
+       "power_plays": "87",
+       "times_short_handed": "83",
+       "rank": 15,
+       "name": "Spokane Chiefs"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "208"
+       },
+       "name": {
+        "teamLink": "208"
+       }
+      },
+      "row": {
+       "team_code": "POR",
+       "ot_losses": "2",
+       "ot_wins": "1",
+       "shootout_wins": "1",
+       "shootout_losses": "1",
+       "power_play_goals": "15",
+       "power_play_goals_against": "12",
+       "short_handed_goals_for": "3",
+       "short_handed_goals_against": "2",
+       "games_played": "22",
+       "power_play_pct": "18.1%",
+       "penalty_kill_pct": "86.0%",
+       "power_plays": "83",
+       "times_short_handed": "86",
+       "rank": 16,
+       "name": "Portland Winterhawks"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "214"
+       },
+       "name": {
+        "teamLink": "214"
+       }
+      },
+      "row": {
+       "team_code": "SEA",
+       "ot_losses": "2",
+       "ot_wins": "4",
+       "shootout_wins": "0",
+       "shootout_losses": "1",
+       "power_play_goals": "14",
+       "power_play_goals_against": "25",
+       "short_handed_goals_for": "1",
+       "short_handed_goals_against": "1",
+       "games_played": "23",
+       "power_play_pct": "16.7%",
+       "penalty_kill_pct": "76.2%",
+       "power_plays": "84",
+       "times_short_handed": "105",
+       "rank": 17,
+       "name": "Seattle Thunderbirds"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "222"
+       },
+       "name": {
+        "teamLink": "222"
+       }
+      },
+      "row": {
+       "team_code": "WEN",
+       "ot_losses": "1",
+       "ot_wins": "0",
+       "shootout_wins": "3",
+       "shootout_losses": "0",
+       "power_play_goals": "13",
+       "power_play_goals_against": "12",
+       "short_handed_goals_for": "2",
+       "short_handed_goals_against": "4",
+       "games_played": "22",
+       "power_play_pct": "16.7%",
+       "penalty_kill_pct": "81.5%",
+       "power_plays": "78",
+       "times_short_handed": "65",
+       "rank": 18,
+       "name": "Wenatchee Wild"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "210"
+       },
+       "name": {
+        "teamLink": "210"
+       }
+      },
+      "row": {
+       "team_code": "PG",
+       "ot_losses": "2",
+       "ot_wins": "1",
+       "shootout_wins": "3",
+       "shootout_losses": "2",
+       "power_play_goals": "12",
+       "power_play_goals_against": "19",
+       "short_handed_goals_for": "3",
+       "short_handed_goals_against": "2",
+       "games_played": "22",
+       "power_play_pct": "16.4%",
+       "penalty_kill_pct": "72.5%",
+       "power_plays": "73",
+       "times_short_handed": "69",
+       "rank": 19,
+       "name": "Prince George Cougars"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "226"
+       },
+       "name": {
+        "teamLink": "226"
+       }
+      },
+      "row": {
+       "team_code": "EVT",
+       "ot_losses": "1",
+       "ot_wins": "1",
+       "shootout_wins": "0",
+       "shootout_losses": "4",
+       "power_play_goals": "13",
+       "power_play_goals_against": "18",
+       "short_handed_goals_for": "0",
+       "short_handed_goals_against": "3",
+       "games_played": "24",
+       "power_play_pct": "16.3%",
+       "penalty_kill_pct": "80.2%",
+       "power_plays": "80",
+       "times_short_handed": "91",
+       "rank": 20,
+       "name": "Everett Silvertips"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "207"
+       },
+       "name": {
+        "teamLink": "207"
+       }
+      },
+      "row": {
+       "team_code": "MJ",
+       "ot_losses": "1",
+       "ot_wins": "3",
+       "shootout_wins": "4",
+       "shootout_losses": "0",
+       "power_play_goals": "13",
+       "power_play_goals_against": "27",
+       "short_handed_goals_for": "5",
+       "short_handed_goals_against": "3",
+       "games_played": "24",
+       "power_play_pct": "14.9%",
+       "penalty_kill_pct": "71.6%",
+       "power_plays": "87",
+       "times_short_handed": "95",
+       "rank": 21,
+       "name": "Moose Jaw Warriors"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "277"
+       },
+       "name": {
+        "teamLink": "277"
+       }
+      },
+      "row": {
+       "team_code": "PEN",
+       "ot_losses": "1",
+       "ot_wins": "1",
+       "shootout_wins": "1",
+       "shootout_losses": "2",
+       "power_play_goals": "13",
+       "power_play_goals_against": "17",
+       "short_handed_goals_for": "0",
+       "short_handed_goals_against": "0",
+       "games_played": "24",
+       "power_play_pct": "13.7%",
+       "penalty_kill_pct": "80.0%",
+       "power_plays": "95",
+       "times_short_handed": "85",
+       "rank": 22,
+       "name": "Penticton Vees"
+      }
+     },
+     {
+      "prop": {
+       "team_code": {
+        "teamLink": "216"
+       },
+       "name": {
+        "teamLink": "216"
+       }
+      },
+      "row": {
+       "team_code": "SC",
+       "ot_losses": "0",
+       "ot_wins": "1",
+       "shootout_wins": "2",
+       "shootout_losses": "0",
+       "power_play_goals": "10",
+       "power_play_goals_against": "28",
+       "short_handed_goals_for": "3",
+       "short_handed_goals_against": "5",
+       "games_played": "24",
+       "power_play_pct": "12.0%",
+       "penalty_kill_pct": "73.8%",
+       "power_plays": "83",
+       "times_short_handed": "107",
+       "rank": 23,
+       "name": "Swift Current Broncos"
+      }
+     }
+    ]
+   }
+  ]
+ }
+])
