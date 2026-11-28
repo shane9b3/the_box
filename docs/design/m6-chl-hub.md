@@ -871,3 +871,15 @@ thread-safe log, and it passed alone and in the full `:ui` rerun with the gate. 
 - A1 and A2 on a device: check logcat for `HubHeadshot` on the next emulator run.
 - A shootout body.
 - Whether `totalGoals` counts the shootout winner's goal.
+
+### Fix pass follow-up: the empty headshots and missing logos were the emulator's clock (lead, 2026-11-27)
+
+The redacted `HubHeadshot` log line named the cause on the first run: `SSLHandshakeException < CertificateException <
+CertPathValidatorException (Response is unreliable: its validity interval is out-of-date)`. The emulator's clock was about
+20 hours behind, so the image host's stapled OCSP response looked like it came from the future and every new TLS handshake
+to that host was refused. Logos already in the disk cache still drew, which is why only some teams were missing. With the
+clock corrected, headshots and the previously missing logos load with no code change. Nothing in the app was at fault; the
+headshot guard and the log line stay because they are cheap and name this kind of failure at once. The log now carries the
+cause chain's class names and the root cause's own words, cut before anything URL-like.
+
+Still open: Brampton's logo is a 404 on the feed's own URL (new franchise), so the code fallback shows.

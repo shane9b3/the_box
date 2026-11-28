@@ -538,7 +538,9 @@ internal object HeadshotLog {
 
     fun failed(url: String, t: Throwable) {
         val host = runCatching { java.net.URI(url).host }.getOrNull() ?: "?"
-        val why = (t as? coil3.network.HttpException)?.response?.code?.let { "HTTP $it" } ?: t.javaClass.simpleName
+        val why = (t as? coil3.network.HttpException)?.response?.code?.let { "HTTP $it" } ?: generateSequence(t) { it.cause }.take(4).joinToString(" < ") { it.javaClass.simpleName } +
+                // The root cause's own words (a TLS or socket reason); anything URL-like is cut so no path or id is logged.
+                generateSequence(t) { it.cause }.last().message?.substringBefore("http")?.take(90)?.let { " ($it)" }.orEmpty()
         if (seen.size < 16 && seen.add("$host $why")) app.thebox.core.common.BoxLog.w("HubHeadshot", "headshot failed: $host $why")
     }
 }
