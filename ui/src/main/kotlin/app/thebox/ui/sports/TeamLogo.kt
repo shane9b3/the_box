@@ -71,13 +71,23 @@ internal fun coilLogoFetchDetailed(
     if (chl && !ChlLogoCheck.isChlLogoUrl(url, override)) return@fetch LogoOutcome(null, rejected = true)
     when (val r = loader.execute(logoRequest(context, url, chl, w, h))) {
         is SuccessResult -> LogoOutcome(r.image.toBitmap())
-        is coil3.request.ErrorResult -> LogoOutcome(null, r.throwable)
+        is coil3.request.ErrorResult -> {
+            // (Owner report 2026-11-27) A team with no transparent PNG on the host (Brampton): the mapper turned the feed's
+            // JPEG into `{id}.png`, which is a 404. Retry the same file as `.jpg` with the white surround knocked out.
+            val jpg = url.takeIf { chl && it.endsWith(".png") && (r.throwable as? coil3.network.HttpException)?.response?.code == 404 }
+                ?.let { it.removeSuffix(".png") + ".jpg" }
+            if (jpg == null) LogoOutcome(null, r.throwable)
+            else when (val j = loader.execute(logoRequest(context, jpg, chl, w, h, knockOutWhite = true))) {
+                is SuccessResult -> LogoOutcome(j.image.toBitmap())
+                is coil3.request.ErrorResult -> LogoOutcome(null, j.throwable)
+            }
+        }
     }
     }
 }
 
 /** The logo request for [data] (a URL; a bitmap in tests): rasterised at 4x the slot, then (CHL only) checked, then trimmed. */
-internal fun logoRequest(context: Context, data: Any, chl: Boolean, w: Int, h: Int): ImageRequest =
+internal fun logoRequest(context: Context, data: Any, chl: Boolean, w: Int, h: Int, knockOutWhite: Boolean = false): ImageRequest =
     ImageRequest.Builder(context.applicationContext ?: context)
         .data(data)
         .size(w * SportsConstants.LOGO_RASTER_SCALE, h * SportsConstants.LOGO_RASTER_SCALE)
@@ -85,7 +95,7 @@ internal fun logoRequest(context: Context, data: Any, chl: Boolean, w: Int, h: I
         .precision(Precision.INEXACT)
         .memoryCachePolicy(CachePolicy.DISABLED)
         .allowHardware(false)
-        .transformations(*logoTransformations(chl, w, h))
+        .transformations(*(if (knockOutWhite) arrayOf<Transformation>(WhiteKnockout()) else emptyArray()), *logoTransformations(chl, w, h))
         .build()
 
 /** The request's transformations: the CHL-only [ChlLogoCheck] first (it must fail before the trim), then [LogoTrim]. */

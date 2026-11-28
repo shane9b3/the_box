@@ -883,3 +883,11 @@ headshot guard and the log line stay because they are cheap and name this kind o
 cause chain's class names and the root cause's own words, cut before anything URL-like.
 
 Still open: Brampton's logo is a 404 on the feed's own URL (new franchise), so the code fallback shows.
+
+### Brampton's logo: JPEG retry with the white surround removed (lead, 2026-11-27, owner report)
+
+The feed lists Brampton's logo as `18.jpg`; the mapper turns every JPEG into `{id}.png` (transparent), and for Brampton
+that file is a 404. The host has no transparent version larger than 50 px. So a CHL logo request that ends in HTTP 404 on a
+`.png` is retried once as the same file with `.jpg`, with `WhiteKnockout` ahead of `ChlLogoCheck`: near-white reachable from
+the picture's edge becomes transparent, enclosed whites stay. A JPEG that is not on white stays opaque and is still refused.
+Same host and folder as before; the league's website (behind bot protection) is not used.
