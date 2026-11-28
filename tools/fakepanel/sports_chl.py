@@ -29,7 +29,7 @@ The CHL hub's detail views (docs/design/m6-chl-hub.md section 6.1; same key rule
         the team's goalies this season, a traded one (most games, `active` "0", another `latest_team_id`) included
     GET ...?feed=statviewfeed&view=teams&...&season=S&special=false|true&sort=...&lang=en
         the league table as JSONP `([ … ])`, joined by `prop.team_code.teamLink`; `Cache-Control: no-store`
-    GET /leaguestat/{client}/240x240/{player id}.jpg   a JPEG marker for a roster player, else 404
+    GET /leaguestat/{client}/240x240/{player id}.jpg   a small real JPEG (16 x 16 grey) for a roster player, else 404
 Each body is a copy of its league's recorded fixture (core/src/testFixtures/resources/sports/chl/hub/) with the game's
 facts written over it, so keys, JSON types and nulls are the feed's. Season figures and rosters are synthetic.
 
@@ -225,6 +225,22 @@ def _png(w, h, rgba, alpha=True):
 
 
 JPEG_MARKERS = b"\xff\xd8\xff\xd9"  # SOI + EOI: "a JPEG" for the route; the app swaps every .jpg for {id}.png anyway
+
+# (CHL hub fix pass, A1) A real, decodable 16 x 16 grey JPEG for the headshot route: the 4-byte marker above decodes to
+# nothing on a device, so every fake-panel headshot drew the empty disc.
+HEADSHOT_JPEG = base64.b64decode(
+    "/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZgAATU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQA"
+    "AAABAAAAEKADAAQAAAABAAAAEAAAAAD/7QA4UGhvdG9zaG9wIDMuMAA4QklNBAQAAAAAAAA4QklNBCUAAAAAABDUHYzZjwCyBOmA"
+    "CZjs+EJ+/8AAEQgAEAAQAwEiAAIRAQMRAf/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQE"
+    "AAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldY"
+    "WVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk"
+    "5ebn6Onq8fLz9PX29/j5+v/EAB8BAAMBAQEBAQEBAQEAAAAAAAABAgMEBQYHCAkKC//EALURAAIBAgQEAwQHBQQEAAECdwABAgMR"
+    "BAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdo"
+    "aWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz"
+    "9PX29/j5+v/bAEMABAQEBAQEBgQEBgkGBgYJDAkJCQkMDwwMDAwMDxIPDw8PDw8SEhISEhISEhUVFRUVFRkZGRkZHBwcHBwcHBwc"
+    "HP/bAEMBBAUFBwcHDAcHDB0UEBQdHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHf/dAAQA"
+    "Af/aAAwDAQACEQMRAD8AbRRRXccp/9k="
+)
 
 
 def check_config(patch):
@@ -979,12 +995,12 @@ def _hub(h, sp, cfg, q, now, client, feed):
 
 
 def _headshot(h, sp, path):
-    """`/leaguestat/{client}/240x240/{id}.jpg` (and the 60x60 `photo`): a JPEG marker for a roster player, else 404."""
+    """`/leaguestat/{client}/240x240/{id}.jpg` (and the 60x60 `photo`): a small real JPEG for a roster player, else 404."""
     m = re.fullmatch(r"/leaguestat/([a-z]+)/(?:240x240|60x60)/([0-9]{1,12})\.jpg", path)
     if m and m[1] in CLIENTS:
         ids = {pl[0] for t in TEAMS[m[1]] for pl in roster(m[1], t) + [traded_goalie(m[1], t)]}
         if m[2] in ids:
-            return _send(h, 200, JPEG_MARKERS, "image/jpeg", {"Cache-Control": "max-age=86400"})
+            return _send(h, 200, HEADSHOT_JPEG, "image/jpeg", {"Cache-Control": "max-age=86400"})
     return _send(h, 404, b"<html><body>404</body></html>", "text/html")
 
 

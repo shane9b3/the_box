@@ -234,6 +234,25 @@ class ChlLogoTest {
             Row(c[1], c[4], c[8], c[6], c[7])
         }
 
+    /**
+     * (CHL hub fix pass, A2) The OHL teams the emulator showed as codes (NB, BRAM, OSH, SOO, OS, NIAG) next to ones that
+     * loaded (OTT, BAR, BFD, WSR, KIT, GUE, PBO): in the recorded `teamsbyseason` every one of their logo URLs has the
+     * shape the check accepts, and the mapper's JPEG swap keeps it so. The check is not what drops them.
+     */
+    @Test
+    fun theOhlTeamsSeenAsCodesHaveLogoUrlsTheCheckAccepts() {
+        val body = kotlinx.serialization.json.Json.parseToJsonElement(SportsFixtures.text("sports/chl/lscluster/teamsbyseason-ohl-2026-27.json")) as kotlinx.serialization.json.JsonObject
+        val teams = app.thebox.core.sports.HockeyTechMapper.teams(body, "https://assets.leaguestat.com/ohl/logos/")!!
+        val byCode = teams.values.associateBy { it.code }
+        for (code in listOf("NB", "BRAM", "OSH", "SOO", "OS", "NIAG", "OTT", "BAR", "BFD", "WSR", "KIT", "GUE", "PBO")) {
+            val logo = byCode.getValue(code).logo
+            assertNotNull(code, logo)
+            assertTrue("$code $logo", ChlLogoCheck.isChlLogoUrl(logo!!))
+        }
+        assertEquals("https://assets.leaguestat.com/ohl/logos/20.png", byCode.getValue("NIAG").logo)
+        assertEquals("https://assets.leaguestat.com/ohl/logos/18.png", byCode.getValue("BRAM").logo)
+    }
+
     @Test
     fun theRecorded61OutcomesGiveTheLogoOrTheFallback() {
         val rows = outcomes()

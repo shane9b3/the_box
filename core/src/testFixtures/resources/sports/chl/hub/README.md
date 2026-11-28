@@ -33,3 +33,20 @@ Not captured, or captured and left out:
   (`https://assets.leaguestat.com/ohl/240x240/{player_id}.jpg`). The mapper does not read it, so it is not kept.
 - `modulekit&view=statviewtype&type=standings&stat=all`: an empty list for the OHL (461 B). Not used.
 - No shootout game. The shape of `shootoutDetail` is still unverified.
+
+## Live captures (CHL hub fix pass, 2026-11-27 evening)
+
+Captured during the OHL's Friday 7 PM ET slate with the app's OHL key and a generic User-Agent, written key-free the
+same way as above (`GC.Parameters.key` deleted; a check before writing failed on the key, any 16-hex-digit token or
+`key=`), trimmed as the finals above (5 skaters per side, all goalies; penalties 3; officials 2 + 1; coaches 1). Kept
+only to record the live shape for §7; the app makes no live detail request. `ChlDetailMapperTest.capturedLiveBodiesMapAndAreLive`
+maps each one.
+
+| File | Request | Game / state |
+|---|---|---|
+| `gc-gamesummary-live-ohl-29246.json` | `feed=gc&tab=gamesummary&game_id=29246&fmt=json&lang_code=en` | NIAG @ LDN (the pre-game fixture's game), 1st period in progress: `meta.status` "2", `final` "0", `started` "1", `game_clock` "00:16:43", `status_value` "In Progress (16:43 remaining in 1st)", `periods` only "1", no goals yet, `goalsByPeriod` 0–0. The same top-level keys as the finals. |
+| `gc-gamesummary-int-ohl-29241.json` | same, `game_id=29241` | NB @ BRAM in the 1st intermission: `meta.status` still "2", `period` "1", `game_clock` "00:00:00", `status_value` "In Progress (0:00 remaining in 1st)"; **no intermission flag** in `meta`; 0–0, so **`goals` is `null`** (not `[]`). |
+| `gc-gamesummary-live-goals-ohl-29248.json` | same, `game_id=29248` | OSH @ SOO, 1st period 3:55 left, 1–2 with 3 goal rows (`period_id` "1"), `shotsByPeriod` 8–11. |
+
+No live game was in a shootout, so `shootoutDetail` is still unverified. The intermission reads as status 2 with the
+clock at 0:00; the mapper (no clock input) calls it LIVE.

@@ -607,6 +607,71 @@ class ChlDetailMapperTest {
         assertFalse(phase("\"3\"") == GamePhase.FINAL) // status 3 is unverified, never final
     }
 
+    /** (CHL hub fix pass, C3) `meta.final` reaches the classifier: a status-3 body the feed marks final is final. */
+    @Test fun aStatusThreeBodyMarkedFinalIsFinal() {
+        fun phase(meta: String) = ChlDetailMapper.summary(
+            ohl29239, json("""{"GC":{"Gamesummary":{"meta":$meta,"home":{},"visitor":{}}}}"""), shotOhl,
+        )!!.first.fetchedPhase
+        assertEquals(GamePhase.FINAL, phase("""{"status":"3","final":"1"}"""))
+        assertEquals(GamePhase.FINAL, phase("""{"status":"2","final":1}"""))
+        assertFalse(phase("""{"status":"3","final":"0"}""") == GamePhase.FINAL)
+        assertFalse(phase("""{"status":"3"}""") == GamePhase.FINAL)
+    }
+
+    /**
+     * (CHL hub fix pass, C2) Shootout finals, assumed shapes (no capture): a period whose `short_name` is "SO" is the SO
+     * column (never OT 2), keeps no shots and no goal row; `meta.shootout` with `totalGoals` one ahead for one side adds an
+     * SO column of 1–0 so the line's total agrees with the headline; without that difference nothing is added.
+     */
+    @Test fun aShootoutFinalLabelsItsColumnSoAndAgreesWithTheTotal() {
+        val so = PeriodLabel(PeriodKind.SO, 1)
+        val named = ChlDetailMapper.summary(ohl29239, summaryBody(""",
+            "periods":{"1":{"short_name":"1"},"2":{"short_name":"2"},"3":{"short_name":"3"},"4":{"short_name":"OT1"},"5":{"short_name":"SO","period_id":"5"}},
+            "goalsByPeriod":{"visitor":{"1":1,"2":1,"3":0,"4":0,"5":1},"home":{"1":0,"2":1,"3":1,"4":0,"5":0}},
+            "shotsByPeriod":{"visitor":{"1":9,"2":8,"3":7,"4":2,"5":3},"home":{"1":6,"2":5,"3":4,"4":1,"5":3}},
+            "goals":[{"team_id":"1","home":"0","period_id":"1","goal_scorer":{"player_id":"1","first_name":"A","last_name":"One"}},
+                     {"team_id":"1","home":"0","period_id":"5","goal_scorer":{"player_id":"2","first_name":"B","last_name":"Two"}}]"""), shotOhl)!!
+        assertEquals(GamePhase.FINAL, named.first.fetchedPhase)
+        assertEquals(listOf(PeriodKind.REG, PeriodKind.REG, PeriodKind.REG, PeriodKind.OT, PeriodKind.SO), named.second.periods.map { it.label.kind })
+        assertEquals(PeriodScore(so, 1, 0), named.second.periods.last())
+        assertEquals(4, named.second.periodShots.size, "no SO column for the shots")
+        assertEquals(listOf("A. One"), named.first.goals.map { it.scorer }, "the shootout row is no goal")
+        // meta.shootout and totalGoals one ahead for the home side: an SO column 0–1 is added.
+        val flagged = ChlDetailMapper.summary(ohl29239, json(
+            """{"GC":{"Gamesummary":{"meta":{"status":"4","final":"1","shootout":"1"},"home":{"team_id":"2"},"visitor":{"team_id":"1"},
+            "goalsByPeriod":{"visitor":{"1":1,"2":1,"3":0,"4":0},"home":{"1":0,"2":1,"3":1,"4":0}},
+            "totalGoals":{"visitor":2,"home":3}}}}""",
+        ), shotOhl)!!
+        assertEquals(PeriodScore(so, 0, 1), flagged.second.periods.last())
+        assertEquals(3, flagged.second.periods.sumOf { it.home })
+        // totalGoals equal to the periods' sums (it leaves the shootout goal out): nothing is invented.
+        val tied = ChlDetailMapper.summary(ohl29239, json(
+            """{"GC":{"Gamesummary":{"meta":{"status":"4","shootout":"1"},"home":{},"visitor":{},
+            "goalsByPeriod":{"visitor":{"1":1,"2":1,"3":0,"4":0},"home":{"1":0,"2":1,"3":1,"4":0}},
+            "totalGoals":{"visitor":2,"home":2}}}}""",
+        ), shotOhl)!!
+        assertTrue(tied.second.periods.none { it.label.kind == PeriodKind.SO })
+        // The three captured finals are not shootouts and are unchanged (their EqualsTheFakes tests).
+        assertTrue(finalQmjhl().second.periods.none { it.label.kind == PeriodKind.SO })
+    }
+
+    /**
+     * (CHL hub fix pass, D) The bodies captured during live OHL games map without a crash and classify as live (status 2 or 3
+     * is never FINAL); the live screen upgrade (§7) is not built, this only pins the shape.
+     */
+    @Test fun capturedLiveBodiesMapAndAreLive() {
+        for (path in LIVE_CAPTURES) {
+            val gs = obj(path)
+            val (d, box) = assertNotNull(ChlDetailMapper.summary(GameId(League.OHL, gs["GC"]!!.jsonObject["Gamesummary"]!!.jsonObject["meta"]!!.jsonObject["id"].toString().trim('"')), gs, shotOhl), path)
+            assertTrue(d.fetchedPhase == GamePhase.LIVE || d.fetchedPhase == GamePhase.INTERMISSION, "$path: ${d.fetchedPhase}")
+            assertTrue(box.periods.isNotEmpty(), path)
+            if (path.contains("29248")) assertEquals(3, d.goals.size, path)
+            if (path.contains("29241")) assertTrue(d.goals.isEmpty(), "a null goals list is no goal")
+            // The running score of the goal rows ends at the periods' sums.
+            d.goals.lastOrNull()?.let { assertEquals(box.periods.sumOf { p -> p.away } to box.periods.sumOf { p -> p.home }, it.away to it.home, path) }
+        }
+    }
+
     @Test fun periodsKeptOnlyWhenBothSidesHaveThem() {
         val d = ChlDetailMapper.summary(ohl29239, summaryBody(""",
             "goalsByPeriod":{"visitor":{"2":1,"1":"0","4":1,"x":3,"0":1},"home":{"1":1,"2":"2"}},
@@ -687,4 +752,13 @@ class ChlDetailMapperTest {
     }
 
     private fun assertNotEquals(a: Any?, b: Any?) = kotlin.test.assertNotEquals(a, b)
+
+    private companion object {
+        /** (CHL hub fix pass, D) The live captures (core/src/testFixtures/resources/sports/chl/hub/README.md). */
+        val LIVE_CAPTURES = listOf(
+            "sports/chl/hub/gc-gamesummary-live-ohl-29246.json",
+            "sports/chl/hub/gc-gamesummary-int-ohl-29241.json",
+            "sports/chl/hub/gc-gamesummary-live-goals-ohl-29248.json",
+        )
+    }
 }

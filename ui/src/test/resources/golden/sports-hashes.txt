@@ -1795,12 +1795,15 @@ ad51ae962b4376dda4d34541e2543529eb6c4f99355f099bc59cb1860734a946  sports-tab/nfl
 # 2026-11-27 (CHL hub integration): 3 CHL finals re-recorded (chl-hub-final-ohl, -nocatchup-whl, -ot-qmjhl): the
 #   game-winning goal on one line ("GWG · …" when the sentence does not fit) so the three stars keep line 2. Every
 #   other hash (NHL, NFL, Stacked, the other CHL entries) is unchanged.
-8ed72bbd79b0bad6ec3998fef79b939f1c305b65247f037b5d0aa2c0eb9f939d  sports-tab/chl-box-final-ohl.png
-d9f9fb5047eebf38092602e1e5f6f7abd0d6b0df7ec3a0bf003974eeef23beb2  sports-tab/chl-goals-final-ohl.png
+c4a247fb1618e43a83f5476a5b2420fdc2a4f8442f9cddd63566f04f12184f75  sports-tab/chl-box-final-ohl.png
+019e5ee3d93df75355fb07e649e5ecc2234b69db3983835b04de8f2032a59da3  sports-tab/chl-goals-final-ohl.png
 ef0e58287a51065fe35b2284f541fd80ee6755855adea3c41bd8659ede4e6bb9  sports-tab/chl-hub-final-nocatchup-whl.png
 9f0a58d1331be9a003353d8fd31b133d07999c2aa0f51b4369f9303edb791916  sports-tab/chl-hub-final-ohl.png
 c7f7e8d68097edebec58ac8a9e1081977cbec554f1d647b52ee1538c47f92f54  sports-tab/chl-hub-final-ot-qmjhl.png
 1fa5dc367e450ef4e2188c41ee39912a0625a25d4733fd6be7713b84ae2ab744  sports-tab/chl-hub-postponed.png
 16a02cfb769270387999355a6f2cf090654eeaa70e66d84c726471dbb131371b  sports-tab/chl-hub-pre-ohl.png
 ea0e48573f629078a8cc42b0c984433d063e1438f2ad16306747fcfa8828bf17  sports-tab/chl-hub-pre-whl.png
-329b935f7ed57b0b65096556c31cfc3c7c416cea50d54e31bf9d341ef058004a  sports-tab/chl-matchup-qmjhl.png
+d2ae27374d3797bb5d64f4c9124e8aef91906aed9559ccfd8967834cb5456ed6  sports-tab/chl-matchup-qmjhl.png
+# 2026-11-27 (CHL hub fix pass): 3 CHL sheets re-recorded: chl-box-final-ohl (the hockey line score aligned to the table's
+#   right edge, sans header words), chl-goals-final-ohl and chl-matchup-qmjhl (the focused row's empty headshot disc drawn
+#   dark so it stays visible). Each PNG looked at. Every NHL, NFL, Stacked and other CHL hash is unchanged.

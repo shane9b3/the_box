@@ -183,7 +183,7 @@ internal object ChlHubUi : HubLeagueUi {
                     out += if (s.meetingsPlayed <= 0) SummaryLine("", text) else line(res.getString(R.string.sports_hub_summary_series), text)
                 }
                 d.leaders.firstOrNull { it.category.equals("points", true) }?.let { p ->
-                    val parts = listOfNotNull(p.away, p.home).map { "${it.name.substringAfterLast(' ')} ${it.value}" }
+                    val parts = listOfNotNull(p.away, p.home).map { "${leaderSurname(it.name)} ${it.value}" }
                     val label = res.getString(if (d.leadersSeason) R.string.sports_hub_summary_points_leaders_season else R.string.sports_hub_summary_points_leaders)
                     if (parts.isNotEmpty()) out += line(label, parts.joinToString(sep))
                 }
@@ -287,7 +287,47 @@ internal object ChlHubUi : HubLeagueUi {
 
     private fun first(c: HubSlots.Ctx): HubSlot = if (c.detailRetry) HubSlots.forAction(SlotAction.RETRY, c) else HubSlots.forAction(SlotAction.FOLLOW, c)
 
-    override fun slotReasons(res: Resources, m: HubPanelModel, slots: List<HubSlot>): List<String?> = slots.map { null }
+    /**
+     * (CHL hub fix pass, UI review B1) A final's set changes shape with the retry state (Retry takes a place of its own
+     * and pushes Box score off the end), so a frozen set re-freezes when it flips: after a Retry that succeeds with focus
+     * in the panel the set is "Watch from start · Goals · Box score" again, never "… · + Follow · Goals". Pre-game and
+     * live keep the shared rule (slot 1 is Retry or Follow in place), so the key is constant there.
+     */
+    override fun slotSetKey(c: HubSlots.Ctx): Any? = enabled && c.final && c.detailRetry
+
+    /**
+     * (CHL hub fix pass, UI review B3) A grey slot's spoken reason, naming the league as the NHL and NFL name theirs: the
+     * Matchup (pre-game) and Goals (final) while the detail loads, after it failed, or when it has nothing for the sheet.
+     * Channels keeps the shared beyond-guide line; every other slot has none.
+     */
+    override fun slotReasons(res: Resources, m: HubPanelModel, slots: List<HubSlot>): List<String?> {
+        val g = m.game
+        if (!enabled || g == null) return slots.map { null }
+        val league = shortName(res, g.id.league)
+        val failed = m.detail == null && m.detailKind == DetailKind.FAILED
+        return slots.map { s ->
+            if (s.action == null || s.enabled) null
+            else when (s.action) {
+                SlotAction.MATCHUP -> res.getString(
+                    when {
+                        failed -> R.string.sports_hub_reason_matchup_failed_chl
+                        m.detail == null -> R.string.sports_hub_reason_matchup_loading_chl
+                        else -> R.string.sports_hub_reason_matchup_none_chl
+                    },
+                    league,
+                )
+                SlotAction.GOALS -> res.getString(
+                    when {
+                        failed -> R.string.sports_hub_reason_goals_failed_chl
+                        m.detail == null -> R.string.sports_hub_reason_goals_loading_chl
+                        else -> R.string.sports_hub_reason_goals_none_chl
+                    },
+                    league,
+                )
+                else -> null
+            }
+        }
+    }
 
     override fun clipRefs(game: GameSnapshot, detail: GameDetail?, infos: Map<Long, ClipInfo>, goalsOpen: Boolean): List<ClipRef> = emptyList()
 
@@ -334,6 +374,25 @@ internal object ChlHubUi : HubLeagueUi {
 
     override fun boxScoreError(res: Resources, game: GameSnapshot): String? =
         if (enabled) res.getString(R.string.sports_hub_error_box_score_chl, shortName(res, game.id.league)) else null
+
+    /**
+     * (CHL hub fix pass, UI review B4) The surname of a leader's "J. Van Der Berg" (the mapper's "{initial}. {last_name}"):
+     * everything after the leading initial, so a multi-word surname stays whole ("Van Der Berg"), without a generational
+     * suffix ("Smith Jr." → "Smith"; Jr, Sr, II–V). A name without an initial is taken whole; a name that is only a suffix
+     * keeps it.
+     */
+    internal fun leaderSurname(name: String): String {
+        val words = name.trim().split(WHITESPACE).filter { it.isNotEmpty() }
+        if (words.isEmpty()) return name.trim()
+        val rest = if (words.size > 1 && INITIAL.matches(words[0])) words.drop(1) else words
+        val bare = rest.dropLastWhile { SUFFIX.matches(it) }.ifEmpty { rest }
+        return bare.joinToString(" ").trimEnd(',')
+    }
+
+    private val WHITESPACE = Regex("""\s+""")
+    /** "J.", "J-P.", "Jean-P." style leading initials: letters ending in a dot. */
+    private val INITIAL = Regex("""\p{L}[\p{L}-]*\.""")
+    private val SUFFIX = Regex("""(?i),?(jr|sr)\.?|,?(ii|iii|iv|v)""")
 
     /** "OHL", "WHL", "QMJHL" (the existing league names). */
     internal fun shortName(res: Resources, league: League?): String = res.getString(

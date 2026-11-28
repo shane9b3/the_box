@@ -372,29 +372,42 @@ internal const val BOX_HOCKEY_LINE_SCORE_TAG = "hub_box_hockey_line_score"
 
 /**
  * (CHL hub §3.3) The hockey line score (not focusable): the period words and T across, then per team a Goals and a Shots
- * row (the abbreviation on the Goals row), 22 px tabular, rows 34 tall (36 from Larger up, as the NFL's line score).
+ * row (the abbreviation on the Goals row), 22 px, rows 34 tall (36 from Larger up, as the NFL's line score).
+ *
+ * (CHL hub fix pass, UI review B2) Laid out as the table below it ([TableRow]): full width, the same 16 px side padding
+ * and 20 px gaps, the values right-aligned in [HOCKEY_LINE_COL] columns, so the T column ends on the table's right edge.
+ * The header words ("1st" … "T") take the table header's sans 22/600 at Fg70 (the values stay tabular mono).
  */
 @Composable
 private fun HockeyLineScore(res: Resources, game: GameSnapshot, box: BoxScore) {
     val (heads, lines) = remember(box, game) { hockeyLineScore(res, game, box) }
     val h = if (app.thebox.core.settings.UiTextScale.factor > 1.05f) 36 else 34
-    androidx.compose.foundation.layout.Column(Modifier.padding(bottom = 12.dp).testTag(BOX_HOCKEY_LINE_SCORE_TAG)) {
+    androidx.compose.foundation.layout.Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).testTag(BOX_HOCKEY_LINE_SCORE_TAG)) {
         val rows = listOf(Triple("", "", heads) to GuideUi.Fg70) + lines.map { Triple(it.team, it.label, it.cells) to GuideUi.Fg }
         rows.forEachIndexed { i, (cells, ink) ->
             val (team, label, values) = cells
             // A hairline between the two teams.
             val m = if (i == 3) Modifier.drawBehindTop() else Modifier
-            Row(m.height(h.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                m.fillMaxWidth().height(h.dp).padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
                 Text(team, Modifier.width(96.dp), style = GuideUi.sans(22, FontWeight.SemiBold, ink), maxLines = 1)
-                Text(label, Modifier.width(112.dp), style = GuideUi.sans(22, FontWeight.Medium, if (i == 0) ink else GuideUi.Fg70), maxLines = 1)
+                Text(label, Modifier.weight(1f), style = GuideUi.sans(22, FontWeight.Medium, if (i == 0) ink else GuideUi.Fg70), maxLines = 1)
                 values.forEachIndexed { k, v ->
                     val total = k == values.lastIndex
-                    Text(v, Modifier.width(72.dp), style = GuideUi.mono(22, if (total && i > 0) FontWeight.SemiBold else FontWeight.Medium, ink), maxLines = 1, textAlign = TextAlign.End)
+                    val style = if (i == 0) GuideUi.sans(22, FontWeight.SemiBold, ink)
+                    else GuideUi.mono(22, if (total) FontWeight.SemiBold else FontWeight.Medium, ink)
+                    Text(v, Modifier.width(HOCKEY_LINE_COL.dp), style = style, maxLines = 1, textAlign = TextAlign.End)
                 }
             }
         }
     }
 }
+
+/** (CHL hub fix pass, B2) A hockey line-score value column, design px: "2nd" / "OT" / a two-digit shots total at Largest. */
+internal const val HOCKEY_LINE_COL = 56
 
 /** A 1 px White08 line along the top edge (a flat draw: no layer, no clip). */
 private fun Modifier.drawBehindTop(): Modifier = this.then(

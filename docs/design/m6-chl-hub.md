@@ -794,3 +794,80 @@ Every NHL, NFL, Stacked and other CHL hash is unchanged.
   switch that §6.2 assumes were not built by P2.
 - Everything in §10 (live `gamesummary`, shootouts, playoff preview, `lastGames` OT marker, headshot host's answer for a
   missing photo, the uncaptured tables).
+
+---
+
+## 14. Fix pass (2026-11-27)
+
+After the emulator run on the real feed (lead) and the two code reviews (no blockers). No adb, no emulator, no IPTV
+provider; a handful of GETs to the public HockeyTech hosts only (below). Nothing sports-related is persisted.
+
+**A1 Headshots.** The cause was not found in code. `ChlLogoCheck` was never on the headshot path: `HubHeadshot` is an
+`AsyncImage` on the shell loader with no CHL check. The URL the app builds is right: `https://assets.leaguestat.com/ohl/240x240/9330.jpg`
+answered 200 `image/jpeg`, a baseline 240 × 240 JPEG, also with the app's own User-Agent. The same composable with a
+fake fetcher loads it in Robolectric (`ChlHeadshotTest`). So on the real feed the empty discs come from the device
+fetch or decode, and the reason is **unverified**. Changes made:
+- `ChlLogoCheck.isChlHeadshotUrl` accepts exactly `https://assets.leaguestat.com/{ohl|whl|lhjmq}/240x240/{1–12 digits}.jpg`,
+  and the fake panel's `{override}/leaguestat/{client}/240x240/{id}.jpg` on the override's own origin. `headshotAllowed`
+  refuses every other URL on the CHL host from a headshot slot. NHL and ESPN headshots are untouched.
+- `HubHeadshot` logs one redacted line per failure kind ("headshot failed: assets.leaguestat.com HTTP 403" or the
+  exception class; never the path or id). The next emulator run's logcat (`HubHeadshot`) names the cause.
+- A focused CHL row (Goals, Matchup leaders and goalies) draws the empty disc in `HEADSHOT_ON_LIGHT` (Canvas at 14 %),
+  so it stays visible on the light fill. NHL and NFL rows are unchanged.
+- The fake panel's headshot route served a 4-byte marker that decodes to nothing, so every fake-panel headshot was an
+  empty disc. It now serves a real 16 × 16 JPEG (`HEADSHOT_JPEG`).
+
+**A2 OHL logos shown as codes.** The fixtures cannot tell. In the recorded `teamsbyseason` (2026-11-13), every logo
+URL of NB, BRAM, OSH, SOO, OS and NIAG has the shape `CHL_LOGO` accepts, after the mapper's JPEG swap (`ChlLogoTest.theOhlTeamsSeenAsCodesHaveLogoUrlsTheCheckAccepts`).
+BRAM's `18.png` was a recorded 404, so its code is the designed fallback. Live today, `ohl/logos/19.png` (NB) and `4.png`
+(OSH) answered 200 with 500 × 500 RGBA PNGs and transparent corners, so the no-alpha check passes them too. The check
+is not the cause and was not changed. The cause is unverified; it may be the same device fetch failure as A1.
+
+**B1** `ChlHubUi.slotSetKey` = `final && detailRetry`: the frozen final set re-freezes when the retry state flips (test
+`SportsViewModelHubTest.aChlFinalsFrozenSetReFreezesWhenItsRetrySucceeds`).
+**B2** The hockey line score is laid out like the table below it: full width, 16 px sides, 20 px gaps, value columns of
+56 right-aligned. Its T column now ends on the table's right edge. The header words are sans 22/600 Fg70; the values
+stay mono. Only the CHL box-score goldens were re-recorded.
+**B3** A grey Matchup or Goals slot speaks a reason that names the league: loading, failed or none
+(`sports_hub_reason_{matchup,goals}_{loading,failed,none}_chl`).
+**B4** `ChlHubUi.leaderSurname`: "J. Van Der Berg" gives "Van Der Berg"; "A. Smith Jr." gives "Smith" (Jr, Sr and
+II–V are dropped).
+**B5** The NHL and NFL Largest panels (`hub-panel-{live,final,pre}-largest`, `nfl-hub-panel-{pre,live,final-highlight}-largest`)
+were rendered with the widening on and with it forced off. The PNGs are byte-identical: no NHL or NFL fixture value is
+wider than a quarter of the row, so the widening never triggers for them. Nothing is worse.
+**C1** A partial pre-game answer keeps what the earlier good read of the same game had and this read lacks: a goalie's
+record, GAA and SV% (matched by name on the same side), or a whole side's goalie list
+(`GameDetailRepositoryImpl.keepPartial`).
+**C2** Shootouts, defensive; no sample has been captured. A period whose `short_name` is "SO" maps to `PeriodKind.SO`.
+It gets no shots column and no goal row. If the feed flags a shootout (`meta.shootout`, the body's `shootout` field,
+or an SO period) but gives no SO column, and `totalGoals` is exactly one goal ahead of the period sums for one side, an
+SO column of 1–0 is added. The line's total then agrees with the headline. Otherwise nothing is invented. The classifier
+gets `shootout`, so the final kind is SO. Assumed: the "SO" `short_name`, and that `totalGoals` may count the winning
+shootout goal.
+**C3** `meta.final` goes to `HockeyTechMapper.classify` as `final`, so a status-3 body that the feed flags final is
+FINAL.
+**C4** A 429 or refused secondary read (goalies or tables) is named in `DetailAnswer.secondaryRefused`. The repository
+then takes the back-off path: the refusal floor, Retry-After, and Retry ignored. The 120 s partial re-reads do not run.
+The answer stays Ready, partial and not failing. A 5xx or a timeout on a secondary read keeps the 120 s re-read.
+
+**D Live capture.** OHL games were live on 2026-11-27 (19:00 ET slate). Five GETs went to the public feed (two boards, three `gamesummary`): `gc-gamesummary-live-ohl-29246.json` (1st period, 0–0), `gc-gamesummary-int-ohl-29241.json` (1st intermission: still status 2 with the clock at 0:00, no intermission flag, `goals` null) and `gc-gamesummary-live-goals-ohl-29248.json` (three goals). The bodies are trimmed and key-free; the hub README lists them. No game was in a shootout.
+`ChlDetailMapperTest` maps each live body without a crash, as LIVE (or as the live phase the feed names). The live
+screen upgrade (§7) is not built.
+
+**Requests made.** Four GETs to `assets.leaguestat.com`: two headshots for the A1 check and two OHL logos for A2. Five
+GETs to the keyed `lscluster` feed for D. All used a generic User-Agent, and no key or keyed URL was written to any
+file.
+
+**Goldens.** Three CHL hashes were re-recorded, and each PNG was looked at: `chl-box-final-ohl`, `chl-goals-final-ohl`
+and `chl-matchup-qmjhl`. No NHL, NFL, Stacked or other CHL hash changed.
+
+**Gate (2026-11-27, this host).** `lintAll` found no new issues. Unit tests had 0 failures: `:core` 5026 (2 skipped),
+`:data` 1036 (5 skipped), `:player` 662, `:ui` 1273 and `:app` 115. `:ui:sportsHashGate` passed. `:app:assembleDebug`
+built. In the first full run, the new `ChlHeadshotTest` load test timed out at 5 s. It now waits up to 30 s on a
+thread-safe log, and it passed alone and in the full `:ui` rerun with the gate. The fake panel Python suites passed:
+`test_sports*` 190, `test_fakepanel` 151, `test_events` 9, and the hub and golden suites 12.
+
+**Still open.**
+- A1 and A2 on a device: check logcat for `HubHeadshot` on the next emulator run.
+- A shootout body.
+- Whether `totalGoals` counts the shootout winner's goal.

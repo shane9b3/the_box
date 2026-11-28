@@ -22,6 +22,8 @@ import app.thebox.core.sports.hub.DetailState
 import app.thebox.core.sports.hub.FinalFacts
 import app.thebox.core.sports.hub.GameDetail
 import app.thebox.core.sports.hub.GameDetailRepository
+import app.thebox.core.sports.hub.Goalie
+import app.thebox.core.sports.hub.GoaliePair
 import app.thebox.core.sports.hub.NflHighlight
 import app.thebox.core.sports.hub.VideoEntry
 import app.thebox.data.di.ApplicationScope
@@ -59,6 +61,12 @@ internal data class DetailAnswer(
     val landingFailed: Boolean,
     val box: Fetch.Ok<BoxScore>? = null,
     val partial: Boolean = false,
+    /**
+     * (CHL hub fix pass, C4) A [partial] answer whose secondary read was **refused** (HTTP 429 or a refusal): the host is
+     * limiting us, so the repository takes the back-off path (the refusal's floor, Retry-After) instead of the 120 s partial
+     * re-reads. The answer is still published as Ready, partial and not failing. Null otherwise.
+     */
+    val secondaryRefused: Fetch.Failed? = null,
 )
 
 /** The repository's view of the detail sources (a seam for the loop's tests). */
@@ -248,6 +256,12 @@ class GameDetailRepositoryImpl internal constructor(
 
     // ---- loop state (touched only inside the loop)
 
+    /**
+     * (CHL hub fix pass, C4) The back-off now running is a partial answer's refused secondary read, not a failed answer:
+     * the entry stays published as Ready and not failing while the back-off waits.
+     */
+    private var secondaryBackoff = false
+
     /** [partial] (CHL hub §4.1): the answer kept what loaded while a secondary read failed (Ready, not failing). */
     private class Entry(val ok: Fetch.Ok<GameDetail>, val landingFailed: Boolean, val partial: Boolean = false)
 
@@ -418,6 +432,7 @@ class GameDetailRepositoryImpl internal constructor(
         lastFailMono = null
         retryAfterS = null
         lastFailKind = null
+        secondaryBackoff = false
         force = false
         lagTries = 0
         partialTries = 0
@@ -485,11 +500,23 @@ class GameDetailRepositoryImpl internal constructor(
         val k = key(id)
         when (val f = a.fetch) {
             is Fetch.Ok -> {
-                cache[k] = Entry(if (a.landingFailed) keepLanding(f, cache[k]) else f, a.landingFailed, a.partial)
+                val kept = when {
+                    a.landingFailed -> keepLanding(f, cache[k])
+                    a.partial -> keepPartial(f, cache[k])
+                    else -> f
+                }
+                cache[k] = Entry(kept, a.landingFailed, a.partial)
                 failures = 0
                 lastFailMono = null
                 retryAfterS = null
                 lastFailKind = null
+                secondaryBackoff = false
+                // (CHL hub fix pass, C4) A refused secondary read: the back-off path (its floor and Retry-After), not the
+                // 120 s partial re-reads; the answer itself stays Ready and not failing.
+                a.secondaryRefused?.takeIf { a.partial && (it.kind == FailKind.HTTP_429 || it.kind == FailKind.REFUSED) }?.let {
+                    failed(it.kind, f.receivedMono, it.retryAfterS)
+                    secondaryBackoff = true
+                }
                 if (f.value.fetchedPhase != GamePhase.FINAL) {
                     seenUnfinished += k
                     if (id.league == League.NFL) lastUnfinishedAt[k] = wallNow()
@@ -499,8 +526,8 @@ class GameDetailRepositoryImpl internal constructor(
                 lagTries = if (g != null && g.id == id && DetailPollPolicy.lagging(phase(g, cache[k]), f.value.fetchedPhase)) lagTries + 1 else 0
                 partialTries = if (a.partial && g != null && g.id == id) partialTries + 1 else 0
             }
-            Fetch.NotFound -> failed(FailKind.HTTP_OTHER, mono.nowMs(), null)
-            is Fetch.Failed -> failed(f.kind, f.receivedMono, f.retryAfterS)
+            Fetch.NotFound -> { secondaryBackoff = false; failed(FailKind.HTTP_OTHER, mono.nowMs(), null) }
+            is Fetch.Failed -> { secondaryBackoff = false; failed(f.kind, f.receivedMono, f.retryAfterS) }
         }
         // (NFL hub §5.5) The box from the same parse: the slot, and every caller waiting for it.
         a.box?.let { boxSlot = k to it }
@@ -536,6 +563,27 @@ class GameDetailRepositoryImpl internal constructor(
                 broadcasts = now.broadcasts.ifEmpty { prev.broadcasts },
             ),
         )
+    }
+
+    /**
+     * (CHL hub fix pass, C1) A partial pre-game answer keeps what an earlier good read of the same game showed and this one
+     * lacks: a goalie's season line (record, GAA, SV%) when the `topgoalies` read failed (matched by name on the same side),
+     * or a side's whole goalie list when the new one has none. Everything the new answer carries wins.
+     */
+    private fun keepPartial(f: Fetch.Ok<GameDetail>, old: Entry?): Fetch.Ok<GameDetail> {
+        val prev = old?.ok?.value?.goalies ?: return f
+        val now = f.value.goalies
+        val merged = if (now == null) prev else GoaliePair(keepGoalies(now.away, prev.away), keepGoalies(now.home, prev.home))
+        return if (merged == now) f else f.copy(value = f.value.copy(goalies = merged))
+    }
+
+    private fun keepGoalies(now: List<Goalie>, prev: List<Goalie>): List<Goalie> {
+        if (now.isEmpty()) return prev
+        val byName = prev.associateBy { it.name }
+        return now.map { g ->
+            val p = byName[g.name]
+            if (p == null || g.record != null || g.gaa != null || g.svPct != null) g else g.copy(record = p.record, gaa = p.gaa, svPct = p.svPct)
+        }
     }
 
     private fun failed(kind: FailKind, atMono: Long, retryAfter: Int?) {
@@ -649,7 +697,7 @@ class GameDetailRepositoryImpl internal constructor(
                 DetailState.Ready(
                     detail = published(game, entry.ok.value),
                     fetchedAtMono = entry.ok.receivedMono,
-                    failing = failures > 0 || entry.landingFailed || !isOnline,
+                    failing = (failures > 0 && !secondaryBackoff) || entry.landingFailed || !isOnline,
                     stale = DetailPollPolicy.isStale(cadence(game.id.league), entry.ok.receivedMono, phase, finalFacts(game, entry), now),
                     partial = entry.partial,
                 )

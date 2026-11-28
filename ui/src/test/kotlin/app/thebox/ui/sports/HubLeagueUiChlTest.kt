@@ -304,6 +304,49 @@ class HubLeagueUiChlTest {
         assertEquals("OT 4:16 · CHI leads 5–4 · Dufour, Hartl", q.last().line2)
     }
 
+    /** (CHL hub fix pass, UI review B3) A grey Matchup or Goals slot speaks a reason naming the league; usable slots none. */
+    @Test fun greySlotsSpeakAReasonNamingTheLeague() {
+        fun reasons(m: HubPanelModel) = ChlHubUi.slotReasons(res, m, m.slots)
+        val loading = k.model(k.preOhl(), null)
+        assertFalse(loading.slots[2].enabled)
+        assertEquals(listOf(null, null, "Matchup details from the OHL are still loading. Try again in a moment."), reasons(loading))
+        val failed = k.model(k.preWhl(), null, DetailKind.FAILED, FailKind.TIMEOUT)
+        assertEquals("The WHL didn't send the matchup details. It tries again on its own; check back shortly.", reasons(failed)[2])
+        val empty = ChlHubFixtures.preQmjhl32953().copy(leaders = emptyList(), goalies = null, recent = emptyList(), series = null)
+        val none = k.model(k.preQmjhl(), empty)
+        if (!none.slots[2].enabled) assertEquals("The QMJHL hasn't posted matchup details for this game yet. Check back closer to puck drop.", reasons(none)[2])
+        assertEquals("a usable Matchup has no reason", listOf<String?>(null, null, null), reasons(k.model(k.preOhl(), ChlHubFixtures.preOhl29246())))
+        // A final without goals yet (detail loading): Goals is grey and says so; Box score is always usable.
+        val final = k.model(k.finalWhl(), null)
+        val gi = final.slots.indexOfFirst { it.action == SlotAction.GOALS }
+        assertFalse(final.slots[gi].enabled)
+        assertEquals("Goals from the WHL are still loading. Try again in a moment.", reasons(final)[gi])
+        val finalNone = k.model(k.finalWhl(), ChlHubFixtures.finalWhl1023337().copy(goals = emptyList()))
+        assertEquals("The WHL lists no goals for this game.", reasons(finalNone)[finalNone.slots.indexOfFirst { it.action == SlotAction.GOALS }])
+        // Spoken in the slot description: "<label>, unavailable. <reason>".
+        val descs = slotDescriptions(res, loading.slots, slotReasonsOf(res, loading, null), beyondChannels = false)
+        assertTrue(descs[2], descs[2].contains("Matchup details from the OHL are still loading"))
+    }
+
+    /** (CHL hub fix pass, UI review B4) The points leaders line keeps a multi-word surname and drops a suffix. */
+    @Test fun thePointsLeadersSurnameKeepsAllItsWordsAndDropsASuffix() {
+        assertEquals("Van Der Berg", ChlHubUi.leaderSurname("J. Van Der Berg"))
+        assertEquals("Smith", ChlHubUi.leaderSurname("A. Smith Jr."))
+        assertEquals("Smith", ChlHubUi.leaderSurname("A. Smith, Jr."))
+        assertEquals("Smith", ChlHubUi.leaderSurname("A. Smith III"))
+        assertEquals("St. Louis", ChlHubUi.leaderSurname("M. St. Louis"))
+        assertEquals("Edgar", ChlHubUi.leaderSurname("R. Edgar"))
+        assertEquals("a name without an initial is taken whole", "Van Der Berg", ChlHubUi.leaderSurname("Van Der Berg"))
+        assertEquals("Ivy", ChlHubUi.leaderSurname("J. Ivy"))
+        val d = ChlHubFixtures.preOhl29246()
+        val p = d.leaders.first()
+        val named = d.copy(leaders = listOf(p.copy(away = p.away!!.copy(name = "J. Van Der Berg"), home = p.home!!.copy(name = "A. Smith Jr."))))
+        val line = ChlHubUi.summary(res, k.model(k.preOhl(), named), k.preOhl(), HubName("NIAG", "IceDogs"), HubName("LDN", "Knights"), wide, 1f)
+            .lines.first { it.label == s(R.string.sports_hub_summary_points_leaders_season) }
+        val sep = s(R.string.sports_hub_summary_sep)
+        assertEquals(line.label + sep + "Van Der Berg ${p.away!!.value}" + sep + "Smith ${p.home!!.value}", line.text)
+    }
+
     @Test fun theBoxErrorNamesTheLeague() {
         assertEquals("Couldn't load the box score from the WHL. Select Retry, or press Back to close.", ChlHubUi.boxScoreError(res, k.finalWhl()))
         assertNull("the NHL keeps its own words", NhlHubUi.boxScoreError(res, SportsFixtures.game()))

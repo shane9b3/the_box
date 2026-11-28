@@ -55,6 +55,8 @@ fun MatchupSheet(
 ) {
     val res = LocalResources.current
     val nfl = game.id.league.group == app.thebox.core.sports.LeagueGroup.NFL
+    // (CHL hub fix pass, A1) The CHL's focused row keeps its empty headshot disc visible; the NHL's and NFL's pixels as before.
+    val chl = game.id.league.group == app.thebox.core.sports.LeagueGroup.CHL
     val rows = remember(detail, game, nfl) { if (nfl) nflMatchupRows(res, game, detail) else matchupRows(detail, res, game) }
     val focusable = rows.indices.filter { rows[it].focusable }
     HubSheetFrame(
@@ -76,12 +78,12 @@ fun MatchupSheet(
                     is MatchupRow.Leaders -> HubSheetRow(reqs[i], first, last, key = "lead:$i", height = 104, onClick = {}) { c ->
                         val label = leaderCategory(res, row.pair.category)
                         Line(label, GuideUi.sans(22, FontWeight.SemiBold, GuideUi.secondary(c, focusedOf(c), 0.70f)), Modifier.weight(0.6f))
-                        LeaderCell(row.pair.away, c, Modifier.weight(1f))
-                        LeaderCell(row.pair.home, c, Modifier.weight(1f))
+                        LeaderCell(row.pair.away, c, Modifier.weight(1f), chl && focusedOf(c))
+                        LeaderCell(row.pair.home, c, Modifier.weight(1f), chl && focusedOf(c))
                     }
                     is MatchupRow.Goalies -> HubSheetRow(reqs[i], first, last, key = "gk:$i", height = 96, onClick = {}) { c ->
-                        GoalieCell(res, row.away, c, Modifier.weight(1f))
-                        GoalieCell(res, row.home, c, Modifier.weight(1f))
+                        GoalieCell(res, row.away, c, Modifier.weight(1f), chl && focusedOf(c))
+                        GoalieCell(res, row.home, c, Modifier.weight(1f), chl && focusedOf(c))
                     }
                     is MatchupRow.Label -> Line(row.text, GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg55), Modifier.padding(start = 16.dp, top = 8.dp).testTag(matchupLabelTag(i)))
                     is MatchupRow.NflLeaders -> HubSheetRow(reqs[i], first, last, key = "nlead:$i", height = 104, onClick = {}) { c ->
@@ -339,10 +341,10 @@ internal fun goalieLine(res: Resources, g: Goalie): String {
 }
 
 @Composable
-private fun LeaderCell(l: Leader?, color: Color, modifier: Modifier) {
+private fun LeaderCell(l: Leader?, color: Color, modifier: Modifier, onLight: Boolean = false) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         if (l == null) return@Row
-        HubHeadshot(l.headshot, l.name, 72.dp)
+        HubHeadshot(l.headshot, l.name, 72.dp, onLight)
         Line(l.name, GuideUi.sans(24, FontWeight.SemiBold, color), Modifier.weight(1f))
         Line(l.value.toString(), GuideUi.sans(26, FontWeight.Bold, color))
     }
@@ -361,10 +363,10 @@ private fun NflLeaderCell(res: Resources, category: String, l: Leader?, color: C
 }
 
 @Composable
-private fun GoalieCell(res: Resources, g: Goalie?, color: Color, modifier: Modifier) {
+private fun GoalieCell(res: Resources, g: Goalie?, color: Color, modifier: Modifier, onLight: Boolean = false) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         if (g == null) return@Row
-        HubHeadshot(g.headshot, g.name, 64.dp)
+        HubHeadshot(g.headshot, g.name, 64.dp, onLight)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             // (CHL hub §3.1, B1) "Starting" only when tonight's lineup marks him; never inferred.
             if (g.starting) {

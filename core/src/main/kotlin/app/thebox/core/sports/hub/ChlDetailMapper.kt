@@ -434,13 +434,20 @@ private object ChlSummaryMapping {
         val visitor = gs.o("visitor") ?: return null
         val meta = gs.o("meta")
 
-        // HockeyTechMapper's classifier, not a restated rule: 4 and 5 are final, 1 scheduled, 3 unverified.
+        // (CHL hub fix pass, C2) A shootout: `meta.shootout`, the body's own `shootout` flag, or a period whose `short_name`
+        // is "SO". No shootout body has been captured, so this is defensive (see [shootoutPeriods], [withShootout]).
+        val soKeys = shootoutPeriods(gs)
+        val shootout = meta.flag("shootout") || gs.flag("shootout") || soKeys.isNotEmpty()
+        fun label(n: Int): PeriodLabel? = if (n in soKeys) PeriodLabel(PeriodKind.SO, 1) else ChlJson.period(n)
+
+        // HockeyTechMapper's classifier, not a restated rule: 4 and 5 are final, 1 scheduled, 3 unverified. (CHL hub fix pass,
+        // C3) `meta.final` is passed as the board passes its own final flag, so a status-3 game the feed marks final is final.
         val phase = HockeyTechMapper.classify(
-            status = meta.i("status"), final = false, started = false, feedPeriod = null, remainingS = null,
-            running = false, away = null, home = null, shootout = false, lengthOf = { null }, regularSeason = true,
+            status = meta.i("status"), final = meta.flag("final"), started = false, feedPeriod = null, remainingS = null,
+            running = false, away = null, home = null, shootout = shootout, lengthOf = { null }, regularSeason = true,
         ).phase
 
-        val periods = byPeriod(gs.o("goalsByPeriod"))
+        val periods = withShootout(byPeriod(gs.o("goalsByPeriod"), ::label), shootout, gs)
         val detail = GameDetail(
             id = id,
             fetchedPhase = phase,
@@ -451,7 +458,7 @@ private object ChlSummaryMapping {
             gameStats = gameStats(id, gs),
             season = null,
             periods = periods,
-            goals = goals(gs, home.s("team_id"), headshot),
+            goals = goals(gs, home.s("team_id"), headshot, ::label),
             stars = stars(gs, visitor, home, headshot),
             leaders = emptyList(),
             goalies = null,
@@ -465,7 +472,8 @@ private object ChlSummaryMapping {
             away = teamBox(gs.o("visitor_team_lineup")),
             home = teamBox(gs.o("home_team_lineup")),
             periods = periods,
-            periodShots = byPeriod(gs.o("shotsByPeriod")),
+            // A shootout's attempts are not shots on goal: no SO column for the shots.
+            periodShots = byPeriod(gs.o("shotsByPeriod"), ::label).filter { it.label.kind != PeriodKind.SO },
         )
         return detail to box
     }
@@ -500,7 +508,34 @@ private object ChlSummaryMapping {
         return rows
     }
 
-    private fun goals(gs: JsonObject, homeId: String?, headshot: (String) -> String?): List<GoalItem> {
+    /**
+     * (CHL hub fix pass, C2) The period keys whose `periods[k].short_name` is "SO" (any case). Assumed, not captured: the
+     * QMJHL final in overtime names its period 4 "OT1", so a shootout period is expected to read "SO".
+     */
+    private fun shootoutPeriods(gs: JsonObject): Set<Int> {
+        val periods = gs.o("periods") ?: return emptySet()
+        return periods.entries.mapNotNull { (k, v) ->
+            val o = v as? JsonObject ?: return@mapNotNull null
+            if (o.s("short_name")?.equals("SO", ignoreCase = true) != true) return@mapNotNull null
+            (o.i("period_id") ?: k.trim().toIntOrNull())?.takeIf { it >= 1 }
+        }.toSet()
+    }
+
+    /**
+     * (CHL hub fix pass, C2) A shootout final's line score: an SO column the feed gave is kept as such. Without one, when
+     * `totalGoals` is ahead of the periods' sums by exactly one goal for one side (the shootout winner's goal, as the NHL
+     * counts it), an SO column of 1–0 is added, so the line's total agrees with the headline. Otherwise nothing is added
+     * (the sheet's total is the board's final score either way). Not captured: whether `totalGoals` carries that goal.
+     */
+    private fun withShootout(periods: List<PeriodScore>, shootout: Boolean, gs: JsonObject): List<PeriodScore> {
+        if (!shootout || periods.isEmpty() || periods.any { it.label.kind == PeriodKind.SO }) return periods
+        val total = pair(gs, "totalGoals") ?: return periods
+        val da = total.first - periods.sumOf { it.away }
+        val dh = total.second - periods.sumOf { it.home }
+        return if ((da == 1 && dh == 0) || (da == 0 && dh == 1)) periods + PeriodScore(PeriodLabel(PeriodKind.SO, 1), da, dh) else periods
+    }
+
+    private fun goals(gs: JsonObject, homeId: String?, headshot: (String) -> String?, label: (Int) -> PeriodLabel?): List<GoalItem> {
         var away = 0
         var home = 0
         val out = ArrayList<GoalItem>()
@@ -511,9 +546,12 @@ private object ChlSummaryMapping {
                 "0" -> Side.AWAY
                 else -> if (homeId != null && team != null) (if (team == homeId) Side.HOME else Side.AWAY) else continue
             }
+            // (CHL hub fix pass, C2) A goal row in a shootout period (if the feed ever lists one) is no goal: not counted.
+            val n = g.i("period_id")
+            if (n != null && label(n)?.kind == PeriodKind.SO) continue
             // The running score counts every placed goal, even one whose row is dropped below.
             if (side == Side.HOME) home++ else away++
-            val period = ChlJson.period(g.i("period_id")) ?: continue
+            val period = n?.let(label) ?: continue
             val scorer = g.o("goal_scorer")
             val name = ChlJson.name(scorer) ?: continue
             out += GoalItem(
@@ -553,14 +591,14 @@ private object ChlSummaryMapping {
     }
 
     /** `{"visitor":{"1":n,…},"home":{…}}` → [PeriodScore]s in key order, a period kept only when both sides have it. */
-    private fun byPeriod(o: JsonObject?): List<PeriodScore> {
+    private fun byPeriod(o: JsonObject?, label: (Int) -> PeriodLabel?): List<PeriodScore> {
         val v = o.o("visitor") ?: return emptyList()
         val h = o.o("home") ?: return emptyList()
         return v.keys.mapNotNull { k -> k.trim().toIntOrNull()?.let { it to k } }
             .sortedBy { it.first }
             .distinctBy { it.first }
             .mapNotNull { (n, k) ->
-                val label = ChlJson.period(n) ?: return@mapNotNull null
+                val label = label(n) ?: return@mapNotNull null
                 val a = v.i(k)?.takeIf { it >= 0 } ?: return@mapNotNull null
                 val b = (h.i(k) ?: h.i(n.toString()))?.takeIf { it >= 0 } ?: return@mapNotNull null
                 PeriodScore(label, a, b)

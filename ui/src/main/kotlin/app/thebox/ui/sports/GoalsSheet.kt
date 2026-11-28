@@ -76,6 +76,7 @@ import app.thebox.core.sports.hub.GoalItem
 import app.thebox.core.sports.hub.ScoringEvent
 import app.thebox.core.sports.hub.Strength
 import app.thebox.core.sports.group
+import app.thebox.core.sports.isChl
 import app.thebox.ui.R
 import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
@@ -400,7 +401,7 @@ private fun EventRowView(
     val dim = goal != null && row.clip == null && !row.noVideo
     HubSheetRow(requester, first, last, key = row.key, height = ROW_H, dimmed = dim, description = row.desc.takeIf { it.isNotEmpty() }, onClick = onClick) { color ->
         when (val icon = row.icon) {
-            is RowIcon.Headshot -> HubHeadshot(icon.url, goal?.scorer.orEmpty(), 64.dp)
+            is RowIcon.Headshot -> HubHeadshot(icon.url, goal?.scorer.orEmpty(), 64.dp, onLight = game.id.league.isChl && focusedOf(color))
             is RowIcon.TeamLogo -> HubLogo(
                 if (icon.side == Side.AWAY) game.away else game.home, game.id.league, 64, 64, align = Alignment.Center,
                 codeColor = GuideUi.secondary(color, focusedOf(color), 0.60f),
@@ -487,14 +488,58 @@ internal fun ClipThumbnail(videoId: Long, url: String?, width: Dp, height: Dp, k
     }
 }
 
-/** A round headshot from the feed (no placeholder text; an empty disc while it loads or without one). */
+/**
+ * A round headshot from the feed (no placeholder text; an empty disc while it loads or without one).
+ *
+ * (CHL hub fix pass, A1) [onLight]: the row is focused (the light FG fill), where the White08 disc vanished; the disc is
+ * then drawn in [HEADSHOT_ON_LIGHT] so the placeholder stays visible (the CHL's rows pass it; the NHL's and NFL's pixels are
+ * unchanged). A URL on the CHL host is requested only in the headshot form ([ChlLogoCheck.headshotAllowed]); a load that
+ * fails is logged once per kind (host and reason only, never the URL), so an empty disc on a device can be told apart from
+ * a missing photo.
+ */
 @Composable
-internal fun HubHeadshot(url: String?, name: String, size: Dp) {
+internal fun HubHeadshot(url: String?, name: String, size: Dp, onLight: Boolean = false) {
     val loader = LocalShellImageLoader.current
-    Box(Modifier.size(size).background(GuideUi.White08, CircleShape)) {
-        if (loader != null && !url.isNullOrBlank()) {
-            AsyncImage(url, contentDescription = name, imageLoader = loader, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().clip(CircleShape))
+    val allowed = rememberHeadshotAllowed(url)
+    Box(Modifier.size(size).background(if (onLight) HEADSHOT_ON_LIGHT else GuideUi.White08, CircleShape)) {
+        if (loader != null && !url.isNullOrBlank() && allowed) {
+            AsyncImage(
+                url, contentDescription = name, imageLoader = loader, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().clip(CircleShape),
+                onError = { HeadshotLog.failed(url, it.result.throwable) },
+            )
         }
+    }
+}
+
+/** (CHL hub fix pass, A1) The empty headshot disc on a focused (light) row: the canvas colour at 14 %. */
+internal val HEADSHOT_ON_LIGHT = GuideUi.Canvas.copy(alpha = 0.14f)
+
+/**
+ * Whether [url] may be requested from a headshot slot. Off the CHL host, at once (no file read); on it, the real host's
+ * form at once, and the fake panel's form (`/leaguestat/` on another origin) only once the debug override has been read
+ * off the main thread.
+ */
+@Composable
+private fun rememberHeadshotAllowed(url: String?): Boolean {
+    if (url.isNullOrBlank()) return false
+    if (ChlLogoCheck.headshotAllowed(url)) return true
+    if (!url.contains("/leaguestat/")) return false
+    val context = LocalContext.current
+    val allowed by androidx.compose.runtime.produceState(false, url) {
+        val origin = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ChlLogoCheck.overrideOrigin(context) }
+        value = origin != null && ChlLogoCheck.isChlHeadshotUrl(url, origin)
+    }
+    return allowed
+}
+
+/** (CHL hub fix pass, A1) One redacted line per failure kind and host: the host and the reason, never the path or id. */
+internal object HeadshotLog {
+    private val seen = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    fun failed(url: String, t: Throwable) {
+        val host = runCatching { java.net.URI(url).host }.getOrNull() ?: "?"
+        val why = (t as? coil3.network.HttpException)?.response?.code?.let { "HTTP $it" } ?: t.javaClass.simpleName
+        if (seen.size < 16 && seen.add("$host $why")) app.thebox.core.common.BoxLog.w("HubHeadshot", "headshot failed: $host $why")
     }
 }
 

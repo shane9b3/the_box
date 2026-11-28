@@ -209,6 +209,36 @@ class SportsViewModelHubTest {
         assertEquals(listOf(SlotAction.WATCH_FROM_START, SlotAction.GOALS, SlotAction.BOX_SCORE), n.actions())
     }
 
+    /**
+     * (CHL hub fix pass, UI review B1) A Retry that succeeds while focus is in the panel re-freezes the final's set: Box
+     * score comes back, and slot 2 is not left as + Follow.
+     */
+    @Test fun aChlFinalsFrozenSetReFreezesWhenItsRetrySucceeds() {
+        assertTrue(ChlHubUi.enabled)
+        val r = FakeScoreRepository(SportsPrefs(league = League.OHL))
+        val chlFinal = SportsFixtures.game(id = "C1", phase = GamePhase.FINAL, league = League.OHL, finalKind = PeriodKind.REG, clock = null)
+        r.board(chlFinal, day = "1969-12-31")
+        matcher.answers[chlFinal.id] = listOf(candidate(airing = GuideFixtures.info(100, 280)))
+        val m = vm(r)
+        m.onCardFocused("C1")
+        assertEquals(0, m.enterPanel("C1"))
+        assertTrue(m.panelFocused.value)
+        assertEquals(listOf(SlotAction.WATCH_FROM_START, SlotAction.GOALS, SlotAction.BOX_SCORE), m.actions())
+        // The detail fails with focus in the panel: Retry takes its place (the set re-freezes on the flip).
+        detail.detail.value = DetailState.Failed(chlFinal.id, FailKind.TIMEOUT)
+        assertEquals(listOf(SlotAction.WATCH_FROM_START, SlotAction.RETRY, SlotAction.GOALS), m.actions())
+        m.onSlot(1)
+        assertEquals(1, detail.retries)
+        detail.detail.value = DetailState.Ready(detailOf(chlFinal), fetchedAtMono = 5_000L, failing = false, stale = false)
+        assertTrue("focus is still in the panel", m.panelFocused.value)
+        assertEquals(listOf(SlotAction.WATCH_FROM_START, SlotAction.GOALS, SlotAction.BOX_SCORE), m.actions())
+        // A second failure re-freezes again (Retry back in place), and a further success restores the set.
+        detail.detail.value = DetailState.Failed(chlFinal.id, FailKind.IO)
+        assertEquals(listOf(SlotAction.WATCH_FROM_START, SlotAction.RETRY, SlotAction.GOALS), m.actions())
+        // The NHL keeps its key (never re-freezes on it).
+        assertNull(HubLeagues.of(app.thebox.core.sports.LeagueGroup.NHL).slotSetKey(HubSlots.Ctx(live, false, null, null, MatchState.Idle, false, 0L)))
+    }
+
     @Test fun aFinalNflGameOffersWatchFromStartOnlyWithACatchUpAiring() {
         repo.prefs.value = SportsPrefs(league = League.NFL)
         val nflFinal = SportsFixtures.nflGame(id = "NF", phase = GamePhase.FINAL, detail = null)

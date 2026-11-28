@@ -36,6 +36,15 @@ class ChlLogoCheck : Transformation() {
         /** What follows `{origin}/leaguestat/` in the fake panel's form (design §2.8), only ever accepted for the override's origin. */
         private val FAKE_TAIL = Regex("""(ohl|whl|lhjmq)/logos/[0-9]+(_[0-9]+)?\.(png|jpg|jpeg)""")
 
+        /**
+         * (CHL hub fix pass, A1) The one headshot form on the real host, exactly what `HockeyTechEndpoints.headshot` builds:
+         * a client folder, `240x240/`, then a 1–12 digit player id and `.jpg`. Nothing else on the host is a headshot.
+         */
+        private val CHL_HEADSHOT = Regex("""https://assets\.leaguestat\.com/(ohl|whl|lhjmq)/240x240/[0-9]{1,12}\.jpg""")
+
+        /** What follows `{origin}/leaguestat/` in the fake panel's headshot form, only ever accepted for the override's origin. */
+        private val FAKE_HEADSHOT_TAIL = Regex("""(ohl|whl|lhjmq)/240x240/[0-9]{1,12}\.jpg""")
+
         /** The data source's debug override file under `filesDir` (one line, an origin): the one constant in `:core`. */
         const val DEBUG_OVERRIDE_FILE = app.thebox.core.sports.SportsConstants.DEBUG_OVERRIDE_FILE
 
@@ -68,6 +77,24 @@ class ChlLogoCheck : Transformation() {
         fun isChlLogoUrl(url: String, overrideOrigin: String? = null): Boolean =
             CHL_LOGO.matches(url) || (overrideOrigin != null && url.startsWith("$overrideOrigin/leaguestat/") &&
                 FAKE_TAIL.matches(url.removePrefix("$overrideOrigin/leaguestat/")))
+
+        /**
+         * (CHL hub fix pass, A1) True when [url] is a well-formed CHL headshot URL: exactly the real host's
+         * `https://assets.leaguestat.com/{ohl|whl|lhjmq}/240x240/{digits}.jpg` (no `..`, query or other path), or, only when
+         * [overrideOrigin] is non-null, the fake panel's `{overrideOrigin}/leaguestat/{client}/240x240/{digits}.jpg` on that
+         * origin and no other. A logo URL is not a headshot, and a headshot is not a logo ([isChlLogoUrl] refuses it).
+         */
+        fun isChlHeadshotUrl(url: String, overrideOrigin: String? = null): Boolean =
+            CHL_HEADSHOT.matches(url) || (overrideOrigin != null && url.startsWith("$overrideOrigin/leaguestat/") &&
+                FAKE_HEADSHOT_TAIL.matches(url.removePrefix("$overrideOrigin/leaguestat/")))
+
+        /**
+         * (CHL hub fix pass, A1) Whether the headshot loader may request [url]: any URL off the CHL host as before (the NHL's
+         * and ESPN's headshots are untouched), and on the CHL host ([isChlHost]) only a [isChlHeadshotUrl]. Every other URL
+         * on that host (a logo, another folder, a query, a `..`) is never requested from a headshot slot.
+         */
+        fun headshotAllowed(url: String, overrideOrigin: String? = null): Boolean =
+            !isChlHost(url, overrideOrigin) || isChlHeadshotUrl(url, overrideOrigin)
 
         /**
          * True when [url] points at the CHL logo host (in any spelling) or, with an override, at the override's `/leaguestat/`

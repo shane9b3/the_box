@@ -171,7 +171,13 @@ class ChlDetailSource internal constructor(
             ?: return badBody(league, pvOk.receivedMono)
         val ok = Fetch.Ok(detail.copy(serverDateMs = pvOk.serverDateMs), pvOk.receivedMono, pvOk.serverDateMs, 0, wireBytes = wire)
         logState(league, if (partial) "partial" else "ok")
-        return DetailAnswer(ok, landingFailed = false, partial = partial)
+        // (CHL hub fix pass, C4) A secondary read the host refused (429 first, for its Retry-After): the repository backs off.
+        val refused = listOfNotNull(reads.away, reads.home, reads.standard, reads.special)
+            .mapNotNull { (it as? HockeyTechHttp.JsonAnswer.Failed)?.fetch }
+            .filter { it.kind == FailKind.HTTP_429 || it.kind == FailKind.REFUSED }
+            .sortedBy { if (it.kind == FailKind.HTTP_429) 0 else 1 }
+            .firstOrNull()
+        return DetailAnswer(ok, landingFailed = false, partial = partial, secondaryRefused = refused?.takeIf { partial })
     }
 
     private class Reads(

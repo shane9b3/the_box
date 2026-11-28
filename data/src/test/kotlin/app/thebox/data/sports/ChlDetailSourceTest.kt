@@ -243,6 +243,22 @@ class ChlDetailSourceTest {
         assertTrue(logs.any { it.contains("chl-detail → partial") })
     }
 
+    /** (CHL hub fix pass, C4) A goalie read the host refused (429 with Retry-After) is named so the repository backs off. */
+    @Test fun aRefusedSecondaryReadIsReportedWithTheAnswer() = runBlocking {
+        answers["topgoalies"] = { r ->
+            if (r.url.queryParameter("team_id") == "20") MockResponse.Builder().code(429).addHeader("Retry-After", "120").body("").build() else fixture(r)
+        }
+        val a = source().detailAnswer(ldnPre, GamePhase.PRE)
+        assertTrue(a.partial)
+        assertEquals(FailKind.HTTP_429, a.secondaryRefused?.kind)
+        assertEquals(120, a.secondaryRefused?.retryAfterS)
+        // A 503 is not a refusal: the 120 s partial re-read stands.
+        answers["topgoalies"] = { r -> if (r.url.queryParameter("team_id") == "20") json("", 503) else fixture(r) }
+        val b = source().detailAnswer(ldnPre, GamePhase.PRE)
+        assertTrue(b.partial)
+        assertNull(b.secondaryRefused)
+    }
+
     @Test fun aGoalieBodyOfTheWrongShapeIsPartialToo() = runBlocking {
         answers["topgoalies"] = { json("([1,2])") }
         val a = source().detailAnswer(ldnPre, GamePhase.PRE)

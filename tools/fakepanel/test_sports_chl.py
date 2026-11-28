@@ -866,7 +866,8 @@ class HubRoutesTest(HubCase):
         pv = self.gc_json("ohl", "preview", self.game("ohl", "evening")[0])["Preview"]
         pid = pv["home_team"]["leadingScorers"][0]["player_id"]
         st, h, body = self.raw(f"/leaguestat/ohl/240x240/{pid}.jpg")
-        self.assertEqual((200, sports_chl.JPEG_MARKERS), (st, body))
+        self.assertEqual((200, sports_chl.HEADSHOT_JPEG), (st, body))
+        self.assertTrue(body.startswith(b"\xff\xd8") and body.endswith(b"\xff\xd9") and len(body) > 100)  # a real JPEG, not the marker
         self.assertEqual(404, self.raw("/leaguestat/ohl/240x240/1.jpg")[0])
         self.assertEqual(404, self.raw(f"/leaguestat/whl/240x240/{pid}x.jpg")[0])
         self.assertEqual(200, self.raw("/leaguestat/ohl/logos/14.png")[0])  # the logos are unchanged

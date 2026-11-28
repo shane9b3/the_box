@@ -189,6 +189,59 @@ class GameDetailRepositoryChlTest {
         assertEquals(listOf(0L, p).map { h.times[6] + it }, h.times.drop(6))
     }
 
+    /** (CHL hub fix pass, C1) A partial re-read keeps the goalie lines a good earlier read showed and this one lacks. */
+    @Test fun aPartialReReadKeepsTheGoalieStatsOfTheEarlierGoodRead() = runTest {
+        val h = harness()
+        val good = ChlHubFixtures.preOhl29246()
+        val stripped = good.goalies!!.let { gp -> gp.copy(home = gp.home.map { it.copy(record = null, gaa = null, svPct = null) }, away = emptyList()) }
+        var partial = false
+        h.fetcher.answer = { id, hint, now ->
+            if (!partial) chlAnswer(id, hint, now)
+            else DetailAnswer(Fetch.Ok(good.copy(id = id, goalies = stripped), now, null, 0), false, partial = true)
+        }
+        h.repo.show(ohl(GamePhase.SCHEDULED))
+        settle(dwell)
+        assertEquals(good.goalies, h.ready.detail.goalies)
+        partial = true
+        settle(SportsConstants.HUB_NFL_PRE_MS)
+        assertEquals(2, h.fetcher.calls.size)
+        assertTrue(h.ready.partial)
+        assertFalse(h.ready.failing)
+        assertEquals("the stats and the away list of the good read are kept", good.goalies, h.ready.detail.goalies)
+        // A new answer's own values win: a goalie with stats keeps his own line.
+        val newer = good.goalies!!.let { gp -> gp.copy(home = gp.home.mapIndexed { i, g -> if (i == 0) g.copy(record = "9-4-0-0") else g.copy(record = null, gaa = null, svPct = null) }) }
+        h.fetcher.answer = { id, _, now -> DetailAnswer(Fetch.Ok(good.copy(id = id, goalies = newer), now, null, 0), false, partial = true) }
+        settle(SportsConstants.HUB_CHL_PARTIAL_RETRY_MS)
+        assertEquals(3, h.fetcher.calls.size)
+        assertEquals("9-4-0-0", h.ready.detail.goalies!!.home[0].record)
+        assertEquals(good.goalies!!.home[1], h.ready.detail.goalies!!.home[1])
+    }
+
+    /** (CHL hub fix pass, C4) A refused or 429 secondary read backs off; it is not re-read after 120 s. */
+    @Test fun aRefusedSecondaryReadBacksOffInsteadOfThePartialReRead() = runTest {
+        for (kind in listOf(FailKind.HTTP_429, FailKind.REFUSED)) {
+            val h = harness()
+            h.fetcher.answer = { id, hint, now ->
+                chlAnswer(id, hint, now).copy(partial = true, secondaryRefused = Fetch.Failed(kind, if (kind == FailKind.HTTP_429) 900 else null, now))
+            }
+            h.repo.show(ohl(GamePhase.SCHEDULED, id = "2930${kind.ordinal}"))
+            settle(dwell)
+            assertTrue("$kind", h.ready.partial)
+            assertFalse("$kind: still Ready and not failing", h.ready.failing)
+            settle(SportsConstants.HUB_CHL_PARTIAL_RETRY_MS)
+            assertEquals("$kind: no 120 s re-read", 1, h.fetcher.calls.size)
+            settle(SportsConstants.BACKOFF_MAX_MS - SportsConstants.HUB_CHL_PARTIAL_RETRY_MS - 1)
+            assertEquals("$kind: the refusal's back-off", 1, h.fetcher.calls.size)
+            assertFalse(h.ready.failing)
+        }
+        // A secondary read that failed otherwise (a timeout) keeps the 120 s partial re-read.
+        val h = harness()
+        h.fetcher.answer = { id, hint, now -> chlAnswer(id, hint, now).copy(partial = true, secondaryRefused = null) }
+        h.repo.show(ohl(GamePhase.SCHEDULED, id = "29299"))
+        settle(dwell + SportsConstants.HUB_CHL_PARTIAL_RETRY_MS)
+        assertEquals(2, h.fetcher.calls.size)
+    }
+
     @Test fun aFailureWithNothingCachedIsFailedWithItsKindAndBacksOff() = runTest {
         val h = harness()
         h.fetcher.answer = { _, _, now -> DetailAnswer(Fetch.Failed(FailKind.REFUSED, null, now), false) }
